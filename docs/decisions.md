@@ -53,6 +53,20 @@ revidieren lassen.
 - **Kein Audio-Gerät:** die App fällt auf den stummen Null-Ausgang zurück (Uhr läuft, alles bedienbar)
   und meldet das deutlich im Log und im Pre-Flight.
 
+## Updater (nachträglich auf Wunsch ergänzt)
+
+- **Abweichung von „keine Internetverbindung, keine Telemetrie“:** Auf ausdrücklichen Wunsch gibt es
+  einen Updater nach dem Muster von Beamweave. Er ist der einzige Code, der ins Internet geht
+  (`crates/sm-server/src/update.rs`; `scripts/offline-test.sh` prüft, dass der HTTP-Client nirgends
+  sonst benutzt wird). Er sendet nichts außer der Anfrage an die GitHub-Releases-API.
+- Prüfung beim Start (wie Beamweave), abschaltbar mit `--no-update-check` bzw.
+  `SHOWMASTER_NO_UPDATE_CHECK=1`. Installation nur auf Knopfdruck und nie im Live-Modus, bei laufenden
+  Cues oder ungespeicherter Show.
+- Downloads nur von `github.com/Cheter0410/show-master-releases/`, mit Prüfung von Größe und
+  SHA-256-Digest; ein Programm-Patch muss wie eine ausführbare Datei des Systems aussehen.
+- **Kein eigenes Fenster:** Die macOS-App läuft ohne Dock-Symbol (`LSUIElement`) und öffnet den Browser;
+  beendet wird über „Quit“ in der Oberfläche. Der Windows-Release-Build hat kein Konsolenfenster.
+
 ## Bekannte Grenzen
 
 - **Dateien werden im Engine-Thread geöffnet.** Durch Standby passiert das vor dem GO; ein Cue, der

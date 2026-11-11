@@ -1,7 +1,8 @@
 # Show Master
 
 Cue-basierte Playback- und Show-Control-Software für Theater, Events, Installationen und Konzerte –
-im Stil von QLab, geschrieben in Rust, für **macOS, Windows und Linux**. Läuft vollständig offline.
+im Stil von QLab, geschrieben in Rust, für **macOS, Windows und Linux**. Läuft vollständig offline;
+einziger Internetzugriff ist die abschaltbare Update-Prüfung.
 
 > **Stand:** Alle hardwareunabhängigen Teile sind umgesetzt und automatisiert getestet (CI grün auf
 > Linux x86_64/aarch64, macOS Apple Silicon/Intel und Windows). Noch nicht
@@ -27,19 +28,44 @@ showmaster [OPTIONEN] [SHOW.smshow]
   --local-only        nur auf 127.0.0.1 lauschen
   --open              Oberfläche im Standardbrowser öffnen
   --make-demo <DIR>   Demo-Show mit generierten Audiodateien anlegen und öffnen
+  --no-open           Browser nicht öffnen (die macOS-App öffnet ihn von selbst)
+  --no-update-check   beim Start nicht nach einer neuen Version fragen (kein Internetzugriff)
   --log-dir <DIR>     Verzeichnis für Logdateien
 ```
 
 ## Installation
 
-- **Portabel (alle Plattformen):** Archiv der eigenen Plattform aus den CI-Artefakten laden, entpacken,
-  `showmaster` starten. Eine Datei, Oberfläche eingebettet, keine Installation.
-- **Debian/Ubuntu:** `sudo apt install ./showmaster_<version>_<arch>.deb` (CI-Artefakt `showmaster-deb`).
-- **Aus dem Quelltext:** siehe Schnellstart.
+| System | Datei | Vorgehen |
+|---|---|---|
+| macOS (Apple Silicon und Intel) | `ShowMaster-x.y.z.dmg` | öffnen, *Show Master* in den Ordner *Programme* ziehen, starten |
+| Windows | `ShowMaster-Setup-x.y.z.exe` | ausführen und durchklicken |
+| Debian/Ubuntu | `showmaster_x.y.z-1_amd64.deb` | doppelklicken oder `sudo apt install ./showmaster_*.deb` |
+| alle | portables Archiv | entpacken, `showmaster` starten |
 
-Die Pakete sind nicht signiert: macOS und Windows warnen beim ersten Start. Es gibt bewusst keinen
-automatischen Updater – ein Update ist das Ersetzen der Datei bzw. des Pakets; Showfiles älterer
-Versionen werden beim Öffnen migriert.
+Die Installer liegen auf der [Download-Seite](https://github.com/Cheter0410/show-master-releases/releases/latest)
+(sobald dort eine Version veröffentlicht ist) und als Artefakte des `build`-Workflows.
+
+- Show Master hat **kein eigenes Fenster**: Beim Start öffnet sich die Oberfläche im Browser
+  (`http://127.0.0.1:7400`). Beendet wird über **Quit** oben rechts. Ein zweiter Start öffnet nur die
+  Oberfläche der laufenden Instanz.
+- Die Installer sind **nicht signiert**. macOS blockiert den ersten Start: *Systemeinstellungen →
+  Datenschutz & Sicherheit → „Dennoch öffnen“*. Windows zeigt SmartScreen: *Weitere Informationen →
+  Trotzdem ausführen*.
+
+### Updates
+
+Wie bei Beamweave: Beim Start fragt Show Master die Download-Seite nach einer neueren Version. Gibt es
+eine, erscheint oben ein grüner Knopf **Update x.y.z**; ein Klick lädt sie, prüft die SHA-256-Prüfsumme,
+installiert und startet neu. Unter Linux führt der Knopf zur Download-Seite.
+
+- Installiert wird nur auf Knopfdruck, nie im Live-Modus, nie während Cues laufen und nur mit
+  gespeicherter Show.
+- Die Update-Prüfung ist der **einzige** Internetzugriff des Programms. Ohne Netz meldet sie still
+  „offline“; alles andere funktioniert unverändert.
+- Ganz abschalten: `--no-update-check` oder Umgebungsvariable `SHOWMASTER_NO_UPDATE_CHECK=1`.
+
+Eine neue Version veröffentlichen: Version in `Cargo.toml` und `CHANGELOG.md` anheben, dann
+`scripts/release.sh` (baut per GitHub Actions und lädt nach `show-master-releases` hoch).
 
 ## Bedienkonzept
 
@@ -105,10 +131,10 @@ npm-Cache lässt sich ohne Internet bauen. Zur Laufzeit wird nie eine Internetve
 
 Optionale Cargo-Features: `--features sm-io/asio` (Windows, ASIO-SDK nötig), `--features sm-io/jack`.
 
-## Pakete
+## Pakete bauen
 
-`./packaging/portable.sh` erzeugt die portable Variante (eine ausführbare Datei, UI eingebettet).
-`.deb` über `cargo deb -p showmaster`. Stand der übrigen Installer: [`packaging/README.md`](packaging/README.md).
+Der Workflow `build` (Tag `v*` oder manuell) baut DMG, Setup-EXE und `.deb` und testet jedes Paket nach dem
+Bau an. `./packaging/portable.sh` erzeugt die portable Variante. Details: [`packaging/README.md`](packaging/README.md).
 
 ## Lizenz
 

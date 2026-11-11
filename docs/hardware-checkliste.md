@@ -32,6 +32,9 @@ validiert werden.
 - [ ] Mehrstündiger Dauerlauf: `SM_SOAK_SECONDS=14400 cargo test --release -p sm-server --test soak -- --ignored --nocapture`
 
 ## Auslieferung
-- [ ] macOS: `.dmg` signieren und notarisieren (Apple-Developer-Zertifikat nötig)
+- [ ] macOS: DMG auf einem echten Mac installieren und starten (Gatekeeper „Dennoch öffnen“, Browser öffnet sich, Quit)
+- [ ] Windows: Setup-EXE durchklicken, Startmenü-Eintrag, Doppelklick auf `.smshow`
+- [ ] Updater von einer Version auf die nächste, auf macOS und Windows (bisher nur Unit-Tests; es gibt noch kein veröffentlichtes Release)
+- [ ] macOS: signieren und notarisieren (Apple-Developer-Zertifikat nötig)
 - [ ] Windows: Installer signieren (Code-Signing-Zertifikat nötig)
 - [ ] AppImage
