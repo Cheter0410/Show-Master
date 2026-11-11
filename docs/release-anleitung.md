@@ -73,14 +73,12 @@ Es müssen sechs Dateien dabei sein: `.dmg`, `Setup-….exe`, `.deb` und die dre
 ## Updater testen (einmal komplett)
 
 1. Version `0.1.0` wie oben veröffentlichen und auf dem Mac (bzw. Windows) installieren.
-2. Version auf `0.1.1` anheben:
+2. Version auf `0.1.1` anheben: in `Cargo.toml` `version = "0.1.0"` → `"0.1.1"`, in `CHANGELOG.md`
+   ganz oben einen Abschnitt `## 0.1.1` mit einer Zeile ergänzen. Dann:
    ```bash
-   sed -i.bak 's/^version = "0.1.0"/version = "0.1.1"/' Cargo.toml && rm Cargo.toml.bak
-   printf '## 0.1.1\n\n- Test update.\n\n' | cat - CHANGELOG.md | sed '1{h;d};2{G}' > /tmp/cl && mv /tmp/cl CHANGELOG.md
    cargo update -w
    git commit -am "Release 0.1.1" && git push
    ```
-   (Oder die beiden Dateien einfach im Editor ändern.)
 3. Schritte 1–2 von „Eine Version veröffentlichen“ für `0.1.1` ausführen.
 4. Installierte 0.1.0 starten: Oben erscheint **Update 0.1.1**. Klicken → *Update and restart*.
    Danach muss die App von selbst neu starten und `0.1.1` anzeigen (`showmaster --version`).
