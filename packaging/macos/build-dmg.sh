@@ -36,6 +36,10 @@ if [ -n "${REBUILD_UI:-}" ] && ! command -v npm >/dev/null 2>&1; then
 fi
 [ "$missing" = 0 ] || { echo; echo "Install the missing tools above, then run this script again."; exit 1; }
 
+# The built UI is part of the repository; restore it if it was deleted locally.
+if [ ! -f ui/dist/index.html ] && [ -z "${REBUILD_UI:-}" ]; then
+  git checkout HEAD -- ui/dist 2>/dev/null || true
+fi
 if [ ! -f ui/dist/index.html ] || [ -n "${REBUILD_UI:-}" ]; then
   (cd ui && npm ci && npm run build)
 fi
