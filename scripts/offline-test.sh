@@ -55,7 +55,7 @@ fcntl.ioctl(s, 0x8914, struct.pack("16sH", b"lo", flags | 1))
 PY
 TRACE=""
 if command -v strace >/dev/null 2>&1; then TRACE="strace -f -e trace=connect,sendto -o $WORK/trace.log"; fi
-$TRACE "$BIN" --no-update-check --port 7499 --log-dir "$WORK/logs" "$WORK/offline.smshow" > "$WORK/app.log" 2>&1 &
+$TRACE "$BIN" --headless --no-update-check --port 7499 --log-dir "$WORK/logs" "$WORK/offline.smshow" > "$WORK/app.log" 2>&1 &
 PID=$!
 for i in $(seq 1 50); do curl -fs --noproxy '*' http://127.0.0.1:7499/api/session >/dev/null 2>&1 && break; sleep 0.2; done
 api() { curl -fsS --noproxy '*' "$@"; echo; }

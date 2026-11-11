@@ -2,7 +2,8 @@
 Type=Application
 Name=Show Master
 Comment=Playback and show control
-Exec=showmaster --open %f
+Exec=showmaster %f
+Icon=showmaster
 Terminal=false
 Categories=AudioVideo;Audio;
 MimeType=application/x-showmaster;

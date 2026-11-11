@@ -14,11 +14,11 @@ einziger Internetzugriff ist die abschaltbare Update-Prüfung.
 ```bash
 # Voraussetzungen: Rust (stable); unter Linux zusätzlich libasound2-dev.
 # Die gebaute Oberfläche (ui/dist) liegt im Repository – Node ist nur zum Ändern der UI nötig.
-cargo run --release -p showmaster -- --make-demo ~/showmaster-demo --open
+cargo run --release -p showmaster -- --make-demo ~/showmaster-demo
 ```
 
-Das Programm startet die Engine und einen lokalen Webserver und öffnet die Oberfläche im Browser
-(`http://127.0.0.1:7400`). Tablets im selben lokalen Netz erreichen die Fernsteuerung unter
+Das Programm öffnet sein eigenes Fenster (native Rust-App, egui). Parallel läuft ein lokaler Webserver
+nur für Fernsteuerung: Tablets im selben lokalen Netz erreichen die Fernsteuerung unter
 `http://<IP>:7400/remote` (PIN, Standard `1234`) und die reine Anzeige unter `/view`; URL und QR-Code
 stehen in *Setup → Remote*.
 
@@ -26,9 +26,9 @@ stehen in *Setup → Remote*.
 showmaster [OPTIONEN] [SHOW.smshow]
   --port <N>          HTTP-Port (Standard: Port aus der Show, 7400)
   --local-only        nur auf 127.0.0.1 lauschen
-  --open              Oberfläche im Standardbrowser öffnen
+  --headless          ohne Fenster laufen (nur Engine + Webserver; unter Linux ohne Bildschirm automatisch)
+  --open              zusätzlich die Weboberfläche im Browser öffnen
   --make-demo <DIR>   Demo-Show mit generierten Audiodateien anlegen und öffnen
-  --no-open           Browser nicht öffnen (die macOS-App öffnet ihn von selbst)
   --no-update-check   beim Start nicht nach einer neuen Version fragen (kein Internetzugriff)
   --log-dir <DIR>     Verzeichnis für Logdateien
 ```
@@ -45,9 +45,10 @@ showmaster [OPTIONEN] [SHOW.smshow]
 Die Installer liegen auf der [Download-Seite](https://github.com/Cheter0410/show-master-releases/releases/latest)
 (sobald dort eine Version veröffentlicht ist) und als Artefakte des `build`-Workflows.
 
-- Show Master hat **kein eigenes Fenster**: Beim Start öffnet sich die Oberfläche im Browser
-  (`http://127.0.0.1:7400`). Beendet wird über **Quit** oben rechts. Ein zweiter Start öffnet nur die
-  Oberfläche der laufenden Instanz.
+- Show Master ist eine **native App mit eigenem Fenster**. Die Weboberfläche (`/remote`, `/view`) ist für
+  Tablets und andere Geräte im Netz gedacht. Ein zweiter Start holt das laufende Fenster nach vorn.
+- Dateien wählt man über den **Systemdialog** (Finder bzw. Explorer); Audiodateien und Shows kann man
+  auch direkt ins Fenster ziehen.
 - Die Installer sind **nicht signiert**. macOS blockiert den ersten Start: *Systemeinstellungen →
   Datenschutz & Sicherheit → „Dennoch öffnen“*. Windows zeigt SmartScreen: *Weitere Informationen →
   Trotzdem ausführen*.
@@ -101,9 +102,10 @@ Eine neue Version veröffentlichen: Version in `Cargo.toml` und `CHANGELOG.md` a
 | `sm-audio` | Echtzeit-Mixer (Routing-Matrix, Fades, Streaming), Backends hinter Traits (cpal, Null) |
 | `sm-core` | Show-Modell, Showfile (Migration, Atomic Write, Backups), deterministische Cue-Engine, Pre-Flight |
 | `sm-io` | Engine-Aktionen → Audio, MIDI, LTC, MTC |
-| `sm-server` | Command-Bus, Edit/Undo, HTTP + WebSocket (Rollen, State-Diff), OSC |
+| `sm-server` | Command-Bus, Edit/Undo, HTTP + WebSocket (Rollen, State-Diff), OSC, Updater |
+| `sm-desktop` | natives Fenster (egui): Edit-Modus, Live-Dashboard, Setup, Systemdialoge |
 | `showmaster` | das Programm (Logging, Panic-Hook, CLI) |
-| `ui/` | Web-Oberfläche (React + TypeScript), ins Binary eingebettet |
+| `ui/` | Web-Oberfläche für Tablets (React + TypeScript), ins Binary eingebettet |
 
 **Eine Master-Clock:** die Sample-Clock des Audio-Streams. Cue-Scheduling, Fades, LTC, MTC und MIDI
 leiten sich davon ab; die Engine liest nie eine Wanduhr und ist deshalb mit simulierter Zeit testbar.

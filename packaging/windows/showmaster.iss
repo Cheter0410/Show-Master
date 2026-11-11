@@ -36,14 +36,14 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "..\..\stage\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 [Icons]
-Name: "{autoprograms}\Show Master"; Filename: "{app}\showmaster.exe"; Parameters: "--open"
-Name: "{autodesktop}\Show Master"; Filename: "{app}\showmaster.exe"; Parameters: "--open"; Tasks: desktopicon
+Name: "{autoprograms}\Show Master"; Filename: "{app}\showmaster.exe"
+Name: "{autodesktop}\Show Master"; Filename: "{app}\showmaster.exe"; Tasks: desktopicon
 
 [Registry]
 Root: HKA; Subkey: "Software\Classes\.smshow"; ValueType: string; ValueData: "ShowMaster.Show"; Flags: uninsdeletevalue
 Root: HKA; Subkey: "Software\Classes\ShowMaster.Show"; ValueType: string; ValueData: "Show Master show"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\ShowMaster.Show\DefaultIcon"; ValueType: string; ValueData: "{app}\showmaster.exe,0"
-Root: HKA; Subkey: "Software\Classes\ShowMaster.Show\shell\open\command"; ValueType: string; ValueData: """{app}\showmaster.exe"" --open ""%1"""
+Root: HKA; Subkey: "Software\Classes\ShowMaster.Show\shell\open\command"; ValueType: string; ValueData: """{app}\showmaster.exe"" ""%1"""
 
 [Run]
-Filename: "{app}\showmaster.exe"; Parameters: "--open"; Description: "{cm:LaunchProgram,Show Master}"; Flags: nowait postinstall
+Filename: "{app}\showmaster.exe"; Description: "{cm:LaunchProgram,Show Master}"; Flags: nowait postinstall

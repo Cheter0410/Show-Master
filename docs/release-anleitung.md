@@ -18,7 +18,7 @@ gh auth login
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential pkg-config libasound2-dev curl git gh gcc-mingw-w64-x86-64 wine
+sudo apt install -y build-essential pkg-config libasound2-dev libxkbcommon-dev libwayland-dev libgtk-3-dev curl git gh gcc-mingw-w64-x86-64 wine
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 rustup target add x86_64-pc-windows-gnu

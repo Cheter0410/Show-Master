@@ -34,7 +34,7 @@ jobs:
 
       - name: Linux packages
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config strace
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config strace libxkbcommon-dev libwayland-dev libgtk-3-dev
 
       - uses: actions/setup-node@v4
         with:
@@ -99,7 +99,7 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config libxkbcommon-dev libwayland-dev libgtk-3-dev
       - uses: actions/setup-node@v4
         with:
           node-version: 22

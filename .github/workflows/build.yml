@@ -52,7 +52,7 @@ jobs:
           for A in arm64 x86_64; do
             echo "=== $A"
             arch -$A "$BIN" --version
-            arch -$A "$BIN" --no-open --port 7455 --local-only --log-dir /tmp/sm-logs-$A --make-demo /tmp/sm-demo-$A &
+            arch -$A "$BIN" --headless --port 7455 --local-only --log-dir /tmp/sm-logs-$A --make-demo /tmp/sm-demo-$A &
             for i in $(seq 1 150); do curl -fs http://127.0.0.1:7455/api/session >/dev/null 2>&1 && break; sleep 0.1; done
             curl -fsS http://127.0.0.1:7455/api/session | grep -q '"role":"admin"'
             curl -fsS http://127.0.0.1:7455/ | grep -qi '<!doctype html'
@@ -60,7 +60,7 @@ jobs:
             sleep 1
             curl -fsS http://127.0.0.1:7455/api/v1/state | python3 -c 'import json,sys; s=json.load(sys.stdin); print("audio:", s["audio"]["backend"], s["audio"]["device"], "| active cues:", len(s["tick"]["active"]), "| update:", s["update"]["state"]); assert s["update"]["state"]=="disabled"; assert len(s["tick"]["active"])>=1'
             # A second start must hand over to the running instance and exit.
-            arch -$A "$BIN" --no-open --port 7455 --local-only --log-dir /tmp/sm-logs2-$A
+            arch -$A "$BIN" --headless --port 7455 --local-only --log-dir /tmp/sm-logs2-$A
             # Quit through the API, as the Quit button does.
             curl -fsS -X POST -H 'content-type: application/json' -d '{"cmd":"quit","force":true}' http://127.0.0.1:7455/api/v1/command | grep -q '"ok":true'
             wait
@@ -109,7 +109,7 @@ jobs:
           Start-Process -FilePath $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER","/DIR=C:\sm-test" -Wait
           if (-not (Test-Path C:\sm-test\showmaster.exe)) { throw "installer did not install the program" }
           $env:SHOWMASTER_NO_UPDATE_CHECK = "1"
-          $p = Start-Process -FilePath C:\sm-test\showmaster.exe -ArgumentList "--port","7455","--local-only","--log-dir","C:\sm-logs" -PassThru
+          $p = Start-Process -FilePath C:\sm-test\showmaster.exe -ArgumentList "--headless","--port","7455","--local-only","--log-dir","C:\sm-logs" -PassThru
           $ok = $false
           for ($i = 0; $i -lt 100; $i++) { try { $r = Invoke-RestMethod http://127.0.0.1:7455/api/session; if ($r.role -eq "admin") { $ok = $true; break } } catch { Start-Sleep -Milliseconds 100 } }
           if (-not $ok) { throw "installed program did not answer" }
@@ -130,7 +130,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config libxkbcommon-dev libwayland-dev libgtk-3-dev
       - uses: actions/setup-node@v4
         with:
           node-version: 22

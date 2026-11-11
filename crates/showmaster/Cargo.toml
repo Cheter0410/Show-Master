@@ -28,10 +28,11 @@ name = "showmaster"
 maintainer = "Show Master"
 section = "sound"
 priority = "optional"
-depends = "libasound2 | libasound2t64"
+depends = "libasound2 | libasound2t64, libxkbcommon-x11-0, libgtk-3-0 | libgtk-3-0t64, libvulkan1 | libgl1"
 extended-description = "Cue-based playback and show control for live production. Runs fully offline."
 assets = [
   ["target/release/showmaster", "usr/bin/", "755"],
   ["../../packaging/linux/showmaster.desktop", "usr/share/applications/", "644"],
+  ["../../assets/icon.png", "usr/share/icons/hicolor/512x512/apps/showmaster.png", "644"],
   ["../../README.md", "usr/share/doc/showmaster/", "644"],
 ]

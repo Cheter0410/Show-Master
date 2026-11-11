@@ -12,7 +12,8 @@ core (sm-core, sm-timecode)   Cue-Modell, Engine, Scheduler, Timecode-Mathematik
 io   (sm-audio, sm-rtpmidi,   Audio-Mixer + Backends, MIDI, LTC, rtp-midi           – plattformabhängiges hinter Traits
       sm-io)
 server (sm-server)            Command-Bus, Dokument/Undo, HTTP/WS, OSC
-ui   (ui/)                    Desktop-, Remote- und View-Oberfläche aus einer Codebasis
+desktop (sm-desktop)          natives Fenster (egui): Edit-Modus, Live-Dashboard, Setup – Client am Command-Bus
+ui   (ui/)                    Web-Oberfläche für Tablets (/remote, /view), im Binary eingebettet
 ```
 
 Abhängigkeiten zeigen nur nach unten: `server → io → core`. `sm-core` kennt weder Audio-Geräte noch
@@ -47,6 +48,7 @@ sie ausgibt, trägt den Frame, zu dem sie wirksam wird:
 | `sm-midi` | gibt terminierte MIDI-Nachrichten zum Zeitpunkt aus | |
 | rtp-midi (3) | UDP-Empfang, Session-Zustand, Clock-Sync | |
 | `sm-net` (tokio, 2) | HTTP/WebSocket | redet mit der Engine nur über Kanäle |
+| Haupt-Thread | natives Fenster (egui), ~25 Bilder/s | liest den veröffentlichten Zustand, schickt Commands; blockiert nie Engine oder Audio |
 
 Fällt das Netzwerk, ein Client oder der ganze Webserver aus, läuft die Show weiter: Engine und Audio
 hängen nicht von `sm-net` ab.
@@ -90,4 +92,4 @@ kopiert sie nach `media/` und speichert BLAKE3-Hashes.
   + `Action`, die der I/O-Hub ausführt.
 - Timecode-Eingang: liefert einen `TcTransport` von außen; Trigger und Chase funktionieren unverändert.
 - Lichtsteuerung (Art-Net/sACN): weiterer Sink im I/O-Hub, terminiert wie MIDI.
-- Natives Fenster / globale Hotkeys: dünne Shell (z. B. Tauri), die `http://127.0.0.1:<port>` lädt.
+- Systemweite Hotkeys (wenn das Fenster keinen Fokus hat): eigener Listener, der Commands auf den Bus legt.

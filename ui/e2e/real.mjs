@@ -43,7 +43,7 @@ if (!existsSync(BIN)) {
 }
 mkdirSync(SHOTS, { recursive: true });
 const work = mkdtempSync(join(tmpdir(), "sm-e2e-"));
-const app = spawn(BIN, ["--make-demo", join(work, "show"), "--port", String(PORT), "--log-dir", join(work, "logs")], { stdio: "ignore" });
+const app = spawn(BIN, ["--headless", "--make-demo", join(work, "show"), "--port", String(PORT), "--log-dir", join(work, "logs")], { stdio: "ignore" });
 const LOCAL = `http://127.0.0.1:${PORT}`;
 const api = async (path, init) => (await fetch(LOCAL + path, init)).json();
 const command = (cmd) => api("/api/v1/command", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(cmd) });

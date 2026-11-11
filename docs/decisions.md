@@ -14,11 +14,15 @@ revidieren lassen.
 
 ## Stack
 
-- **UI als eingebettete Web-Oberfläche statt nativer Rust-UI.** Das iPad braucht ohnehin ein
-  Web-Frontend; eine einzige Codebasis für Desktop, Remote und View vermeidet doppelte Logik. Die
-  Desktop-App ist der Rust-Prozess plus Browserfenster. Eine Tauri-Hülle (natives Fenster, globale
-  Hotkeys, Datei-Drop mit Pfaden) ist vorgesehen, aber **nicht gebaut**: sie braucht ein Display zum
-  Testen. Folge heute: globale Hotkeys fehlen, Hotkeys wirken im Browserfenster.
+- **Desktop: native Rust-UI mit egui (`crates/sm-desktop`); Web nur für Tablets.** Ursprünglich lief
+  auch die Desktop-Oberfläche im Browser. Auf Wunsch ist der Desktop jetzt eine native App mit eigenem
+  Fenster – dasselbe Toolkit wie Beamweave (egui/eframe 0.37, wgpu). Dateiauswahl über die
+  Systemdialoge (rfd: Finder/Explorer/GTK-Portal), Drag & Drop von Dateien mit echten Pfaden.
+  Das Fenster ist nur ein weiterer Client am Command-Bus (wie iPad, HTTP-API, OSC); Engine und Audio
+  laufen in eigenen Threads, ein hängendes Fenster stört die Wiedergabe nicht. Die Weboberfläche
+  (React) bleibt für `/remote` und `/view`; ihre Desktop-Ansicht unter `/` existiert weiter, ist aber
+  nicht mehr der Hauptweg. Hotkeys wirken, solange das Fenster den Fokus hat (keine systemweiten
+  Hotkeys).
 - **cpal reicht** als Audio-Schicht (CoreAudio, WASAPI, ALSA; ASIO und JACK als Feature). Der Mixer
   hängt nur an den Traits `AudioBackend`/`OutputStream`; ein eigenes Backend ließe sich ergänzen.
   PipeWire wird über dessen ALSA- bzw. JACK-Schnittstelle angesprochen. Ob 32+ Kanäle mit niedriger
@@ -64,8 +68,8 @@ revidieren lassen.
   Cues oder ungespeicherter Show.
 - Downloads nur von `github.com/Cheter0410/show-master-releases/`, mit Prüfung von Größe und
   SHA-256-Digest; ein Programm-Patch muss wie eine ausführbare Datei des Systems aussehen.
-- **Kein eigenes Fenster:** Die macOS-App läuft ohne Dock-Symbol (`LSUIElement`) und öffnet den Browser;
-  beendet wird über „Quit“ in der Oberfläche. Der Windows-Release-Build hat kein Konsolenfenster.
+- Schließen des Fensters beendet das Programm. Im Live-Modus (Quit-Schutz), bei laufenden Cues oder
+  ungespeicherten Änderungen wird vorher nachgefragt. Der Windows-Release-Build hat kein Konsolenfenster.
 
 ## Bekannte Grenzen
 
