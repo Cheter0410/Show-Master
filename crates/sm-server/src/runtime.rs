@@ -184,6 +184,7 @@ pub struct Handle {
     pub clients: Arc<Mutex<Vec<ClientInfo>>>,
     /// Signalled when the application should exit (Quit command, update installed).
     pub quit: Arc<tokio::sync::Notify>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Handle {
@@ -222,6 +223,11 @@ impl Handle {
                 reply: None,
             })
             .map_err(|_| "runtime stopped".to_string())
+    }
+
+    /// Stop the runtime thread (it autosaves on the way out). Join it afterwards.
+    pub fn shutdown(&self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub fn state(&self) -> Value {
@@ -376,6 +382,7 @@ pub fn spawn(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         events,
         clients: Arc::new(Mutex::new(Vec::new())),
         quit: Arc::new(tokio::sync::Notify::new()),
+        stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
     let h = handle.clone();
     let (ready_tx, ready_rx) = mpsc::channel::<()>();
@@ -503,6 +510,9 @@ impl Runtime {
                 Err(RecvTimeoutError::Timeout) => None,
                 Err(RecvTimeoutError::Disconnected) => break,
             };
+            if self.handle.stop.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
             // A bug must never take the command bus down mid-show: contain a
             // panic to the request that caused it and keep running.
             let step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

@@ -361,7 +361,8 @@ fn main() -> std::process::ExitCode {
             }
         }
     });
-    // Dropping the last handle stops the engine thread, which autosaves on the way out.
+    // Stop the engine thread; it autosaves on the way out.
+    handle.shutdown();
     drop(handle);
     tokio_rt.shutdown_timeout(std::time::Duration::from_secs(1));
     let _ = engine_thread.join();
