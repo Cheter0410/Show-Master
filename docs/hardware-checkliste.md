@@ -23,6 +23,7 @@ validiert werden.
 - [ ] rtp-midi: Verbindung von macOS (Audio-MIDI-Setup), iOS und rtpMIDI (Windows) – beide Richtungen
 - [ ] rtp-midi mit `journal: true` gegen Wireshark-Dissector und echte Empfänger
 - [ ] MSC an einem Lichtpult
+- [ ] MIDI-/MTC-Jitter messen, besonders unter macOS (ein virtueller CI-Runner lieferte eine Nachricht 75 ms zu spät; auf echter Hardware zu prüfen)
 
 ## Bedienung
 - [ ] Oberfläche auf einem echten iPad (Safari, „Zum Home-Bildschirm“, Wake-Lock, Hoch-/Querformat)

@@ -193,10 +193,22 @@ fn sender_loop(
                 deliver(&mut open, &s.port, &s.bytes);
             }
         }
-        let wait = heap
-            .peek()
-            .map(|s| s.due.saturating_duration_since(Instant::now()))
-            .unwrap_or(Duration::from_millis(500));
+        // Timers are coarse (and coalesced on some systems): sleep until shortly
+        // before the next message, then yield-spin the last stretch.
+        const SPIN: Duration = Duration::from_micros(1500);
+        let wait = match heap.peek() {
+            Some(s) => {
+                let left = s.due.saturating_duration_since(Instant::now());
+                if left <= SPIN {
+                    while Instant::now() < s.due {
+                        std::thread::yield_now();
+                    }
+                    continue;
+                }
+                left - SPIN
+            }
+            None => Duration::from_millis(500),
+        };
         match rx.recv_timeout(wait) {
             Ok(Msg::Send(s)) => heap.push(s),
             Ok(Msg::Panic) => {
@@ -439,21 +451,32 @@ mod tests {
         hub.send_at(t0 + Duration::from_millis(20), "test", vec![0x90, 1, 1]);
         hub.send_at(t0 + Duration::from_millis(60), "test", vec![0x90, 3, 1]);
         hub.send_at(t0, "nope", vec![0x90, 9, 1]);
-        std::thread::sleep(Duration::from_millis(150));
+        // Poll instead of assuming a fixed delay: CI machines can be slow.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while log.lock().unwrap().len() < 3 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
         let got = log.lock().unwrap().clone();
         assert_eq!(
             got.iter().map(|g| g.1[1]).collect::<Vec<_>>(),
             vec![1, 2, 3]
         );
+        // Never early. The upper bound is generous because virtualised CI
+        // runners oversleep by tens of milliseconds; real jitter is measured on
+        // hardware (docs/hardware-checkliste.md).
         assert!(got[0].0 >= t0 + Duration::from_millis(20));
+        assert!(got[1].0 >= t0 + Duration::from_millis(60));
         assert!(
-            got[0].0 < t0 + Duration::from_millis(50),
+            got[0].0 < t0 + Duration::from_millis(400),
             "late by {:?}",
             got[0].0 - t0
         );
         assert!(hub.take_errors().iter().any(|e| e.contains("nope")));
         hub.panic();
-        std::thread::sleep(Duration::from_millis(50));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while log.lock().unwrap().len() < 3 + 48 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
         assert_eq!(log.lock().unwrap().len(), 3 + 48);
     }
 
