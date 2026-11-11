@@ -164,7 +164,8 @@ async fn soak() {
     let start = Instant::now();
     let frame0 = handle.tick()["frame"].as_u64().unwrap();
     let rss0 = rss_kb();
-    let (mut fired, mut max_voices, mut max_cpu, mut edits) = (0u64, 0u64, 0f64, 0u64);
+    let (mut fired, mut max_voices, mut max_cpu, mut edits, mut mtc) =
+        (0u64, 0u64, 0f64, 0u64, 0f64);
     let mut rss_mid = None;
     while start.elapsed() < Duration::from_secs(seconds) {
         handle
@@ -192,10 +193,20 @@ async fn soak() {
                     )
                     .await
                     .unwrap();
+                // Undo right away so the (deliberately unlimited) undo history
+                // does not grow and mask a real leak in the memory check.
+                handle
+                    .command(cmd(json!({ "cmd": "undo" })), Role::Admin, "soak")
+                    .await
+                    .unwrap();
                 edits += 1;
             }
+            // Count and drop recorded MIDI for the same reason.
+            let mut log = midi.lock().unwrap();
+            mtc += log.iter().filter(|m| m.1[0] == 0xF1).count() as f64;
+            log.clear();
         }
-        if rss_mid.is_none() && start.elapsed() > Duration::from_secs(seconds / 2) {
+        if rss_mid.is_none() && start.elapsed() > Duration::from_secs(seconds / 3) {
             rss_mid = rss_kb();
         }
     }
@@ -204,7 +215,7 @@ async fn soak() {
     let elapsed = start.elapsed().as_secs_f64();
     let frames = tick["frame"].as_u64().unwrap() - frame0;
     let rate = frames as f64 / elapsed;
-    let mtc = midi
+    mtc += midi
         .lock()
         .unwrap()
         .iter()
