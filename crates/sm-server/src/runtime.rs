@@ -77,6 +77,8 @@ pub enum SysCommand {
     CheckUpdate,
     /// Download and install the available update, then restart.
     InstallUpdate,
+    /// Bring the desktop window to the front (sent by a second program start).
+    RaiseWindow,
     /// Shut the application down.
     Quit {
         #[serde(default)]
@@ -184,6 +186,10 @@ pub struct Handle {
     pub clients: Arc<Mutex<Vec<ClientInfo>>>,
     /// Signalled when the application should exit (Quit command, update installed).
     pub quit: Arc<tokio::sync::Notify>,
+    /// Set together with `quit`; polled by the desktop window.
+    pub quit_requested: Arc<std::sync::atomic::AtomicBool>,
+    /// Set when another program start asks the window to come to the front.
+    pub raise: Arc<std::sync::atomic::AtomicBool>,
     stop: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -223,6 +229,13 @@ impl Handle {
                 reply: None,
             })
             .map_err(|_| "runtime stopped".to_string())
+    }
+
+    /// Ask the whole application to exit (window, server, engine).
+    pub fn request_quit(&self) {
+        self.quit_requested
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.quit.notify_one();
     }
 
     /// Stop the runtime thread (it autosaves on the way out). Join it afterwards.
@@ -382,6 +395,8 @@ pub fn spawn(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         events,
         clients: Arc::new(Mutex::new(Vec::new())),
         quit: Arc::new(tokio::sync::Notify::new()),
+        quit_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        raise: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
     let h = handle.clone();
@@ -546,7 +561,7 @@ impl Runtime {
                 {
                     self.note("info", "Update installed - restarting".into());
                     self.publish(false);
-                    self.handle.quit.notify_one();
+                    self.handle.request_quit();
                     self.updater = None;
                 }
             }
@@ -951,6 +966,12 @@ impl Runtime {
                 self.note("info", "Installing update".into());
                 Ok(Value::Null)
             }
+            SysCommand::RaiseWindow => {
+                self.handle
+                    .raise
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(Value::Null)
+            }
             SysCommand::Quit { force } => {
                 if !force && self.any_running() {
                     return Err("cues_running".into());
@@ -959,7 +980,7 @@ impl Runtime {
                     return Err("unsaved_changes".into());
                 }
                 self.note("info", "Quit requested".into());
-                self.handle.quit.notify_one();
+                self.handle.request_quit();
                 Ok(Value::Null)
             }
             SysCommand::ResetClip => {

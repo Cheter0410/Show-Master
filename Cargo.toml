@@ -20,6 +20,7 @@ sm-audio = { path = "crates/sm-audio", default-features = false }
 sm-core = { path = "crates/sm-core" }
 sm-io = { path = "crates/sm-io" }
 sm-server = { path = "crates/sm-server" }
+sm-desktop = { path = "crates/sm-desktop" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

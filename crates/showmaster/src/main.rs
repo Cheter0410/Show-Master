@@ -1,12 +1,12 @@
-// The installed Windows build has no console window; it is used through the
-// browser UI. Debug builds keep the console for development.
+// The installed Windows build has no console window (it has its own window).
+// Debug builds keep the console for development.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 //! Show Master: playback and show control.
 //!
 //! This binary runs the complete application: cue engine, audio/MIDI/
-//! timecode I/O and the embedded web server that serves the user interface
-//! (desktop UI on this machine, remote UI for tablets on the local network).
+//! timecode I/O, the native desktop window and the embedded web server for
+//! tablets and other remote devices on the local network.
 //! The only internet access is the update check (see `sm_server::update`),
 //! which can be switched off with `--no-update-check`.
 
@@ -30,8 +30,9 @@ OPTIONS:
     --port <N>        HTTP port (default: the show's remote port, 7400)
     --local-only      Listen on 127.0.0.1 only, whatever the show says
     --log-dir <DIR>   Directory for log files
-    --open            Open the user interface in the default browser
-    --no-open         Do not open the browser (the macOS app opens it by default)
+    --headless        Run without a window (server only: tablets, API, Stream Deck).
+                      Automatic on Linux when no display is available.
+    --open            Also open the web user interface in the default browser
     --no-update-check Do not look for a newer version at start-up (no internet access at all)
     --make-demo <DIR> Write a demo show (showfile + generated audio) into DIR and open it
     -h, --help        Show this help
@@ -44,6 +45,7 @@ struct Args {
     local_only: bool,
     log_dir: Option<PathBuf>,
     open: bool,
+    headless: bool,
     update_check: bool,
 }
 
@@ -53,8 +55,8 @@ fn parse_args() -> Result<Args, String> {
         port: None,
         local_only: false,
         log_dir: None,
-        // A double-clicked macOS app has no terminal: show the UI right away.
-        open: in_app_bundle(),
+        open: false,
+        headless: false,
         update_check: std::env::var_os("SHOWMASTER_NO_UPDATE_CHECK").is_none(),
     };
     let mut it = std::env::args().skip(1);
@@ -85,6 +87,7 @@ fn parse_args() -> Result<Args, String> {
             "--local-only" => args.local_only = true,
             "--no-update-check" => args.update_check = false,
             "--no-open" => args.open = false,
+            "--headless" => args.headless = true,
             // Passed by the updater when it restarts the program.
             "--after-update" => {}
             "--open" => args.open = true,
@@ -193,12 +196,31 @@ fn init_logging(dir: PathBuf) -> PathBuf {
     path
 }
 
-/// True when started from a macOS application bundle (double-clicked app).
-fn in_app_bundle() -> bool {
-    cfg!(target_os = "macos")
-        && std::env::current_exe()
-            .map(|e| e.to_string_lossy().contains(".app/Contents/MacOS/"))
-            .unwrap_or(false)
+/// Is a display available for a window? Only Linux can lack one.
+fn display_available() -> bool {
+    if cfg!(any(target_os = "linux", target_os = "freebsd")) {
+        std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
+    } else {
+        true
+    }
+}
+
+/// Send a command to the already running instance (loopback = admin).
+fn post_command(port: u16, body: &str) {
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let Ok(mut s) =
+        std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(400))
+    else {
+        return;
+    };
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_millis(1000)));
+    let req = format!(
+        "POST /api/v1/command HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = s.write_all(req.as_bytes());
+    let mut buf = [0u8; 512];
+    let _ = std::io::Read::read(&mut s, &mut buf);
 }
 
 /// Is a Show Master instance already answering on this port?
@@ -245,7 +267,7 @@ async fn bind(addr: IpAddr, port: u16) -> std::io::Result<tokio::net::TcpListene
 }
 
 fn main() -> std::process::ExitCode {
-    let args = match parse_args() {
+    let mut args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
             eprintln!("error: {e}\n\n{USAGE}");
@@ -258,12 +280,21 @@ fn main() -> std::process::ExitCode {
         runtime::VERSION,
         log_path.display()
     );
+    if !args.headless && !display_available() {
+        tracing::info!("no display found - running without a window (--headless)");
+        args.headless = true;
+    }
 
     sm_server::update::cleanup_after_update();
-    // Starting the app a second time just brings up the UI of the running one.
+    // Starting the app a second time hands over to the running instance.
     let probe_port = args.port.unwrap_or(7400);
     if already_running(probe_port) {
         tracing::info!("Show Master is already running on port {probe_port}");
+        if let Some(show) = &args.show {
+            let body = serde_json::json!({ "cmd": "open_show", "path": show }).to_string();
+            post_command(probe_port, &body);
+        }
+        post_command(probe_port, r#"{"cmd":"raise_window"}"#);
         if args.open {
             open_browser(&format!("http://127.0.0.1:{probe_port}"));
         }
@@ -319,48 +350,80 @@ fn main() -> std::process::ExitCode {
         }
     }
 
-    let open = args.open;
+    // The web server (tablets, API) runs in the background in both modes.
     let server_handle = handle.clone();
-    let quit = handle.quit.clone();
-    let code = tokio_rt.block_on(async move {
+    let open = args.open;
+    let (bound_tx, bound_rx) = std::sync::mpsc::channel::<Option<u16>>();
+    let server = tokio_rt.spawn(async move {
         let listener = match bind(addr, port).await {
             Ok(l) => l,
             Err(e) => {
                 tracing::error!("cannot open any port: {e}");
-                return std::process::ExitCode::FAILURE;
+                let _ = bound_tx.send(None);
+                return;
             }
         };
         let local = listener.local_addr().map(|a| a.port()).unwrap_or(port);
-        let url = format!("http://127.0.0.1:{local}");
-        tracing::info!("user interface: {url}");
+        let _ = bound_tx.send(Some(local));
+        tracing::info!("web interface: http://127.0.0.1:{local}");
         if lan {
             for u in sm_server::http::local_urls(local) {
                 tracing::info!("remote (tablet): {u}/remote   view only: {u}/view");
             }
         }
-        println!("Show Master is running. Open {url}");
-        if open {
-            open_browser(&url);
-        }
-        tokio::select! {
-            r = sm_server::http::serve(server_handle, listener) => {
-                if let Err(e) = r {
-                    tracing::error!("server stopped: {e}");
-                }
-                std::process::ExitCode::FAILURE
-            }
-            _ = quit.notified() => {
-                tracing::info!("quitting");
-                // Let the UI receive the final state before the server goes away.
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                std::process::ExitCode::SUCCESS
-            }
-            _ = tokio::signal::ctrl_c() => {
-                tracing::info!("shutting down");
-                std::process::ExitCode::SUCCESS
-            }
+        if let Err(e) = sm_server::http::serve(server_handle, listener).await {
+            tracing::error!("web server stopped: {e}");
         }
     });
+    let bound = bound_rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .ok()
+        .flatten();
+    if let Some(local) = bound {
+        println!("Show Master is running. Web interface: http://127.0.0.1:{local}");
+        if open {
+            open_browser(&format!("http://127.0.0.1:{local}"));
+        }
+    }
+
+    // Ctrl+C (terminal) quits like the Quit button.
+    let ctrl_c_handle = handle.clone();
+    tokio_rt.spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            tracing::info!("interrupted");
+            ctrl_c_handle.request_quit();
+        }
+    });
+
+    let code = if args.headless {
+        if bound.is_none() {
+            std::process::ExitCode::FAILURE
+        } else {
+            let quit = handle.quit.clone();
+            let quit_flag = handle.quit_requested.clone();
+            tokio_rt.block_on(async move {
+                if !quit_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    quit.notified().await;
+                }
+                tracing::info!("quitting");
+                // Let clients receive the final state before the server goes away.
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            });
+            std::process::ExitCode::SUCCESS
+        }
+    } else {
+        // The window must run on the main thread (macOS requirement).
+        match sm_desktop::run(handle.clone(), tokio_rt.handle().clone(), None) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                tracing::error!("cannot open the window: {e}");
+                eprintln!("Show Master could not open its window: {e}\nStart with --headless to run without a window.");
+                std::process::ExitCode::FAILURE
+            }
+        }
+    };
+    tracing::info!("shutting down");
+    server.abort();
     // Stop the engine thread; it autosaves on the way out.
     handle.shutdown();
     drop(handle);
