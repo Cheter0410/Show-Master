@@ -37,7 +37,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build app and disk image
         run: ./packaging/macos/build-dmg.sh
-      - name: Smoke test the packaged app
+      - name: Smoke test the packaged app (Apple Silicon and Intel)
         run: |
           set -euo pipefail
           MNT=$(mktemp -d)
@@ -45,21 +45,27 @@ jobs:
           cp -R "$MNT/ShowMaster.app" /tmp/ShowMaster.app
           hdiutil detach "$MNT"
           BIN=/tmp/ShowMaster.app/Contents/MacOS/showmaster
-          "$BIN" --version
-          # Started the way a double click does, minus the browser; no update check in CI.
-          SHOWMASTER_NO_UPDATE_CHECK=1 "$BIN" --no-open --port 7455 --local-only --log-dir /tmp/sm-logs --make-demo /tmp/sm-demo &
-          for i in $(seq 1 100); do curl -fs http://127.0.0.1:7455/api/session >/dev/null 2>&1 && break; sleep 0.1; done
-          curl -fsS http://127.0.0.1:7455/api/session | grep -q '"role":"admin"'
-          curl -fsS http://127.0.0.1:7455/ | grep -qi '<!doctype html'
-          curl -fsS http://127.0.0.1:7455/api/v1/cmd/go | grep -q '"ok":true'
-          sleep 1
-          curl -fsS http://127.0.0.1:7455/api/v1/state | python3 -c 'import json,sys; s=json.load(sys.stdin); print("audio:", s["audio"]["backend"], s["audio"]["device"], "| active cues:", len(s["tick"]["active"]), "| update:", s["update"]["state"]); assert s["update"]["state"]=="disabled"; assert len(s["tick"]["active"])>=1'
-          # A second start must hand over to the running instance and exit.
-          "$BIN" --no-open --port 7455 --local-only --log-dir /tmp/sm-logs2
-          # Quit through the API, as the Quit button does.
-          curl -fsS -X POST -H 'content-type: application/json' -d '{"cmd":"quit","force":true}' http://127.0.0.1:7455/api/v1/command | grep -q '"ok":true'
-          wait
-          echo "packaged app started, played, handed over and quit cleanly"
+          lipo -info "$BIN"
+          # The Intel part runs under Rosetta on this Apple Silicon runner.
+          /usr/bin/pgrep -q oahd || softwareupdate --install-rosetta --agree-to-license
+          export SHOWMASTER_NO_UPDATE_CHECK=1
+          for A in arm64 x86_64; do
+            echo "=== $A"
+            arch -$A "$BIN" --version
+            arch -$A "$BIN" --no-open --port 7455 --local-only --log-dir /tmp/sm-logs-$A --make-demo /tmp/sm-demo-$A &
+            for i in $(seq 1 150); do curl -fs http://127.0.0.1:7455/api/session >/dev/null 2>&1 && break; sleep 0.1; done
+            curl -fsS http://127.0.0.1:7455/api/session | grep -q '"role":"admin"'
+            curl -fsS http://127.0.0.1:7455/ | grep -qi '<!doctype html'
+            curl -fsS http://127.0.0.1:7455/api/v1/cmd/go | grep -q '"ok":true'
+            sleep 1
+            curl -fsS http://127.0.0.1:7455/api/v1/state | python3 -c 'import json,sys; s=json.load(sys.stdin); print("audio:", s["audio"]["backend"], s["audio"]["device"], "| active cues:", len(s["tick"]["active"]), "| update:", s["update"]["state"]); assert s["update"]["state"]=="disabled"; assert len(s["tick"]["active"])>=1'
+            # A second start must hand over to the running instance and exit.
+            arch -$A "$BIN" --no-open --port 7455 --local-only --log-dir /tmp/sm-logs2-$A
+            # Quit through the API, as the Quit button does.
+            curl -fsS -X POST -H 'content-type: application/json' -d '{"cmd":"quit","force":true}' http://127.0.0.1:7455/api/v1/command | grep -q '"ok":true'
+            wait
+            echo "$A: started, played, handed over and quit cleanly"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: ShowMaster-macOS
