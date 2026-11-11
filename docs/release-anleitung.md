@@ -5,9 +5,11 @@ veröffentlicht mit der GitHub-Kommandozeile `gh` nach `Cheter0410/show-master-r
 
 ## Einmalig: Mac einrichten
 
+Node.js ist auf dem Mac nicht nötig: Die gebaute Oberfläche liegt im Repository.
+
 ```bash
 xcode-select --install
-brew install node gh
+brew install gh
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 gh auth login
 ```

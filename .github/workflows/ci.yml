@@ -48,6 +48,8 @@ jobs:
           npm ci
           npm test
           npm run build
+          # The built UI is committed (so the app builds without Node); it must be current.
+          git diff --exit-code -- dist || { echo "ui/dist is out of date: run 'npm run build' in ui/ and commit ui/dist"; exit 1; }
 
       - uses: dtolnay/rust-toolchain@stable
         with:

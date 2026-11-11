@@ -12,8 +12,8 @@ einziger Internetzugriff ist die abschaltbare Update-Prüfung.
 ## Schnellstart
 
 ```bash
-# Voraussetzungen: Rust (stable), Node 22; unter Linux zusätzlich libasound2-dev
-cd ui && npm ci && npm run build && cd ..
+# Voraussetzungen: Rust (stable); unter Linux zusätzlich libasound2-dev.
+# Die gebaute Oberfläche (ui/dist) liegt im Repository – Node ist nur zum Ändern der UI nötig.
 cargo run --release -p showmaster -- --make-demo ~/showmaster-demo --open
 ```
 
@@ -124,6 +124,7 @@ cargo run --release -p sm-audio --example audio_bench   # Prototyp (a): Multicha
 
 cargo build -p showmaster && node ui/e2e/real.mjs        # Browser-Test der echten App (braucht Playwright + Chromium)
 cd ui && npm run dev                   # UI-Entwicklung gegen einen laufenden showmaster
+cd ui && npm run build                 # nach UI-Änderungen: ui/dist neu bauen und mit committen
 ```
 
 Offline-Builds: `Cargo.lock` und `ui/package-lock.json` sind eingecheckt; mit `cargo vendor` und einem

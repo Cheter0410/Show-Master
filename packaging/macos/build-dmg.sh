@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds ShowMaster-x.y.z.dmg (universal: Apple Silicon + Intel) on a Mac.
-# Needs: Xcode command line tools, Rust (rustup) and Node 22.
+# Needs: Xcode command line tools and Rust (rustup). Node.js only with REBUILD_UI=1.
 #   ./packaging/macos/build-dmg.sh
 # The result is in dist/. Used by the `build` workflow and for building by hand.
 set -euo pipefail
@@ -21,10 +21,11 @@ if ! command -v cargo >/dev/null 2>&1 || ! command -v rustup >/dev/null 2>&1; th
     echo "         then open a new terminal window."; missing=1
   fi
 fi
-if ! command -v npm >/dev/null 2>&1; then
+# Node.js is only needed to rebuild the web UI; the built UI is part of the repository.
+if [ -n "${REBUILD_UI:-}" ] && ! command -v npm >/dev/null 2>&1; then
   for d in /opt/homebrew/bin /usr/local/bin; do [ -x "$d/npm" ] && export PATH="$d:$PATH"; done
 fi
-if ! command -v npm >/dev/null 2>&1; then
+if [ -n "${REBUILD_UI:-}" ] && ! command -v npm >/dev/null 2>&1; then
   if command -v brew >/dev/null 2>&1; then
     echo "Missing: Node.js.  Install:  brew install node"
   else
