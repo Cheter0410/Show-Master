@@ -28,32 +28,8 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --locked -p showmaster --target aarch64-apple-darwin
-      - run: cargo build --release --locked -p showmaster --target x86_64-apple-darwin
       - name: Build app and disk image
-        run: |
-          set -euo pipefail
-          V=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print([p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="showmaster"][0])')
-          APP=dmg/ShowMaster.app
-          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" dist
-          lipo -create -output "$APP/Contents/MacOS/showmaster" target/aarch64-apple-darwin/release/showmaster target/x86_64-apple-darwin/release/showmaster
-          sed "s/APP_VERSION/$V/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
-          cp README.md "$APP/Contents/Resources/"
-          ICONSET=ShowMaster.iconset
-          mkdir -p "$ICONSET"
-          for s in 16 32 128 256 512; do
-            sips -z $s $s assets/icon.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-            sips -z $((s*2)) $((s*2)) assets/icon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
-          done
-          iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/ShowMaster.icns"
-          codesign --force --deep -s - "$APP"
-          codesign --verify --deep "$APP"
-          lipo -info "$APP/Contents/MacOS/showmaster"
-          ln -s /Applications dmg/Applications
-          hdiutil create -volname "Show Master" -srcfolder dmg -ov -format UDZO "dist/ShowMaster-$V.dmg"
-          gzip -9 -c target/aarch64-apple-darwin/release/showmaster > dist/showmaster-macos-arm64.gz
-          gzip -9 -c target/x86_64-apple-darwin/release/showmaster > dist/showmaster-macos-x86_64.gz
-          ls -la dist
+        run: ./packaging/macos/build-dmg.sh
       - name: Smoke test the packaged app
         run: |
           set -euo pipefail

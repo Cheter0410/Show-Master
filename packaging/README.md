@@ -11,6 +11,16 @@
 Jeder Job testet sein Paket nach dem Bau: installieren bzw. aus dem DMG kopieren, starten, API abfragen,
 über die API beenden.
 
+## DMG auf dem eigenen Mac bauen
+
+Ohne GitHub Actions, direkt auf einem Mac (Xcode-Kommandozeilenwerkzeuge, Rust und Node 22 nötig):
+
+```bash
+./packaging/macos/build-dmg.sh
+```
+
+Das Ergebnis liegt in `dist/ShowMaster-x.y.z.dmg`.
+
 ## Veröffentlichen
 
 Der Updater liest `https://github.com/Cheter0410/show-master-releases` (öffentliches Repository nur für
