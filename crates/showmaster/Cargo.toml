@@ -15,7 +15,8 @@ tracing.workspace = true
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "ansi", "env-filter"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "signal", "macros", "time"] }
 
-[target.'cfg(windows)'.build-dependencies]
+# Used only when building for Windows (also when cross-compiling from Linux with MinGW).
+[build-dependencies]
 winresource = "0.1"
 
 [lints]
