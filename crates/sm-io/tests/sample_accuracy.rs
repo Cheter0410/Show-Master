@@ -124,9 +124,8 @@ fn engine_to_speaker_is_sample_accurate() {
     let mut step = |engine: &mut Engine, io: &mut Io, out: &mut Vec<f32>| {
         let now = io.now() + LOOKAHEAD;
         engine.advance(now);
-        for (voice, msg) in io.apply(engine.drain_actions()) {
-            panic!("voice {voice} failed: {msg}");
-        }
+        let failed = io.apply(engine.drain_actions());
+        assert!(failed.is_empty(), "voices failed: {failed:?}");
         let (failed, _log) = io.tick(engine.now());
         assert!(failed.is_empty());
         // Offline: wait for the disk streamer instead of racing it.
