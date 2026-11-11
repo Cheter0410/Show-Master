@@ -7,10 +7,8 @@ use crate::theme;
 use crate::util;
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
-use sm_core::model::{
-    ContinueMode, ControlAction, Cue, CueKind, GroupMode, Show, TcAction,
-};
 use sm_core::midi::MidiMessage;
+use sm_core::model::{ContinueMode, ControlAction, Cue, CueKind, GroupMode, Show, TcAction};
 use std::sync::Arc;
 
 /// Height of one cue row (without spacing).
@@ -126,7 +124,11 @@ pub fn cue_target(cue: &Cue, show: &Show) -> String {
                 #[allow(unreachable_patterns)]
                 _ => "message".into(),
             };
-            let port = if m.port.is_empty() { "(no port)" } else { &m.port };
+            let port = if m.port.is_empty() {
+                "(no port)"
+            } else {
+                &m.port
+            };
             format!("{port} · {what}")
         }
         CueKind::Timecode(t) => match &t.tc {
@@ -165,7 +167,13 @@ pub fn cue_target(cue: &Cue, show: &Show) -> String {
 }
 
 /// Single-line text, elided with "…" to `width`.
-pub fn elided(ui: &egui::Ui, text: String, font: FontId, color: Color32, width: f32) -> Arc<egui::Galley> {
+pub fn elided(
+    ui: &egui::Ui,
+    text: String,
+    font: FontId,
+    color: Color32,
+    width: f32,
+) -> Arc<egui::Galley> {
     let mut job = LayoutJob::simple_singleline(text, font, color);
     job.wrap = TextWrapping {
         max_width: width.max(1.0),
@@ -205,8 +213,14 @@ fn status_glyph(p: &egui::Painter, c: Pos2, st: RowState, armed: bool, s: f32) {
         }
         RowState::PreWait => {
             p.circle_stroke(c, s * 0.45, Stroke::new(2.0, theme::RUNNING));
-            p.line_segment([c, c + Vec2::new(0.0, -s * 0.3)], Stroke::new(2.0, theme::RUNNING));
-            p.line_segment([c, c + Vec2::new(s * 0.22, 0.0)], Stroke::new(2.0, theme::RUNNING));
+            p.line_segment(
+                [c, c + Vec2::new(0.0, -s * 0.3)],
+                Stroke::new(2.0, theme::RUNNING),
+            );
+            p.line_segment(
+                [c, c + Vec2::new(s * 0.22, 0.0)],
+                Stroke::new(2.0, theme::RUNNING),
+            );
         }
         RowState::Paused => {
             for dx in [-s * 0.22, s * 0.22] {
@@ -219,7 +233,13 @@ fn status_glyph(p: &egui::Painter, c: Pos2, st: RowState, armed: bool, s: f32) {
         }
         RowState::Error => {
             p.circle_filled(c, s * 0.5, theme::ERROR);
-            p.text(c, Align2::CENTER_CENTER, "!", FontId::proportional(s * 0.85), Color32::WHITE);
+            p.text(
+                c,
+                Align2::CENTER_CENTER,
+                "!",
+                FontId::proportional(s * 0.85),
+                Color32::WHITE,
+            );
         }
         RowState::Loaded => {
             p.circle_stroke(c, s * 0.42, Stroke::new(2.0, theme::LOADED));
@@ -228,7 +248,10 @@ fn status_glyph(p: &egui::Painter, c: Pos2, st: RowState, armed: bool, s: f32) {
         RowState::Idle if !armed => {
             p.circle_stroke(c, s * 0.42, Stroke::new(1.5, theme::MUTED));
             p.line_segment(
-                [c + Vec2::new(-s * 0.3, s * 0.3), c + Vec2::new(s * 0.3, -s * 0.3)],
+                [
+                    c + Vec2::new(-s * 0.3, s * 0.3),
+                    c + Vec2::new(s * 0.3, -s * 0.3),
+                ],
                 Stroke::new(1.5, theme::MUTED),
             );
         }
@@ -278,7 +301,9 @@ pub fn cue_window(
     let mut actions = Vec::new();
     let show = &input.state.show;
     let Some(list) = input.list.and_then(|l| show.list(l)) else {
-        ui.centered_and_justified(|ui| ui.label(egui::RichText::new("No cue list").color(theme::MUTED)));
+        ui.centered_and_justified(|ui| {
+            ui.label(egui::RichText::new("No cue list").color(theme::MUTED))
+        });
         return actions;
     };
     let mut flat: Vec<(&Cue, u8)> = Vec::with_capacity(list.cues.len());
@@ -288,7 +313,11 @@ pub fn cue_window(
 
     if flat.is_empty() {
         ui.centered_and_justified(|ui| {
-            ui.label(egui::RichText::new("This cue list is empty.").size(18.0).color(theme::MUTED))
+            ui.label(
+                egui::RichText::new("This cue list is empty.")
+                    .size(18.0)
+                    .color(theme::MUTED),
+            )
         });
         return actions;
     }
@@ -304,7 +333,11 @@ pub fn cue_window(
     if input.follow && changed {
         if let Some(i) = ph_index {
             let top = i as f32 * step;
-            let view = if win.view_h > 0.0 { win.view_h } else { ui.available_height() };
+            let view = if win.view_h > 0.0 {
+                win.view_h
+            } else {
+                ui.available_height()
+            };
             let margin = (view - ROW_H).clamp(0.0, step * 1.5);
             let visible = top >= win.offset && top + ROW_H <= win.offset + view - margin;
             if !visible {
@@ -324,11 +357,14 @@ pub fn cue_window(
     if let Some(y) = scroll_to {
         area = area.vertical_scroll_offset(y);
     }
+    // `show_rows` positions rows with the ui's item spacing.
+    ui.spacing_mut().item_spacing.y = ROW_GAP;
     let out = area.show_rows(ui, ROW_H, flat.len(), |ui, range| {
         ui.spacing_mut().item_spacing.y = ROW_GAP;
         for i in range {
             let (cue, depth) = flat[i];
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::hover());
+            let (rect, _) =
+                ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::hover());
             if let Some(a) = draw_row(ui, rect, i, cue, depth, playhead == Some(cue.id), input) {
                 actions.push(a);
             }
@@ -358,13 +394,25 @@ fn draw_row(
     let selected = input.selection.contains(&cue.id);
     let hc = input.high_contrast;
     let v = ui.visuals();
-    let text_color = if hc { Color32::WHITE } else { Color32::from_gray(235) };
-    let muted = if hc { Color32::from_gray(200) } else { theme::MUTED };
+    let text_color = if hc {
+        Color32::WHITE
+    } else {
+        Color32::from_gray(235)
+    };
+    let muted = if hc {
+        Color32::from_gray(200)
+    } else {
+        theme::MUTED
+    };
     let dim = |c: Color32| if cue.armed { c } else { c.gamma_multiply(0.45) };
 
     let p = ui.painter_at(rect);
     // Background.
-    let stripe = if index % 2 == 1 { v.faint_bg_color } else { v.extreme_bg_color };
+    let stripe = if index % 2 == 1 {
+        v.faint_bg_color
+    } else {
+        v.extreme_bg_color
+    };
     let bg = match state_colors(st) {
         Some((_, bg)) => bg,
         None if is_playhead => theme::NEXT_BG,
@@ -375,9 +423,19 @@ fn draw_row(
         p.rect_filled(rect, 4.0, Color32::from_white_alpha(8));
     }
     if is_playhead {
-        p.rect_stroke(rect, 4.0, Stroke::new(if hc { 3.0 } else { 2.0 }, theme::NEXT), egui::StrokeKind::Inside);
+        p.rect_stroke(
+            rect,
+            4.0,
+            Stroke::new(if hc { 3.0 } else { 2.0 }, theme::NEXT),
+            egui::StrokeKind::Inside,
+        );
     } else if selected {
-        p.rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_gray(150)), egui::StrokeKind::Inside);
+        p.rect_stroke(
+            rect,
+            4.0,
+            Stroke::new(1.0, Color32::from_gray(150)),
+            egui::StrokeKind::Inside,
+        );
     }
     // Cue colour swatch on the left edge.
     if let Some(c) = theme::cue_color(&cue.color) {
@@ -395,7 +453,13 @@ fn draw_row(
     if is_playhead && st == RowState::Idle {
         let r = Rect::from_center_size(Pos2::new(x + status_w / 2.0, cy), Vec2::new(46.0, 22.0));
         p.rect_filled(r, 4.0, theme::NEXT);
-        p.text(r.center(), Align2::CENTER_CENTER, "NEXT", FontId::proportional(13.0), Color32::BLACK);
+        p.text(
+            r.center(),
+            Align2::CENTER_CENTER,
+            "NEXT",
+            FontId::proportional(13.0),
+            Color32::BLACK,
+        );
     } else {
         status_glyph(&p, Pos2::new(x + status_w / 2.0, cy), st, cue.armed, 18.0);
     }
@@ -416,8 +480,18 @@ fn draw_row(
             Stroke::new(1.0, muted.gamma_multiply(0.6)),
         );
     }
-    let num = elided(ui, cue.number.clone(), FontId::proportional(22.0), dim(text_color), num_w);
-    p.galley(Pos2::new(x + indent, cy - num.size().y / 2.0), num, text_color);
+    let num = elided(
+        ui,
+        cue.number.clone(),
+        FontId::proportional(22.0),
+        dim(text_color),
+        num_w,
+    );
+    p.galley(
+        Pos2::new(x + indent, cy - num.size().y / 2.0),
+        num,
+        text_color,
+    );
     x += num_w + indent;
 
     // Right side: time column, type, tags.
@@ -428,8 +502,20 @@ fn draw_row(
         Some(a) => {
             let (big, caption, _) = active_timing(a);
             let color = accent.unwrap_or(text_color);
-            p.text(Pos2::new(time_r, cy - 3.0), Align2::RIGHT_BOTTOM, big, theme::clock_font(20.0), color);
-            p.text(Pos2::new(time_r, cy + 1.0), Align2::RIGHT_TOP, caption, FontId::proportional(11.5), muted);
+            p.text(
+                Pos2::new(time_r, cy - 3.0),
+                Align2::RIGHT_BOTTOM,
+                big,
+                theme::clock_font(20.0),
+                color,
+            );
+            p.text(
+                Pos2::new(time_r, cy + 1.0),
+                Align2::RIGHT_TOP,
+                caption,
+                FontId::proportional(11.5),
+                muted,
+            );
         }
         None => {
             let text = match cue.action_duration() {
@@ -439,7 +525,13 @@ fn draw_row(
                 None if matches!(cue.kind, CueKind::Audio(_)) => "loop".into(),
                 None => String::new(),
             };
-            p.text(Pos2::new(time_r, cy), Align2::RIGHT_CENTER, text, theme::clock_font(17.0), dim(muted));
+            p.text(
+                Pos2::new(time_r, cy),
+                Align2::RIGHT_CENTER,
+                text,
+                theme::clock_font(17.0),
+                dim(muted),
+            );
         }
     }
     let type_w = 70.0;
@@ -487,8 +579,18 @@ fn draw_row(
     } else {
         cue.name.clone()
     };
-    let name_color = if cue.name.is_empty() { muted } else { text_color };
-    let name = elided(ui, name_text, FontId::proportional(20.0), dim(name_color), name_w);
+    let name_color = if cue.name.is_empty() {
+        muted
+    } else {
+        text_color
+    };
+    let name = elided(
+        ui,
+        name_text,
+        FontId::proportional(20.0),
+        dim(name_color),
+        name_w,
+    );
     let sub: Option<(String, Color32)> = if let Some(e) = error {
         Some((e.to_string(), theme::ERROR))
     } else {
@@ -496,7 +598,10 @@ fn draw_row(
         if !t.is_empty() {
             Some((t, muted))
         } else if !cue.notes.is_empty() {
-            Some((cue.notes.lines().next().unwrap_or_default().to_string(), muted))
+            Some((
+                cue.notes.lines().next().unwrap_or_default().to_string(),
+                muted,
+            ))
         } else {
             None
         }
@@ -533,7 +638,10 @@ fn draw_row(
                 let t = (a.elapsed as f32 * 0.5).fract();
                 let w = bar.width() * 0.2;
                 let x0 = bar.left() + (bar.width() + w) * t - w;
-                let seg = Rect::from_x_y_ranges(x0.max(bar.left())..=(x0 + w).min(bar.right()), bar.y_range());
+                let seg = Rect::from_x_y_ranges(
+                    x0.max(bar.left())..=(x0 + w).min(bar.right()),
+                    bar.y_range(),
+                );
                 p.rect_filled(seg, 1.5, color);
             }
         }
@@ -541,12 +649,7 @@ fn draw_row(
 
     let label = format!("Cue {}", cue_label(cue));
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Row, true, &label));
-    let resp = resp.on_hover_text(if depth == 0 {
-        "Double-click: stand by this cue (set as NEXT)"
-    } else {
-        "Part of a group"
-    });
-    if resp.clicked() { eprintln!("CLICK dbl={} t={}", resp.double_clicked(), ui.input(|i| i.time)); }
+    // No tooltip: a mouse resting on the list during a show must not cover rows.
     if resp.double_clicked() && depth == 0 {
         Some(CueAction::SetPlayhead(cue.id))
     } else if resp.clicked() {

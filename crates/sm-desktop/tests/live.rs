@@ -44,6 +44,23 @@ fn playhead(s: &Value) -> Value {
     s["playheads"][list.to_string()].clone()
 }
 
+/// Two clicks in one frame (kittest queues each event in its own, slow frame).
+fn double_click(h: &mut Harness<'static, App>, pos: egui::Pos2) {
+    let events = &mut h.input_mut().events;
+    events.push(egui::Event::PointerMoved(pos));
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::default(),
+            });
+        }
+    }
+    h.step();
+}
+
 #[test]
 fn go_button_fires_the_next_cue_and_moves_the_playhead() {
     let env = Env::demo();
@@ -92,16 +109,19 @@ fn double_click_on_a_row_sets_the_playhead_single_click_does_not() {
     let row = h.get_by_label("Cue 4 Long");
     row.click();
     settle(&mut h);
-    assert_eq!(playhead(&env.state()), first, "a single click must not move the playhead");
+    assert_eq!(
+        playhead(&env.state()),
+        first,
+        "a single click must not move the playhead"
+    );
     assert!(active(&env).is_empty(), "a click must never fire a cue");
-    eprintln!("SEL {:?} {:?}", h.state().view.selection, h.get_by_label("Cue 4 Long").rect());
-    h.get_by_label("Cue 4 Long").click();
-    h.step();
-    h.get_by_label("Cue 4 Long").click();
-    h.step();
-    eprintln!("SEL {:?} t={:?}", h.state().view.selection, h.input().time);
+    let pos = h.get_by_label("Cue 4 Long").rect().center();
+    double_click(&mut h, pos);
     env.wait(&mut h, "playhead on cue 4", |s| playhead(s) == long);
-    assert!(active(&env).is_empty(), "a double-click must not fire a cue");
+    assert!(
+        active(&env).is_empty(),
+        "a double-click must not fire a cue"
+    );
 }
 
 #[test]
@@ -122,7 +142,9 @@ fn prev_next_and_reset_with_confirmation() {
     // Nothing happens before the confirmation.
     assert!(!active(&env).is_empty());
     h.get_by_label("Reset show").click();
-    env.wait(&mut h, "reset", |s| playhead(s) == first && active(&env).is_empty());
+    env.wait(&mut h, "reset", |s| {
+        playhead(s) == first && active(&env).is_empty()
+    });
 }
 
 #[test]
@@ -151,7 +173,9 @@ fn master_fader_sets_the_master_level() {
     });
     // Bottom of the fader = silence.
     h.get_by_label("Master level").set_value_accesskit(-60.0);
-    env.wait(&mut h, "master silent", |s| s["master_db"].as_f64().unwrap() < -100.0);
+    env.wait(&mut h, "master silent", |s| {
+        s["master_db"].as_f64().unwrap() < -100.0
+    });
 }
 
 #[test]
@@ -177,7 +201,9 @@ fn small_window_and_many_cues_render() {
     assert!(h.query_by_label("Cue 1 Cue number 1").is_some());
     assert!(h.query_by_label("Cue 500 Cue number 500").is_none());
     // Following the playhead scrolls it into view.
-    let target = env.state()["show"]["cue_lists"][0]["cues"][499]["id"].as_u64().unwrap();
+    let target = env.state()["show"]["cue_lists"][0]["cues"][499]["id"]
+        .as_u64()
+        .unwrap();
     let list = env.state()["show"]["cue_lists"][0]["id"].as_u64().unwrap();
     env.rt.block_on(async {
         let cmd = sm_server::runtime::parse_command(
@@ -191,6 +217,5 @@ fn small_window_and_many_cues_render() {
     });
     env.wait(&mut h, "playhead set", |s| playhead(s) == target);
     settle(&mut h);
-    for n in h.query_all_by_role(egui::Role::Row) { eprintln!("ROW {n:?}"); }
     assert!(h.query_by_label("Cue 500 Cue number 500").is_some());
 }

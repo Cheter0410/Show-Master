@@ -15,6 +15,8 @@ pub struct ClockCell<'a> {
     pub color: Color32,
     /// Accent (left bar + caption colour) when the clock is "active".
     pub accent: Option<Color32>,
+    /// Digit size; `None` = as large as fits.
+    pub size: Option<f32>,
 }
 
 /// Font size that fits `chars` monospace characters into `width` and `height`.
@@ -33,10 +35,18 @@ pub fn clock_cell(ui: &mut egui::Ui, rect: Rect, cell: &ClockCell<'_>) -> Rect {
     painter.rect(
         rect,
         6.0,
-        if hc { Color32::BLACK } else { v.extreme_bg_color },
+        if hc {
+            Color32::BLACK
+        } else {
+            v.extreme_bg_color
+        },
         Stroke::new(
             if hc { 1.5 } else { 1.0 },
-            if hc { Color32::from_gray(200) } else { Color32::from_gray(48) },
+            if hc {
+                Color32::from_gray(200)
+            } else {
+                Color32::from_gray(48)
+            },
         ),
         egui::StrokeKind::Inside,
     );
@@ -70,12 +80,14 @@ pub fn clock_cell(ui: &mut egui::Ui, rect: Rect, cell: &ClockCell<'_>) -> Rect {
         egui::pos2(rect.left() + pad, rect.top() + 6.0 + caption_h),
         egui::pos2(rect.right() - pad, rect.bottom() - 4.0),
     );
-    let size = fit_digits(
-        cell.value.chars().count(),
-        digits_rect.width(),
-        digits_rect.height() * 0.95,
-        64.0,
-    );
+    let size = cell.size.unwrap_or_else(|| {
+        fit_digits(
+            cell.value.chars().count(),
+            digits_rect.width(),
+            digits_rect.height() * 0.95,
+            64.0,
+        )
+    });
     painter.text(
         digits_rect.left_center(),
         Align2::LEFT_CENTER,
@@ -90,16 +102,20 @@ pub fn clock_cell(ui: &mut egui::Ui, rect: Rect, cell: &ClockCell<'_>) -> Rect {
 }
 
 /// A small badge (e.g. `LTC`) painted right-to-left from `right`; returns the new right edge.
-pub fn badge(ui: &egui::Ui, right: f32, center_y: f32, text: &str, on: bool, color: Color32) -> f32 {
+pub fn badge(
+    ui: &egui::Ui,
+    right: f32,
+    center_y: f32,
+    text: &str,
+    on: bool,
+    color: Color32,
+) -> f32 {
     let painter = ui.painter();
     let font = FontId::proportional(10.5);
     let fg = if on { Color32::BLACK } else { theme::MUTED };
     let galley = painter.layout_no_wrap(text.to_string(), font, fg);
     let size = galley.size() + Vec2::new(8.0, 2.0);
-    let r = Rect::from_min_size(
-        egui::pos2(right - size.x, center_y - size.y / 2.0),
-        size,
-    );
+    let r = Rect::from_min_size(egui::pos2(right - size.x, center_y - size.y / 2.0), size);
     if on {
         painter.rect_filled(r, 3.0, color);
     } else {
@@ -128,7 +144,7 @@ pub fn tc_text(tc: &TcInfo) -> &str {
 pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> bool {
     let gap = 8.0;
     // Timecode needs the most room, the wall clock the least.
-    let weights = [0.85, 1.0, 1.25, 0.95];
+    let weights = [1.0, 1.0, 1.4, 0.85];
     let total: f32 = weights.iter().sum();
     let avail = rect.width() - gap * 3.0;
     let mut x = rect.left();
@@ -138,6 +154,10 @@ pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> bool {
         cells[i] = Rect::from_min_size(egui::pos2(x, rect.top()), Vec2::new(width, rect.height()));
         x += width + gap;
     }
+    // One digit size for all four clocks (calmer than four different sizes).
+    let digits_h = (rect.height() - 26.0) * 0.95;
+    let fit = |i: usize, chars: usize| fit_digits(chars, cells[i].width() - 20.0, digits_h, 64.0);
+    let size = Some(fit(0, 8).min(fit(1, 8)).min(fit(2, 11)).min(fit(3, 6)));
     let text = ui.visuals().strong_text_color();
     let dim = theme::MUTED;
 
@@ -151,6 +171,7 @@ pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> bool {
             value: &wall,
             color: text,
             accent: None,
+            size,
         },
     );
 
@@ -164,6 +185,7 @@ pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> bool {
             value: show.as_deref().unwrap_or("--:--"),
             color: if show.is_some() { text } else { dim },
             accent: None,
+            size,
         },
     );
     let mut reset = false;
@@ -178,7 +200,11 @@ pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> bool {
         p.rect(
             btn,
             3.0,
-            if hovered { Color32::from_gray(60) } else { Color32::TRANSPARENT },
+            if hovered {
+                Color32::from_gray(60)
+            } else {
+                Color32::TRANSPARENT
+            },
             Stroke::new(1.0, Color32::from_gray(80)),
             egui::StrokeKind::Inside,
         );
@@ -189,7 +215,9 @@ pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> bool {
             FontId::proportional(11.0),
             if hovered { text } else { theme::MUTED },
         );
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Reset show clock"));
+        resp.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::Role::Button, true, "Reset show clock")
+        });
         reset = resp.on_hover_text("Reset the show clock to zero").clicked();
     }
 
@@ -203,6 +231,7 @@ pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> bool {
             value: tc_text(tc),
             color: if tc.running { text } else { dim },
             accent: tc.running.then_some(theme::RUNNING),
+            size,
         },
     );
     let cy = free.center().y;
@@ -233,6 +262,7 @@ pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> bool {
             value: auto.as_deref().unwrap_or("--:--"),
             color: if auto.is_some() { theme::NEXT } else { dim },
             accent: auto.is_some().then_some(theme::NEXT),
+            size,
         },
     );
     reset

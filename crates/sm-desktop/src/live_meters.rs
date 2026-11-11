@@ -142,8 +142,14 @@ pub fn meter_bridge(
     );
     let y = |db: f32| bars.bottom() - frac(db) * bars.height();
     // Scale.
+    let mut last_label_y = f32::NEG_INFINITY;
     for db in TICKS {
         let yy = y(db);
+        // Skip a label that would collide with the one above (small heights).
+        if yy - last_label_y < 11.0 {
+            continue;
+        }
+        last_label_y = yy;
         painter.text(
             Pos2::new(rect.left() + scale_w - 4.0, yy),
             Align2::RIGHT_CENTER,
@@ -207,7 +213,10 @@ pub fn meter_bridge(
             } else {
                 Color32::from_rgb(60, 20, 20)
             },
-            Stroke::new(1.0, Color32::from_gray(if resp.hovered() { 160 } else { 60 })),
+            Stroke::new(
+                1.0,
+                Color32::from_gray(if resp.hovered() { 160 } else { 60 }),
+            ),
             egui::StrokeKind::Inside,
         );
         resp.widget_info(|| {
@@ -234,12 +243,7 @@ pub fn meter_bridge(
         );
         if label_h > 20.0 {
             if let Some(name) = name_of(i) {
-                let g = painter.layout(
-                    name,
-                    FontId::proportional(10.0),
-                    theme::MUTED,
-                    col_w + gap,
-                );
+                let g = painter.layout(name, FontId::proportional(10.0), theme::MUTED, col_w + gap);
                 let g_w = g.size().x;
                 painter.galley(
                     Pos2::new(col.center().x - g_w / 2.0, label_top + 13.0),
@@ -377,7 +381,8 @@ pub fn master_fader(ui: &mut egui::Ui, rect: Rect, fader: &mut Fader, engine_db:
             },
         )
         .inner;
-    ui.ctx().accesskit_node_builder(resp.id, |b| b.set_label("Master level"));
+    ui.ctx()
+        .accesskit_node_builder(resp.id, |b| b.set_label("Master level"));
     let resp = resp.on_hover_text("Master level. Double-click: 0 dB");
     if resp.double_clicked() {
         fader.set(0.0);
