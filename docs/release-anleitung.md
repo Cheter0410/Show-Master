@@ -16,7 +16,7 @@ gh auth login
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential pkg-config libasound2-dev curl git gh gcc-mingw-w64-x86-64 wine64
+sudo apt install -y build-essential pkg-config libasound2-dev curl git gh gcc-mingw-w64-x86-64 wine
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 rustup target add x86_64-pc-windows-gnu
@@ -30,7 +30,7 @@ Inno Setup (baut den Windows-Installer) unter Wine installieren:
 
 ```bash
 curl -L -o /tmp/innosetup.exe https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe
-WINEDEBUG=-all wine /tmp/innosetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER '/DIR=C:\InnoSetup'
+WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" wine /tmp/innosetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER '/DIR=C:\InnoSetup'
 ls ~/.wine/drive_c/InnoSetup/ISCC.exe
 ```
 
