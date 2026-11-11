@@ -4,7 +4,7 @@ Cue-basierte Playback- und Show-Control-Software für Theater, Events, Installat
 im Stil von QLab, geschrieben in Rust, für **macOS, Windows und Linux**. Läuft vollständig offline.
 
 > **Stand:** Alle hardwareunabhängigen Teile sind umgesetzt und automatisiert getestet (CI grün auf
-> Linux x86_64/aarch64 und Windows; macOS-Jobs sind noch nicht gelaufen). Noch nicht
+> Linux x86_64/aarch64, macOS Apple Silicon/Intel und Windows). Noch nicht
 > an echter Hardware validiert sind: Audio-Interfaces (Latenz, Multichannel), System-MIDI-Ports,
 > rtp-midi gegen macOS/iOS und die signierten Installer. Details: [`docs/hardware-checkliste.md`](docs/hardware-checkliste.md).
 
@@ -29,6 +29,17 @@ showmaster [OPTIONEN] [SHOW.smshow]
   --make-demo <DIR>   Demo-Show mit generierten Audiodateien anlegen und öffnen
   --log-dir <DIR>     Verzeichnis für Logdateien
 ```
+
+## Installation
+
+- **Portabel (alle Plattformen):** Archiv der eigenen Plattform aus den CI-Artefakten laden, entpacken,
+  `showmaster` starten. Eine Datei, Oberfläche eingebettet, keine Installation.
+- **Debian/Ubuntu:** `sudo apt install ./showmaster_<version>_<arch>.deb` (CI-Artefakt `showmaster-deb`).
+- **Aus dem Quelltext:** siehe Schnellstart.
+
+Die Pakete sind nicht signiert: macOS und Windows warnen beim ersten Start. Es gibt bewusst keinen
+automatischen Updater – ein Update ist das Ersetzen der Datei bzw. des Pakets; Showfiles älterer
+Versionen werden beim Öffnen migriert.
 
 ## Bedienkonzept
 

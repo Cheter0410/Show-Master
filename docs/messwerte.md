@@ -26,6 +26,7 @@ Anmerkungen:
   Änderung um die Größe der Show und wird beim Laden einer anderen Show geleert.
 - Mehrstündige Läufe stehen aus (längster Lauf: 30 min). Die CI kann den Dauertest über
   „Run workflow“ mit frei wählbarer Dauer starten.
-- CI: Linux x86_64, Linux aarch64 und Windows sind grün (Format, Clippy, alle Tests, Release-Build,
-  portables Paket; unter Linux zusätzlich Offline-Nachweis und Start-Benchmark). Die macOS-Jobs haben
-  bisher keinen Runner bekommen und sind daher **nicht gelaufen** – macOS ist ungetestet.
+- CI: grün auf Linux x86_64, Linux aarch64, macOS Apple Silicon, macOS Intel und Windows (Format,
+  Clippy, alle Tests, Release-Build, portables Paket; unter Linux zusätzlich der Offline-Nachweis), dazu
+  das `.deb`-Paket. Der erste macOS-Lauf deckte einen zu engen Timing-Test im MIDI-Sender auf
+  (Nachricht 75 ms zu spät auf einem virtuellen Runner); Sender und Test wurden daraufhin überarbeitet.

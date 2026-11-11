@@ -3,7 +3,7 @@
 | Ziel | Stand | Wie |
 |---|---|---|
 | Portable (alle Plattformen) | fertig, in der CI gebaut | `./packaging/portable.sh` → `dist/showmaster-<version>-<os>-<arch>.tar.gz/.zip` |
-| Linux `.deb` | konfiguriert, CI-Job `deb` | `cargo install cargo-deb && cargo deb -p showmaster` |
+| Linux `.deb` | fertig, in der CI gebaut (Job `deb`) | `cargo install cargo-deb && cargo deb -p showmaster` |
 | Linux AppImage | offen | `linuxdeploy` mit `packaging/linux/showmaster.desktop` |
 | macOS `.dmg` | offen | App-Bundle + `codesign` + `notarytool`; braucht ein Apple-Developer-Zertifikat |
 | Windows `.msi`/NSIS | offen | z. B. `cargo wix`; braucht ein Code-Signing-Zertifikat |
