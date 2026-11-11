@@ -1,0 +1,18 @@
+[package]
+name = "showmaster"
+description = "Show Master - playback and show control"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sm-core.workspace = true
+sm-server.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "ansi", "env-filter"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "signal", "macros"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,31 @@
+[package]
+name = "sm-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Show Master audio engine: sample-accurate RT mixer, streaming voices, device backends"
+
+[features]
+default = ["cpal-backend"]
+# Real audio devices through cpal (CoreAudio / WASAPI / ALSA).
+cpal-backend = ["dep:cpal"]
+# Steinberg ASIO host on Windows (needs the ASIO SDK at build time).
+asio = ["cpal-backend", "cpal/asio"]
+# JACK host on Linux / macOS.
+jack = ["cpal-backend", "cpal/jack"]
+
+[dependencies]
+rtrb = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+symphonia = { version = "0.5", default-features = false, features = ["wav", "flac", "mp3", "ogg", "vorbis", "aiff", "pcm", "isomp4", "aac"] }
+rubato = "0.16"
+cpal = { version = "0.15", optional = true }
+
+[dev-dependencies]
+hound = "3.5"
+
+[lints]
+workspace = true

@@ -1,0 +1,31 @@
+[package]
+name = "sm-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+sm-core.workspace = true
+sm-io.workspace = true
+sm-audio.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "signal"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "ws"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
+mime_guess = "2"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+getrandom = "0.3"
+if-addrs = "0.13"
+
+[dev-dependencies]
+tempfile = "3"
+tokio-tungstenite = "0.26"
+hound = "3"
+
+[lints]
+workspace = true

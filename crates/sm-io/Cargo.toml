@@ -1,0 +1,29 @@
+[package]
+name = "sm-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["midir-backend", "cpal-backend"]
+midir-backend = ["dep:midir"]
+cpal-backend = ["sm-audio/cpal-backend"]
+asio = ["sm-audio/asio"]
+jack = ["sm-audio/jack"]
+
+[dependencies]
+serde.workspace = true
+tracing.workspace = true
+rtrb.workspace = true
+sm-core.workspace = true
+sm-timecode.workspace = true
+sm-audio = { workspace = true, default-features = false }
+sm-rtpmidi.workspace = true
+midir = { version = "0.10", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

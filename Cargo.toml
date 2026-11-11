@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.85"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+rtrb = "0.3"
+sm-timecode = { path = "crates/sm-timecode" }
+sm-rtpmidi = { path = "crates/sm-rtpmidi" }
+sm-audio = { path = "crates/sm-audio", default-features = false }
+sm-core = { path = "crates/sm-core" }
+sm-io = { path = "crates/sm-io" }
+sm-server = { path = "crates/sm-server" }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+panic = "unwind"
+
+[profile.dev.package."*"]
+opt-level = 2
