@@ -661,3 +661,9 @@ button.lrow-gutter:hover { box-shadow: inset 6px 0 0 var(--green-deep); }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; }
 }
+
+/* update button / dialog */
+.update-btn { background: #14532d; border-color: #22c55e; color: #dcfce7; font-weight: 600; }
+.update-btn:hover { background: #166534; }
+.update-notes { white-space: pre-wrap; max-height: 40vh; overflow: auto; margin: 8px 0; padding: 10px; border: 1px solid var(--border, #333); border-radius: 6px; font: inherit; }
+.error-text { color: #f87171; }

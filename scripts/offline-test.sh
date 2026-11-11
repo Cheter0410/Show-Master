@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
-# Proves that Show Master works with no network at all and has no way to
-# reach the internet:
-#   1. static: no HTTP-client/TLS crates in the dependency tree,
+# Proves that Show Master works with no network at all, and that the update
+# check is the only thing that can ever reach the internet:
+#   1. static: the HTTP client is used by the updater module and nowhere else,
 #   2. static: the built web UI references no external origin,
-#   3. dynamic (Linux): the app is started inside an empty network namespace
+#   3. dynamic (Linux): the app is started with --no-update-check inside an empty network namespace
 #      (loopback only), driven through its API, and strace shows that it never
 #      tried to connect to a non-loopback address.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "== 1. dependency tree =="
-banned='^(reqwest|ureq|isahc|curl|curl-sys|hyper-tls|hyper-rustls|rustls|native-tls|openssl|openssl-sys|surf|attohttpc|sentry|opentelemetry.*)$'
+# ureq (with rustls) is allowed: it is used by the updater and nothing else
+# (crates/sm-server/src/update.rs). Telemetry and other HTTP stacks stay banned.
+banned='^(reqwest|isahc|curl|curl-sys|hyper-tls|hyper-rustls|native-tls|openssl|openssl-sys|surf|attohttpc|sentry|opentelemetry.*)$'
 if cargo tree -p showmaster --prefix none --format '{p}' --edges normal,build 2>/dev/null | awk '{print $1}' | sort -u | grep -E "$banned"; then
   echo "FAIL: network client crates found in the dependency tree" >&2; exit 1
 fi
-echo "ok: no HTTP client / TLS crates"
+# The updater must be the only user of the HTTP client.
+if grep -rl "ureq::" crates --include='*.rs' | grep -v "crates/sm-server/src/update.rs"; then
+  echo "FAIL: HTTP client used outside the updater" >&2; exit 1
+fi
+echo "ok: the updater is the only code that can reach the internet"
 
 echo "== 2. web UI assets =="
 if [ -d ui/dist ]; then
@@ -49,7 +55,7 @@ fcntl.ioctl(s, 0x8914, struct.pack("16sH", b"lo", flags | 1))
 PY
 TRACE=""
 if command -v strace >/dev/null 2>&1; then TRACE="strace -f -e trace=connect,sendto -o $WORK/trace.log"; fi
-$TRACE "$BIN" --port 7499 --log-dir "$WORK/logs" "$WORK/offline.smshow" > "$WORK/app.log" 2>&1 &
+$TRACE "$BIN" --no-update-check --port 7499 --log-dir "$WORK/logs" "$WORK/offline.smshow" > "$WORK/app.log" 2>&1 &
 PID=$!
 for i in $(seq 1 50); do curl -fs --noproxy '*' http://127.0.0.1:7499/api/session >/dev/null 2>&1 && break; sleep 0.2; done
 api() { curl -fsS --noproxy '*' "$@"; echo; }

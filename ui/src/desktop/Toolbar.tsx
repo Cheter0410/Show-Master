@@ -9,6 +9,7 @@ import { TYPE_LABELS } from "../cues";
 import { currentListId, getApp, setApp, toast, useApp } from "../store";
 import { FileBrowser, type FileMode } from "./FileBrowser";
 import { ModeSwitch } from "./ModeSwitch";
+import { QuitButton, UpdateButton } from "./AppMenu";
 import { transport } from "../commands";
 import { IconStop } from "../components/icons";
 
@@ -90,10 +91,12 @@ export function Toolbar(p: { onSetup: () => void; fileDialog: FileMode | null; s
           </button>
         </div>
         <span className="spacer" />
+        <UpdateButton />
         <ModeSwitch />
         <button className="btn" onClick={p.onSetup} data-testid="tb-setup">
           <IconGear /> Setup
         </button>
+        <QuitButton />
       </div>
       <div className="tb-row tb-row2">
         <span className="tb-label"><IconPlus size={14} /> Add cue</span>

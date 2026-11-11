@@ -73,6 +73,15 @@ pub enum SysCommand {
         text: String,
     },
     ResetClip,
+    /// Ask the update server for a newer version now.
+    CheckUpdate,
+    /// Download and install the available update, then restart.
+    InstallUpdate,
+    /// Shut the application down.
+    Quit {
+        #[serde(default)]
+        force: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -173,6 +182,8 @@ pub struct Handle {
     pub published: Arc<RwLock<Published>>,
     pub events: broadcast::Sender<Outbound>,
     pub clients: Arc<Mutex<Vec<ClientInfo>>>,
+    /// Signalled when the application should exit (Quit command, update installed).
+    pub quit: Arc<tokio::sync::Notify>,
 }
 
 impl Handle {
@@ -237,6 +248,8 @@ pub struct Config {
     pub midi_backend: Option<Box<dyn sm_io::midi::MidiBackend>>,
     /// Use this show instead of loading `show_path` (tests, recovery).
     pub show: Option<Show>,
+    /// Look for a newer version at start-up (the only internet access there is).
+    pub update_check: bool,
 }
 
 struct Probe;
@@ -340,6 +353,7 @@ struct Runtime {
     mode: Mode,
     preflight: Vec<Issue>,
     recovery: Option<Show>,
+    updater: Option<crate::update::Updater>,
     log: Vec<LogEntry>,
     new_log: Vec<LogEntry>,
     handle: Handle,
@@ -361,6 +375,7 @@ pub fn spawn(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         published: Arc::new(RwLock::new(Published::default())),
         events,
         clients: Arc::new(Mutex::new(Vec::new())),
+        quit: Arc::new(tokio::sync::Notify::new()),
     };
     let h = handle.clone();
     let (ready_tx, ready_rx) = mpsc::channel::<()>();
@@ -425,6 +440,9 @@ impl Runtime {
             mode: Mode::Edit,
             preflight: Vec::new(),
             recovery,
+            updater: config
+                .update_check
+                .then(|| crate::update::Updater::new(VERSION)),
             log,
             new_log: Vec::new(),
             handle,
@@ -511,6 +529,16 @@ impl Runtime {
             if last_slow.elapsed() >= Duration::from_secs(1) {
                 last_slow = Instant::now();
                 self.state_dirty = true; // peers, clients, device errors
+                if self
+                    .updater
+                    .as_ref()
+                    .is_some_and(|u| u.get() == crate::update::State::Quit)
+                {
+                    self.note("info", "Update installed - restarting".into());
+                    self.publish(false);
+                    self.handle.quit.notify_one();
+                    self.updater = None;
+                }
             }
             if last_tick.elapsed() >= TICK_INTERVAL {
                 last_tick = Instant::now();
@@ -886,6 +914,44 @@ impl Runtime {
                 self.doc.touch(|s| s.notes = text);
                 Ok(Value::Null)
             }
+            SysCommand::CheckUpdate => {
+                match &self.updater {
+                    Some(u) if !u.busy() => u.recheck(),
+                    Some(_) => return Err("an update is being installed".into()),
+                    // Switched off at start-up: an explicit request turns it on.
+                    None => self.updater = Some(crate::update::Updater::new(VERSION)),
+                }
+                Ok(Value::Null)
+            }
+            SysCommand::InstallUpdate => {
+                // Never replace the program under a running show.
+                if self.mode == Mode::Live {
+                    return Err("live_mode".into());
+                }
+                if self.any_running() {
+                    return Err("cues_running".into());
+                }
+                if self.doc.dirty {
+                    return Err("unsaved_changes".into());
+                }
+                self.updater
+                    .as_ref()
+                    .ok_or("update check is switched off")?
+                    .start()?;
+                self.note("info", "Installing update".into());
+                Ok(Value::Null)
+            }
+            SysCommand::Quit { force } => {
+                if !force && self.any_running() {
+                    return Err("cues_running".into());
+                }
+                if !force && self.doc.dirty {
+                    return Err("unsaved_changes".into());
+                }
+                self.note("info", "Quit requested".into());
+                self.handle.quit.notify_one();
+                Ok(Value::Null)
+            }
             SysCommand::ResetClip => {
                 self.io.reset_clip();
                 Ok(Value::Null)
@@ -962,6 +1028,7 @@ impl Runtime {
             "remote": { "urls": self.urls.1, "port": port, "clients": clients },
             "preflight": self.preflight,
             "layouts": LAYOUTS,
+            "update": self.updater.as_ref().map(|u| u.json()).unwrap_or_else(|| crate::update::disabled_json(VERSION)),
         })
     }
 

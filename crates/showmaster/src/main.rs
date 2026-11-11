@@ -1,9 +1,14 @@
+// The installed Windows build has no console window; it is used through the
+// browser UI. Debug builds keep the console for development.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 //! Show Master: playback and show control.
 //!
 //! This binary runs the complete application: cue engine, audio/MIDI/
 //! timecode I/O and the embedded web server that serves the user interface
 //! (desktop UI on this machine, remote UI for tablets on the local network).
-//! It never contacts the internet.
+//! The only internet access is the update check (see `sm_server::update`),
+//! which can be switched off with `--no-update-check`.
 
 mod demo;
 
@@ -26,6 +31,8 @@ OPTIONS:
     --local-only      Listen on 127.0.0.1 only, whatever the show says
     --log-dir <DIR>   Directory for log files
     --open            Open the user interface in the default browser
+    --no-open         Do not open the browser (the macOS app opens it by default)
+    --no-update-check Do not look for a newer version at start-up (no internet access at all)
     --make-demo <DIR> Write a demo show (showfile + generated audio) into DIR and open it
     -h, --help        Show this help
     -V, --version     Show the version
@@ -37,6 +44,7 @@ struct Args {
     local_only: bool,
     log_dir: Option<PathBuf>,
     open: bool,
+    update_check: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -45,7 +53,9 @@ fn parse_args() -> Result<Args, String> {
         port: None,
         local_only: false,
         log_dir: None,
-        open: false,
+        // A double-clicked macOS app has no terminal: show the UI right away.
+        open: in_app_bundle(),
+        update_check: std::env::var_os("SHOWMASTER_NO_UPDATE_CHECK").is_none(),
     };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -73,6 +83,10 @@ fn parse_args() -> Result<Args, String> {
                 args.show = Some(demo::make(&dir)?);
             }
             "--local-only" => args.local_only = true,
+            "--no-update-check" => args.update_check = false,
+            "--no-open" => args.open = false,
+            // Passed by the updater when it restarts the program.
+            "--after-update" => {}
             "--open" => args.open = true,
             "--log-dir" => {
                 args.log_dir = Some(
@@ -179,6 +193,32 @@ fn init_logging(dir: PathBuf) -> PathBuf {
     path
 }
 
+/// True when started from a macOS application bundle (double-clicked app).
+fn in_app_bundle() -> bool {
+    cfg!(target_os = "macos")
+        && std::env::current_exe()
+            .map(|e| e.to_string_lossy().contains(".app/Contents/MacOS/"))
+            .unwrap_or(false)
+}
+
+/// Is a Show Master instance already answering on this port?
+fn already_running(port: u16) -> bool {
+    use std::io::Read;
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let timeout = std::time::Duration::from_millis(400);
+    let Ok(mut s) = std::net::TcpStream::connect_timeout(&addr, timeout) else {
+        return false;
+    };
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_millis(1000)));
+    let request = b"GET /api/session HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+    if s.write_all(request).is_err() {
+        return false;
+    }
+    let mut buf = String::new();
+    let _ = s.read_to_string(&mut buf);
+    buf.contains("\"view_needs_pin\"")
+}
+
 fn open_browser(url: &str) {
     let result = if cfg!(target_os = "windows") {
         std::process::Command::new("cmd")
@@ -219,6 +259,17 @@ fn main() -> std::process::ExitCode {
         log_path.display()
     );
 
+    sm_server::update::cleanup_after_update();
+    // Starting the app a second time just brings up the UI of the running one.
+    let probe_port = args.port.unwrap_or(7400);
+    if already_running(probe_port) {
+        tracing::info!("Show Master is already running on port {probe_port}");
+        if args.open {
+            open_browser(&format!("http://127.0.0.1:{probe_port}"));
+        }
+        return std::process::ExitCode::SUCCESS;
+    }
+
     let tokio_rt = match tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -235,6 +286,7 @@ fn main() -> std::process::ExitCode {
     let (handle, engine_thread) = runtime::spawn(Config {
         show_path: args.show.clone(),
         port: args.port,
+        update_check: args.update_check,
         ..Config::default()
     });
     let state = handle.state();
@@ -269,6 +321,7 @@ fn main() -> std::process::ExitCode {
 
     let open = args.open;
     let server_handle = handle.clone();
+    let quit = handle.quit.clone();
     let code = tokio_rt.block_on(async move {
         let listener = match bind(addr, port).await {
             Ok(l) => l,
@@ -295,6 +348,12 @@ fn main() -> std::process::ExitCode {
                     tracing::error!("server stopped: {e}");
                 }
                 std::process::ExitCode::FAILURE
+            }
+            _ = quit.notified() => {
+                tracing::info!("quitting");
+                // Let the UI receive the final state before the server goes away.
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                std::process::ExitCode::SUCCESS
             }
             _ = tokio::signal::ctrl_c() => {
                 tracing::info!("shutting down");

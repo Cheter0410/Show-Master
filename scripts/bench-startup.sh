@@ -9,7 +9,7 @@ PORT=7498
 WORK="$(mktemp -d)"; trap 'kill $PID 2>/dev/null || true; rm -rf "$WORK"' EXIT
 now_ms() { python3 -c 'import time; print(int(time.time()*1000))'; }
 T0=$(now_ms)
-"$BIN" --port $PORT --local-only --log-dir "$WORK" > "$WORK/out.log" 2>&1 &
+"$BIN" --no-update-check --port $PORT --local-only --log-dir "$WORK" > "$WORK/out.log" 2>&1 &
 PID=$!
 for i in $(seq 1 400); do
   curl -fs --noproxy '*' "http://127.0.0.1:$PORT/api/session" >/dev/null 2>&1 && break

@@ -169,6 +169,7 @@ export async function startMock(opts = {}) {
     remote: { urls: [`http://192.168.1.10:${port}`], port, clients: [] },
     preflight: [],
     layouts: Object.keys(LAYOUTS),
+    update: { state: "current", current: "0.1.0", version: null, notes: null, automatic: null, download_page: "", done: 0, total: 0, error: null },
   };
   let sent = clone(state); // what the clients have
   const undoStack = [];

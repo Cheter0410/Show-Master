@@ -1,4 +1,5 @@
 // Desktop Live mode: the show dashboard. No structural editing is reachable from here.
+import { QuitButton } from "./AppMenu";
 import { useState } from "react";
 import { transport } from "../commands";
 import { Clocks } from "../components/Clocks";
@@ -27,6 +28,7 @@ export function LiveDashboard({ canEdit }: { canEdit: boolean }) {
         </label>
         <GoToBox />
         {canEdit ? <ModeSwitch /> : null}
+        {canEdit ? <QuitButton /> : null}
       </header>
       <div className="live-grid">
         <div className="live-cues">

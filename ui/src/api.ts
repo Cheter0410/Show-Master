@@ -313,6 +313,20 @@ export interface State {
   remote: RemoteState;
   preflight: PreflightIssue[];
   layouts: string[];
+  update: UpdateState;
+}
+
+export interface UpdateState {
+  state: "disabled" | "checking" | "current" | "offline" | "available" | "downloading" | "installing" | "restarting" | "failed";
+  current: string;
+  version: string | null;
+  notes: string | null;
+  /** false = this copy cannot install by itself (use the download page) */
+  automatic: boolean | null;
+  download_page: string;
+  done: number;
+  total: number;
+  error: string | null;
 }
 
 // ---------- tick ----------
@@ -428,7 +442,8 @@ export type Command =
   | { cmd: "undo" | "redo" }
   // application
   | { cmd: "set_mode"; mode: Mode; force?: boolean }
-  | { cmd: "run_preflight" | "collect_media" | "clear_log" }
+  | { cmd: "run_preflight" | "collect_media" | "clear_log" | "check_update" | "install_update" }
+  | { cmd: "quit"; force?: boolean }
   | { cmd: "new_show"; force?: boolean }
   | { cmd: "open_show"; path: string; force?: boolean }
   | { cmd: "save_show"; path?: string }
