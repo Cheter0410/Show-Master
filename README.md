@@ -3,7 +3,8 @@
 Cue-basierte Playback- und Show-Control-Software für Theater, Events, Installationen und Konzerte –
 im Stil von QLab, geschrieben in Rust, für **macOS, Windows und Linux**. Läuft vollständig offline.
 
-> **Stand:** Alle hardwareunabhängigen Teile sind umgesetzt und automatisiert getestet. Noch nicht
+> **Stand:** Alle hardwareunabhängigen Teile sind umgesetzt und automatisiert getestet (CI grün auf
+> Linux x86_64/aarch64 und Windows; macOS-Jobs sind noch nicht gelaufen). Noch nicht
 > an echter Hardware validiert sind: Audio-Interfaces (Latenz, Multichannel), System-MIDI-Ports,
 > rtp-midi gegen macOS/iOS und die signierten Installer. Details: [`docs/hardware-checkliste.md`](docs/hardware-checkliste.md).
 

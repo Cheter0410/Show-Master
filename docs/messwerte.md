@@ -26,5 +26,6 @@ Anmerkungen:
   Änderung um die Größe der Show und wird beim Laden einer anderen Show geleert.
 - Mehrstündige Läufe stehen aus (längster Lauf: 30 min). Die CI kann den Dauertest über
   „Run workflow“ mit frei wählbarer Dauer starten.
-- Die CI-Matrix (macOS, Windows, Linux) ist konfiguriert, aber noch nie gelaufen; gebaut und getestet
-  wurde bisher nur unter Linux x86_64.
+- CI: Linux x86_64, Linux aarch64 und Windows sind grün (Format, Clippy, alle Tests, Release-Build,
+  portables Paket; unter Linux zusätzlich Offline-Nachweis und Start-Benchmark). Die macOS-Jobs haben
+  bisher keinen Runner bekommen und sind daher **nicht gelaufen** – macOS ist ungetestet.
