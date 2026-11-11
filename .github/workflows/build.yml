@@ -6,12 +6,19 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Which installers to build"
+        type: choice
+        default: macos
+        options: [macos, windows, linux, all]
 
 permissions:
   contents: read
 
 jobs:
   macos:
+    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'macos' || inputs.platforms == 'all'
     runs-on: macos-15
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
@@ -62,6 +69,7 @@ jobs:
           if-no-files-found: error
 
   windows:
+    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'windows' || inputs.platforms == 'all'
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -112,6 +120,7 @@ jobs:
           if-no-files-found: error
 
   linux:
+    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'linux' || inputs.platforms == 'all'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

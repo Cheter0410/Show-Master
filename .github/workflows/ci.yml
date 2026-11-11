@@ -26,8 +26,9 @@ jobs:
       matrix:
         # Every push is tested on Linux. macOS and Windows runners are expensive on private
         # repositories (macOS minutes count tenfold), so the full matrix runs for pull
-        # requests, tags and manual runs only.
-        include: ${{ fromJSON((github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) && '[{"name":"Linux x86_64","os":"ubuntu-24.04"}]' || '[{"name":"Linux x86_64","os":"ubuntu-24.04"},{"name":"Linux aarch64","os":"ubuntu-24.04-arm"},{"name":"macOS Apple Silicon","os":"macos-15"},{"name":"macOS Intel","os":"macos-15-intel"},{"name":"Windows","os":"windows-2022"}]') }}
+        # requests, tags and manual runs only. Intel Macs are covered by the universal build;
+        # the Intel runner is slow and costs most.
+        include: ${{ fromJSON((github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) && '[{"name":"Linux x86_64","os":"ubuntu-24.04"}]' || '[{"name":"Linux x86_64","os":"ubuntu-24.04"},{"name":"Linux aarch64","os":"ubuntu-24.04-arm"},{"name":"macOS Apple Silicon","os":"macos-15"},{"name":"Windows","os":"windows-2022"}]') }}
     steps:
       - uses: actions/checkout@v4
 
