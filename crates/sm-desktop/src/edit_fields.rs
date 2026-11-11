@@ -7,7 +7,7 @@ use super::Out;
 use crate::theme;
 use egui::{Id, Key, TextEdit, TextStyle, Ui};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Turns the field text into the command to send: `Ok(None)` = nothing to
 /// do, `Err` = invalid input (shown red while typing, toast on commit).
@@ -22,6 +22,8 @@ struct Draft {
 #[derive(Default)]
 pub struct Drafts {
     map: HashMap<Id, Draft>,
+    /// Fields left with Escape: their focus loss must not commit.
+    cancelled: HashSet<Id>,
 }
 
 impl Drafts {
@@ -102,6 +104,15 @@ pub fn field(
     out: &mut Vec<Out>,
     make: impl Fn(&str) -> Result<Option<Value>, String> + 'static,
 ) -> egui::Response {
+    // Escape cancels. egui drops the focus on Escape before any widget runs
+    // (and the shell may consume the key as a hotkey), so look at the raw
+    // events; a field that still has focus with Escape pressed is cancelled too.
+    let escape = escape_pressed(ui);
+    let had_focus = ui.memory(|m| m.has_focus(id));
+    if had_focus && escape {
+        drafts.map.remove(&id);
+        drafts.cancelled.insert(id);
+    }
     let editing = drafts.map.get_mut(&id);
     let has_draft = editing.is_some();
     let mut text = match editing {
@@ -130,24 +141,42 @@ pub fn field(
     let mut resp = ui.add(te).accessible_name(o.name);
     if resp.lost_focus() {
         drafts.map.remove(&id);
-        let cancelled = ui.input(|i| i.key_pressed(Key::Escape));
+        let cancelled = drafts.cancelled.remove(&id) || escape;
         if !cancelled && text != current {
             commit(&(Box::new(make) as MakeCmd), &text, out);
         }
-    } else if resp.has_focus() && (has_draft || text != current) {
-        drafts.map.insert(
-            id,
-            Draft {
-                text,
-                seen: true,
-                make: Box::new(make),
-            },
-        );
+    } else if resp.has_focus() {
+        drafts.cancelled.remove(&id);
+        if has_draft || text != current {
+            drafts.map.insert(
+                id,
+                Draft {
+                    text,
+                    seen: true,
+                    make: Box::new(make),
+                },
+            );
+        }
     }
     if let Some(e) = error.filter(|e| !e.is_empty()) {
         resp = resp.on_hover_text(e);
     }
     resp
+}
+
+fn escape_pressed(ui: &Ui) -> bool {
+    ui.input(|i| {
+        i.raw.events.iter().any(|e| {
+            matches!(
+                e,
+                egui::Event::Key {
+                    key: Key::Escape,
+                    pressed: true,
+                    ..
+                }
+            )
+        })
+    })
 }
 
 /// Put the cursor over the whole text of a field (when it opens for editing).

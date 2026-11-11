@@ -148,9 +148,15 @@ pub(crate) fn audio_tab(
     ui.horizontal_top(|ui| {
         grid(("audio_a", id)).show(ui, |ui| {
             label(ui, "Start");
-            time_field(ui, edit, out, ("audio_start", id), "Start time", a.start, move |v| {
-                kind_patch(id, json!({ "start": v }))
-            });
+            time_field(
+                ui,
+                edit,
+                out,
+                ("audio_start", id),
+                "Start time",
+                a.start,
+                move |v| kind_patch(id, json!({ "start": v })),
+            );
             ui.end_row();
             label(ui, "End");
             let end = a.end.map(fmt_secs).unwrap_or_default();
@@ -227,14 +233,26 @@ pub(crate) fn audio_tab(
             });
             ui.end_row();
             label(ui, "Fade in");
-            time_field(ui, edit, out, ("audio_fin", id), "Fade in time", a.fade_in, move |v| {
-                kind_patch(id, json!({ "fade_in": v }))
-            });
+            time_field(
+                ui,
+                edit,
+                out,
+                ("audio_fin", id),
+                "Fade in time",
+                a.fade_in,
+                move |v| kind_patch(id, json!({ "fade_in": v })),
+            );
             ui.end_row();
             label(ui, "Fade out");
-            time_field(ui, edit, out, ("audio_fout", id), "Fade out time", a.fade_out, move |v| {
-                kind_patch(id, json!({ "fade_out": v }))
-            });
+            time_field(
+                ui,
+                edit,
+                out,
+                ("audio_fout", id),
+                "Fade out time",
+                a.fade_out,
+                move |v| kind_patch(id, json!({ "fade_out": v })),
+            );
             ui.end_row();
             label(ui, "Curve");
             if let Some(c) = curve_combo(ui, ("audio_curve", id), a.fade_curve) {
@@ -342,7 +360,10 @@ fn waveform(
                 };
                 let r = Rect::from_min_max(
                     pos2(x, mid - hi.clamp(-1.0, 1.0) * half),
-                    pos2(x + 1.0, (mid - lo.clamp(-1.0, 1.0) * half).max(mid - hi * half + 1.0)),
+                    pos2(
+                        x + 1.0,
+                        (mid - lo.clamp(-1.0, 1.0) * half).max(mid - hi * half + 1.0),
+                    ),
                 );
                 mesh.add_colored_rect(r, color);
             }
@@ -371,17 +392,33 @@ fn waveform(
             );
         }
     }
-    painter.hline(rect.x_range(), mid, Stroke::new(1.0, Color32::from_gray(45)));
+    painter.hline(
+        rect.x_range(),
+        mid,
+        Stroke::new(1.0, Color32::from_gray(45)),
+    );
     if duration > 0.0 {
         // dim outside the region, markers with flags
         let shade = Color32::from_black_alpha(110);
-        painter.rect_filled(Rect::from_x_y_ranges(rect.left()..=xs, rect.y_range()), 0.0, shade);
-        painter.rect_filled(Rect::from_x_y_ranges(xe..=rect.right(), rect.y_range()), 0.0, shade);
+        painter.rect_filled(
+            Rect::from_x_y_ranges(rect.left()..=xs, rect.y_range()),
+            0.0,
+            shade,
+        );
+        painter.rect_filled(
+            Rect::from_x_y_ranges(xe..=rect.right(), rect.y_range()),
+            0.0,
+            shade,
+        );
         for (x, color, right) in [(xs, theme::NEXT, true), (xe, theme::ERROR, false)] {
             painter.vline(x, rect.y_range(), Stroke::new(2.0, color));
             let s = if right { 10.0 } else { -10.0 };
             painter.add(Shape::convex_polygon(
-                vec![pos2(x, rect.top()), pos2(x + s, rect.top()), pos2(x, rect.top() + 10.0)],
+                vec![
+                    pos2(x, rect.top()),
+                    pos2(x + s, rect.top()),
+                    pos2(x, rect.top() + 10.0),
+                ],
                 color,
                 Stroke::NONE,
             ));
@@ -398,9 +435,8 @@ fn waveform(
     }
 
     // Marker dragging: grab the nearest marker; commit on release.
-    let time_at = |x: f32| {
-        (((x - rect.left()) / rect.width()) as f64 * duration).clamp(0.0, duration)
-    };
+    let time_at =
+        |x: f32| (((x - rect.left()) / rect.width()) as f64 * duration).clamp(0.0, duration);
     let min_len = 0.01;
     if duration > 0.0 {
         if resp.hovered() {
@@ -478,7 +514,13 @@ fn is_on(p: &Crosspoint) -> bool {
 
 /// New routing with crosspoint `src -> out` set to `db` (`None` = off),
 /// starting from the effective routing (the default one if none is set).
-pub fn set_point(a: &AudioCue, outputs: usize, src: u16, out: u16, db: Option<f32>) -> Vec<Crosspoint> {
+pub fn set_point(
+    a: &AudioCue,
+    outputs: usize,
+    src: u16,
+    out: u16,
+    db: Option<f32>,
+) -> Vec<Crosspoint> {
     let mut next: Vec<Crosspoint> = a
         .effective_routing(outputs)
         .into_iter()
@@ -563,9 +605,7 @@ pub(crate) fn routing_tab(ui: &mut Ui, show: &Show, cue: &Cue, out: &mut Vec<Out
     });
     ui.add_space(6.0);
     if outputs.is_empty() {
-        ui.label(
-            RichText::new("No outputs are patched. Add outputs in Setup.").color(theme::WARN),
-        );
+        ui.label(RichText::new("No outputs are patched. Add outputs in Setup.").color(theme::WARN));
         return;
     }
     let eff = a.effective_routing(outputs.len());
@@ -578,7 +618,11 @@ pub(crate) fn routing_tab(ui: &mut Ui, show: &Show, cue: &Cue, out: &mut Vec<Out
                     ui.label(RichText::new("source / output").small().color(theme::MUTED));
                     for (i, o) in outputs.iter().enumerate() {
                         ui.vertical_centered(|ui| {
-                            ui.label(RichText::new(format!("{}", i + 1)).small().color(theme::MUTED));
+                            ui.label(
+                                RichText::new(format!("{}", i + 1))
+                                    .small()
+                                    .color(theme::MUTED),
+                            );
                             ui.label(RichText::new(&o.name).strong());
                         })
                         .response
@@ -593,7 +637,8 @@ pub(crate) fn routing_tab(ui: &mut Ui, show: &Show, cue: &Cue, out: &mut Vec<Out
                         ui.label(RichText::new(source_name(sources, src)).strong());
                         for (oi, o) in outputs.iter().enumerate() {
                             let oi = oi as u16;
-                            let point = eff.iter().find(|p| p.src == src && p.out == oi && is_on(p));
+                            let point =
+                                eff.iter().find(|p| p.src == src && p.out == oi && is_on(p));
                             let text = point.map(|p| fmt_db_field(p.db)).unwrap_or_default();
                             let (fill, color) = match (point, is_default) {
                                 (Some(_), false) => (theme::RUNNING, Color32::WHITE),
@@ -638,20 +683,34 @@ pub(crate) fn routing_tab(ui: &mut Ui, show: &Show, cue: &Cue, out: &mut Vec<Out
                                 }
                                 ui.separator();
                                 let tid = ui.scope_id().with("route_db");
-                                let mut text = ui
-                                    .data(|d| d.get_temp::<String>(tid))
-                                    .unwrap_or_else(|| point.map(|p| fmt_db_field(p.db)).unwrap_or_else(|| "0".into()));
+                                let mut text =
+                                    ui.data(|d| d.get_temp::<String>(tid)).unwrap_or_else(|| {
+                                        point
+                                            .map(|p| fmt_db_field(p.db))
+                                            .unwrap_or_else(|| "0".into())
+                                    });
                                 ui.horizontal(|ui| {
                                     ui.label("Level");
                                     let r = ui
-                                        .add(egui::TextEdit::singleline(&mut text).desired_width(60.0))
+                                        .add(
+                                            egui::TextEdit::singleline(&mut text)
+                                                .desired_width(60.0),
+                                        )
                                         .accessible_name("Crosspoint level");
                                     ui.label("dB");
-                                    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    if r.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
                                         match parse_db(&text) {
                                             Ok(db) => {
                                                 let db = (db > DB_FLOOR).then_some(db.min(12.0));
-                                                out.push(set(set_point(a, outputs.len(), src, oi, db)));
+                                                out.push(set(set_point(
+                                                    a,
+                                                    outputs.len(),
+                                                    src,
+                                                    oi,
+                                                    db,
+                                                )));
                                                 ui.close();
                                             }
                                             Err(e) => out.push(Out::Error(e)),
@@ -679,7 +738,14 @@ mod tests {
         };
         // from default (L->1, R->2) turn R->2 off
         let r = set_point(&a, 4, 1, 1, None);
-        assert_eq!(r, vec![Crosspoint { src: 0, out: 0, db: 0.0 }]);
+        assert_eq!(
+            r,
+            vec![Crosspoint {
+                src: 0,
+                out: 0,
+                db: 0.0
+            }]
+        );
         // everything off keeps an explicit silent routing
         let a2 = AudioCue {
             routing: r,
@@ -688,6 +754,10 @@ mod tests {
         assert_eq!(set_point(&a2, 4, 0, 0, None), vec![SILENT]);
         let r = set_point(&a, 4, 0, 3, Some(-6.0));
         assert_eq!(r.len(), 3);
-        assert!(r.contains(&Crosspoint { src: 0, out: 3, db: -6.0 }));
+        assert!(r.contains(&Crosspoint {
+            src: 0,
+            out: 3,
+            db: -6.0
+        }));
     }
 }

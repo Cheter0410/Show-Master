@@ -101,7 +101,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         } = &mut *app;
         let state = &client.state;
         let tick = &client.tick;
-        let any_selected = view.selection.iter().any(|id| state.show.cue(*id).is_some());
+        let any_selected = view
+            .selection
+            .iter()
+            .any(|id| state.show.cue(*id).is_some());
         if any_selected {
             egui::Panel::bottom("edit_inspector")
                 .resizable(true)
@@ -208,7 +211,10 @@ fn add_row(app: &mut App, ui: &mut egui::Ui, out: &mut Vec<Out>) {
             let h = 30.0;
             widgets::panic_button(app, ui, egui::vec2(92.0, h));
             if ui
-                .add_sized([84.0, h], egui::Button::new(RichText::new("Stop all").strong()))
+                .add_sized(
+                    [84.0, h],
+                    egui::Button::new(RichText::new("Stop all").strong()),
+                )
                 .on_hover_text("Stop all cues (with the stop fade)")
                 .clicked()
             {
@@ -225,14 +231,7 @@ fn add_row(app: &mut App, ui: &mut egui::Ui, out: &mut Vec<Out>) {
             ui.spacing_mut().item_spacing.x = 2.0;
             for l in lists {
                 let on = current == Some(l.id);
-                let text = if on {
-                    RichText::new(&l.name).strong()
-                } else {
-                    RichText::new(&l.name)
-                };
-                let resp = ui
-                    .add(egui::Button::new(text).selected(on).frame_when_inactive(false))
-                    .accessible_name(format!("Cue list {}", l.name))
+                let resp = tab(ui, on, &l.name, &format!("Cue list {}", l.name))
                     .on_hover_text("Click to show this list · right-click to rename or delete");
                 if resp.clicked() && !on {
                     out.push(Out::ShowList(l.id));
@@ -400,6 +399,28 @@ fn list_dialog(app: &mut App, ctx: &egui::Context, out: &mut Vec<Out>) {
 // Shared helpers
 // ---------------------------------------------------------------------------
 
+/// A flat tab: strong text and a blue underline when active.
+pub(crate) fn tab(ui: &mut egui::Ui, on: bool, label: &str, name: &str) -> egui::Response {
+    let text = if on {
+        RichText::new(label)
+            .strong()
+            .color(ui.visuals().strong_text_color())
+    } else {
+        RichText::new(label).color(theme::MUTED)
+    };
+    let resp = ui
+        .add(egui::Button::new(text).frame_when_inactive(false))
+        .accessible_name(name);
+    if on {
+        ui.painter().hline(
+            resp.rect.x_range().shrink(4.0),
+            resp.rect.bottom() + 3.0,
+            egui::Stroke::new(2.5, theme::EDIT),
+        );
+    }
+    resp
+}
+
 pub fn type_label_of(kind: &str) -> &'static str {
     match kind {
         "audio" => "Audio",
@@ -453,7 +474,11 @@ pub fn target_text(cue: &Cue, show: &Show) -> String {
             }
         }
         CueKind::Midi(m) => {
-            let port = if m.port.is_empty() { "(no port)" } else { &m.port };
+            let port = if m.port.is_empty() {
+                "(no port)"
+            } else {
+                &m.port
+            };
             format!("{port} · {}", inspector::midi_summary(&m.message))
         }
         CueKind::Timecode(t) => match &t.tc {
@@ -496,7 +521,11 @@ pub fn fmt_secs(v: f64) -> String {
         let m = (v / 60.0).floor();
         let s = v - m * 60.0;
         let sec = trim(format!("{s:06.3}"));
-        let sec = if sec.len() < 2 { format!("0{sec}") } else { sec };
+        let sec = if sec.len() < 2 {
+            format!("0{sec}")
+        } else {
+            sec
+        };
         format!("{m}:{sec}")
     }
 }
@@ -514,7 +543,11 @@ pub fn parse_secs(text: &str) -> Result<Option<f64>, String> {
 
 /// dB text: `-6`, `+3.5`, `-inf`/`off` = silence (-120).
 pub fn parse_db(text: &str) -> Result<f32, String> {
-    let t = text.trim().trim_end_matches("dB").trim_end_matches("db").trim();
+    let t = text
+        .trim()
+        .trim_end_matches("dB")
+        .trim_end_matches("db")
+        .trim();
     match t.to_ascii_lowercase().as_str() {
         "-inf" | "inf" | "off" | "-∞" | "∞" => Ok(-120.0),
         s => s

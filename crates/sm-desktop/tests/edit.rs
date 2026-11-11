@@ -7,10 +7,10 @@ mod common;
 use common::{settle, Env};
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
-use sm_desktop::App;
 use serde_json::Value;
 use sm_core::model::CueList;
 use sm_desktop::edit::table::{move_command, DropPos, DropTarget};
+use sm_desktop::App;
 
 /// Top-level cues of the first list: (id, number, name, type).
 fn cues(env: &Env) -> Vec<(u64, String, String, String)> {
@@ -37,15 +37,8 @@ fn id_of(env: &Env, number: &str) -> u64 {
         .unwrap()
 }
 
-/// A harness that draws missing glyphs as boxes instead of panicking.
-/// Needed once the show is dirty: the shell's title marker (`app.rs`) uses a
-/// glyph the default fonts lack. The edit view's own glyphs are checked with
-/// the panicking policy in `every_inspector_tab_draws_with_the_default_fonts`.
 fn harness(env: &Env) -> Harness<'static, App> {
-    let h = env.harness();
-    h.ctx
-        .set_missing_glyph_policy(egui::MissingGlyphPolicy::Tofu);
-    h
+    env.harness()
 }
 
 fn find_cue(s: &Value, id: u64) -> Option<Value> {
@@ -178,7 +171,9 @@ fn routing_cell_click_toggles_a_crosspoint() {
     env.wait(&mut h, "routing set", |s| {
         find_cue(s, id).is_some_and(|c| {
             let r = c["kind"]["routing"].as_array().cloned().unwrap_or_default();
-            r.len() == 3 && r.iter().any(|p| p["src"] == 0 && p["out"] == 1 && p["db"] == 0.0)
+            r.len() == 3
+                && r.iter()
+                    .any(|p| p["src"] == 0 && p["out"] == 1 && p["db"] == 0.0)
         })
     });
     // And off again.
@@ -201,7 +196,11 @@ fn gutter_click_sets_the_playhead() {
     assert!(h.query_by_label("Set playhead to Bed").is_none());
     h.get_by_label("Set playhead to 4 Long").click();
     env.wait(&mut h, "playhead moved", |s| {
-        s["playheads"].as_object().unwrap().values().any(|v| v.as_u64() == Some(id))
+        s["playheads"]
+            .as_object()
+            .unwrap()
+            .values()
+            .any(|v| v.as_u64() == Some(id))
     });
 }
 
@@ -322,8 +321,7 @@ fn fade_tab_shows_target_and_level() {
 
 #[test]
 fn every_inspector_tab_draws_with_the_default_fonts() {
-    // Panicking glyph policy (kittest default): any glyph the bundled fonts
-    // lack fails the test. Nothing here makes the show dirty.
+    // kittest panics on any glyph the bundled fonts lack.
     let env = Env::demo();
     let mut h = env.harness();
     for row in [
@@ -337,7 +335,17 @@ fn every_inspector_tab_draws_with_the_default_fonts() {
     ] {
         h.get_by_label(row).click();
         settle(&mut h);
-        for tab in ["Basic tab", "Timing tab", "Audio tab", "Routing tab", "Fade tab", "MIDI tab", "Timecode tab", "Control tab", "Group tab"] {
+        for tab in [
+            "Basic tab",
+            "Timing tab",
+            "Audio tab",
+            "Routing tab",
+            "Fade tab",
+            "MIDI tab",
+            "Timecode tab",
+            "Control tab",
+            "Group tab",
+        ] {
             if let Some(t) = h.query_by_label(tab) {
                 t.click();
                 settle(&mut h);
@@ -356,4 +364,86 @@ fn every_inspector_tab_draws_with_the_default_fonts() {
         settle(&mut h);
     }
     h.get_by_label("Waveform");
+}
+
+#[test]
+fn double_click_on_the_name_edits_inline_and_escape_cancels() {
+    let env = Env::demo();
+    let mut h = harness(&env);
+    let id = id_of(&env, "7");
+    let row = h.get_by_label("Cue 7 Note").rect();
+    // Name column starts after gutter, status, number and type columns.
+    let p = egui::pos2(
+        row.left() + 52.0 + 26.0 + 58.0 + 74.0 + 30.0,
+        row.center().y,
+    );
+    let double_click = |h: &mut Harness<'static, App>| {
+        // Explicit input times: the harness otherwise reports none, and
+        // egui needs them to recognise a double click.
+        let t0 = h.ctx.input(|i| i.time) + 1.0;
+        h.hover_at(p);
+        h.step();
+        for (n, pressed) in [true, false, true, false].into_iter().enumerate() {
+            let input = h.input_mut();
+            input.time = Some(t0 + n as f64 * 0.05);
+            input.events.push(egui::Event::PointerButton {
+                pos: p,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.step();
+        }
+        settle(h);
+    };
+    double_click(&mut h);
+    h.get_by_label("Inline cue name").type_text("Changed");
+    h.key_press(egui::Key::Escape);
+    settle(&mut h);
+    assert!(h.query_by_label("Inline cue name").is_none());
+    assert_eq!(find_cue(&env.state(), id).unwrap()["name"], "Note");
+    double_click(&mut h);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.get_by_label("Inline cue name").type_text("Standby");
+    h.key_press(egui::Key::Enter);
+    env.wait(&mut h, "renamed inline", |s| {
+        find_cue(s, id).is_some_and(|c| c["name"] == "Standby")
+    });
+}
+
+#[test]
+fn lists_can_be_added_renamed_and_switched() {
+    let env = Env::demo();
+    let mut h = harness(&env);
+    h.get_by_label("Lists").click();
+    settle(&mut h);
+    h.get_by_label("New cue list…").click();
+    settle(&mut h);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.get_by_label("List name").type_text("Interval");
+    settle(&mut h);
+    h.get_by_label("Create").click();
+    env.wait(&mut h, "list added", |s| {
+        s["show"]["cue_lists"].as_array().unwrap().len() == 2
+    });
+    settle(&mut h);
+    // The new (empty) list is shown, with tabs for both lists.
+    let new_list = env.state()["show"]["cue_lists"][1]["id"].as_u64();
+    assert_eq!(h.state().view.list, new_list);
+    h.get_by_label("Cue list Interval");
+    assert!(h.query_by_label("Cue 1 Intro").is_none());
+    h.get_by_label("Cue list Main").click();
+    settle(&mut h);
+    h.get_by_label("Cue 1 Intro");
+    // Rename through the tab's context menu.
+    h.get_by_label("Cue list Interval").click_secondary();
+    settle(&mut h);
+    h.get_by_label("Rename…").click();
+    settle(&mut h);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.get_by_label("List name").type_text("Act 2");
+    h.key_press(egui::Key::Enter);
+    env.wait(&mut h, "list renamed", |s| {
+        s["show"]["cue_lists"][1]["name"] == "Act 2"
+    });
 }

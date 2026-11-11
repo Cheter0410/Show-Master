@@ -10,9 +10,7 @@ use crate::theme;
 use egui::{vec2, Color32, Id, RichText, Sense, Stroke, Ui};
 use serde_json::{json, Map, Value};
 use sm_core::midi::{MidiMessage, MscCommand};
-use sm_core::model::{
-    ContinueMode, ControlAction, Cue, CueKind, Curve, GroupMode, Show, TcAction,
-};
+use sm_core::model::{ContinueMode, ControlAction, Cue, CueKind, Curve, GroupMode, Show, TcAction};
 use sm_core::timecode::Timecode;
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -74,24 +72,7 @@ pub(crate) fn show(
 }
 
 fn tab_button(ui: &mut Ui, cur: &mut Tab, tab: Tab, label: &str) {
-    let on = *cur == tab;
-    let text = if on {
-        RichText::new(label).strong().color(ui.visuals().strong_text_color())
-    } else {
-        RichText::new(label).color(theme::MUTED)
-    };
-    let resp = ui
-        .add(egui::Button::new(text).frame_when_inactive(false))
-        .accessible_name(format!("{label} tab"));
-    if on {
-        let r = resp.rect;
-        ui.painter().hline(
-            r.x_range().shrink(4.0),
-            r.bottom() + 3.0,
-            Stroke::new(2.5, theme::EDIT),
-        );
-    }
-    if resp.clicked() {
+    if super::tab(ui, *cur == tab, label, &format!("{label} tab")).clicked() {
         *cur = tab;
     }
 }
@@ -218,7 +199,10 @@ fn columns(
 
 pub(crate) const CONTINUE: [(ContinueMode, &str); 3] = [
     (ContinueMode::DoNotContinue, "Do not continue"),
-    (ContinueMode::AutoContinue, "Auto-continue (after post-wait)"),
+    (
+        ContinueMode::AutoContinue,
+        "Auto-continue (after post-wait)",
+    ),
     (ContinueMode::AutoFollow, "Auto-follow (when finished)"),
 ];
 
@@ -263,7 +247,10 @@ fn basic_tab(ui: &mut Ui, cue: &Cue, edit: &mut EditState, out: &mut Vec<Out>) {
                 ui.end_row();
                 label(ui, "Continue");
                 if let Some(m) = continue_combo(ui, ("insp_cont", id), Some(cue.continue_mode)) {
-                    out.push(Out::Cmd(cue_patch(id, json!({ "continue_mode": continue_value(m) }))));
+                    out.push(Out::Cmd(cue_patch(
+                        id,
+                        json!({ "continue_mode": continue_value(m) }),
+                    )));
                 }
                 ui.end_row();
                 label(ui, "Armed");
@@ -370,17 +357,29 @@ fn timing_tab(ui: &mut Ui, show: &Show, cue: &Cue, edit: &mut EditState, out: &m
     grid(("insp_timing", id)).show(ui, |ui| {
         label(ui, "Pre-wait");
         ui.horizontal(|ui| {
-            time_field(ui, edit, out, ("insp_pre", id), "Pre-wait time", cue.pre_wait, move |v| {
-                cue_patch(id, json!({ "pre_wait": v }))
-            });
+            time_field(
+                ui,
+                edit,
+                out,
+                ("insp_pre", id),
+                "Pre-wait time",
+                cue.pre_wait,
+                move |v| cue_patch(id, json!({ "pre_wait": v })),
+            );
             hint(ui, "delay between trigger and action (seconds or m:ss.s)");
         });
         ui.end_row();
         label(ui, "Post-wait");
         ui.horizontal(|ui| {
-            time_field(ui, edit, out, ("insp_post", id), "Post-wait time", cue.post_wait, move |v| {
-                cue_patch(id, json!({ "post_wait": v }))
-            });
+            time_field(
+                ui,
+                edit,
+                out,
+                ("insp_post", id),
+                "Post-wait time",
+                cue.post_wait,
+                move |v| cue_patch(id, json!({ "post_wait": v })),
+            );
             hint(ui, "auto-continue fires the next cue after this time");
         });
         ui.end_row();
@@ -555,9 +554,15 @@ fn fade_tab(ui: &mut Ui, show: &Show, cue: &Cue, edit: &mut EditState, out: &mut
         }
         ui.end_row();
         label(ui, "Duration");
-        time_field(ui, edit, out, ("fade_dur", id), "Fade duration", f.duration, move |v| {
-            kind_patch(id, json!({ "duration": v }))
-        });
+        time_field(
+            ui,
+            edit,
+            out,
+            ("fade_dur", id),
+            "Fade duration",
+            f.duration,
+            move |v| kind_patch(id, json!({ "duration": v })),
+        );
         ui.end_row();
         label(ui, "Curve");
         if let Some(c) = curve_combo(ui, ("fade_curve", id), f.curve) {
@@ -744,7 +749,11 @@ fn midi_tab(ui: &mut Ui, state: &UiState, cue: &Cue, edit: &mut EditState, out: 
                             let t = format!(
                                 "{}  ({})",
                                 p.name,
-                                if p.device.is_empty() { "unassigned" } else { &p.device }
+                                if p.device.is_empty() {
+                                    "unassigned"
+                                } else {
+                                    &p.device
+                                }
                             );
                             if ui.selectable_label(k.port == p.name, t).clicked() {
                                 picked = Some(p.name.clone());
@@ -801,9 +810,16 @@ fn midi_tab(ui: &mut Ui, state: &UiState, cue: &Cue, edit: &mut EditState, out: 
                 ui.end_row();
                 let ch_field = |ui: &mut Ui, edit: &mut EditState, out: &mut Vec<Out>, ch: u8| {
                     label(ui, "Channel");
-                    int_field(ui, edit, out, ("midi_ch", id), "MIDI channel", ch.into(), (1, 16), move |v| {
-                        kind_patch(id, json!({ "message": { "channel": v } }))
-                    });
+                    int_field(
+                        ui,
+                        edit,
+                        out,
+                        ("midi_ch", id),
+                        "MIDI channel",
+                        ch.into(),
+                        (1, 16),
+                        move |v| kind_patch(id, json!({ "message": { "channel": v } })),
+                    );
                     ui.end_row();
                 };
                 let byte = |ui: &mut Ui,
@@ -813,9 +829,16 @@ fn midi_tab(ui: &mut Ui, state: &UiState, cue: &Cue, edit: &mut EditState, out: 
                             (text, name): (&str, &str),
                             v: u8| {
                     label(ui, text);
-                    int_field(ui, edit, out, ("midi_b", id, key), name, v.into(), (0, 127), move |v| {
-                        kind_patch(id, json!({ "message": { key: v } }))
-                    });
+                    int_field(
+                        ui,
+                        edit,
+                        out,
+                        ("midi_b", id, key),
+                        name,
+                        v.into(),
+                        (0, 127),
+                        move |v| kind_patch(id, json!({ "message": { key: v } })),
+                    );
                     ui.end_row();
                 };
                 match m {
@@ -831,7 +854,14 @@ fn midi_tab(ui: &mut Ui, state: &UiState, cue: &Cue, edit: &mut EditState, out: 
                     } => {
                         ch_field(ui, edit, out, *channel);
                         byte(ui, edit, out, "note", ("Note", "Note number"), *note);
-                        byte(ui, edit, out, "velocity", ("Velocity", "Note velocity"), *velocity);
+                        byte(
+                            ui,
+                            edit,
+                            out,
+                            "velocity",
+                            ("Velocity", "Note velocity"),
+                            *velocity,
+                        );
                     }
                     MidiMessage::ControlChange {
                         channel,
@@ -839,12 +869,33 @@ fn midi_tab(ui: &mut Ui, state: &UiState, cue: &Cue, edit: &mut EditState, out: 
                         value,
                     } => {
                         ch_field(ui, edit, out, *channel);
-                        byte(ui, edit, out, "controller", ("Controller", "Controller number"), *controller);
-                        byte(ui, edit, out, "value", ("Value", "Controller value"), *value);
+                        byte(
+                            ui,
+                            edit,
+                            out,
+                            "controller",
+                            ("Controller", "Controller number"),
+                            *controller,
+                        );
+                        byte(
+                            ui,
+                            edit,
+                            out,
+                            "value",
+                            ("Value", "Controller value"),
+                            *value,
+                        );
                     }
                     MidiMessage::ProgramChange { channel, program } => {
                         ch_field(ui, edit, out, *channel);
-                        byte(ui, edit, out, "program", ("Program", "Program number"), *program);
+                        byte(
+                            ui,
+                            edit,
+                            out,
+                            "program",
+                            ("Program", "Program number"),
+                            *program,
+                        );
                     }
                     MidiMessage::PitchBend { channel, value } => {
                         ch_field(ui, edit, out, *channel);
@@ -881,7 +932,10 @@ fn midi_tab(ui: &mut Ui, state: &UiState, cue: &Cue, edit: &mut EditState, out: 
                         );
                         ui.end_row();
                         ui.label("");
-                        hint(ui, "hex bytes; F0 / F7 framing is added if missing, data 00–7F");
+                        hint(
+                            ui,
+                            "hex bytes; F0 / F7 framing is added if missing, data 00–7F",
+                        );
                         ui.end_row();
                     }
                     MidiMessage::Msc { .. } => {}
@@ -903,17 +957,31 @@ fn midi_tab(ui: &mut Ui, state: &UiState, cue: &Cue, edit: &mut EditState, out: 
             grid(("insp_msc", id)).show(ui, |ui| {
                 label(ui, "Device ID");
                 ui.horizontal(|ui| {
-                    int_field(ui, edit, out, ("msc_dev", id), "MSC device ID", (*device_id).into(), (0, 127), move |v| {
-                        kind_patch(id, json!({ "message": { "device_id": v } }))
-                    });
+                    int_field(
+                        ui,
+                        edit,
+                        out,
+                        ("msc_dev", id),
+                        "MSC device ID",
+                        (*device_id).into(),
+                        (0, 127),
+                        move |v| kind_patch(id, json!({ "message": { "device_id": v } })),
+                    );
                     hint(ui, "0–111, 127 = all");
                 });
                 ui.end_row();
                 label(ui, "Format");
                 ui.horizontal(|ui| {
-                    int_field(ui, edit, out, ("msc_fmt", id), "Command format", (*command_format).into(), (0, 127), move |v| {
-                        kind_patch(id, json!({ "message": { "command_format": v } }))
-                    });
+                    int_field(
+                        ui,
+                        edit,
+                        out,
+                        ("msc_fmt", id),
+                        "Command format",
+                        (*command_format).into(),
+                        (0, 127),
+                        move |v| kind_patch(id, json!({ "message": { "command_format": v } })),
+                    );
                     hint(ui, "1 = lighting, 16 = sound, 127 = all");
                 });
                 ui.end_row();
@@ -975,7 +1043,9 @@ const TC_ACTIONS: [(&str, &str); 6] = [
 ];
 
 fn timecode_tab(ui: &mut Ui, show: &Show, cue: &Cue, edit: &mut EditState, out: &mut Vec<Out>) {
-    let CueKind::Timecode(k) = &cue.kind else { return };
+    let CueKind::Timecode(k) = &cue.kind else {
+        return;
+    };
     let id = cue.id;
     let cur = match &k.tc {
         TcAction::Start => "start",
@@ -1033,7 +1103,10 @@ fn timecode_tab(ui: &mut Ui, show: &Show, cue: &Cue, edit: &mut EditState, out: 
                 out,
                 move |t| {
                     let tc = tc_field_parse(t)?.ok_or("Enter a timecode (HH:MM:SS:FF)")?;
-                    Ok(Some(kind_patch(id, json!({ "tc": { key: tc.to_string() } }))))
+                    Ok(Some(kind_patch(
+                        id,
+                        json!({ "tc": { key: tc.to_string() } }),
+                    )))
                 },
             );
             ui.end_row();
@@ -1061,7 +1134,9 @@ pub fn control_label(a: ControlAction) -> &'static str {
 }
 
 fn control_tab(ui: &mut Ui, show: &Show, cue: &Cue, edit: &mut EditState, out: &mut Vec<Out>) {
-    let CueKind::Control(k) = &cue.kind else { return };
+    let CueKind::Control(k) = &cue.kind else {
+        return;
+    };
     let id = cue.id;
     grid(("insp_control", id)).show(ui, |ui| {
         label(ui, "Action");
@@ -1095,9 +1170,15 @@ fn control_tab(ui: &mut Ui, show: &Show, cue: &Cue, edit: &mut EditState, out: &
         if let Some((name, h)) = time {
             label(ui, name);
             ui.horizontal(|ui| {
-                time_field(ui, edit, out, ("control_time", id), "Control time", k.time, move |v| {
-                    kind_patch(id, json!({ "time": v }))
-                });
+                time_field(
+                    ui,
+                    edit,
+                    out,
+                    ("control_time", id),
+                    "Control time",
+                    k.time,
+                    move |v| kind_patch(id, json!({ "time": v })),
+                );
                 hint(ui, h);
             });
             ui.end_row();
@@ -1218,7 +1299,10 @@ fn bulk(ui: &mut Ui, cues: &[&Cue], edit: &mut EditState, out: &mut Vec<Out>) {
                     out.push(patch(json!({ "continue_mode": continue_value(m) })));
                 }
                 ui.end_row();
-                for (key, name, v) in [("pre_wait", "Pre-wait", pre), ("post_wait", "Post-wait", post)] {
+                for (key, name, v) in [
+                    ("pre_wait", "Pre-wait", pre),
+                    ("post_wait", "Post-wait", post),
+                ] {
                     label(ui, name);
                     let ids = ids.clone();
                     fields::field(
@@ -1226,7 +1310,9 @@ fn bulk(ui: &mut Ui, cues: &[&Cue], edit: &mut EditState, out: &mut Vec<Out>) {
                         &mut edit.drafts,
                         Id::unique(("bulk_time", &salt, key)),
                         &v.map(fmt_secs).unwrap_or_default(),
-                        Opts::new(&format!("{name} time"), 90.0).mono().hint("mixed"),
+                        Opts::new(&format!("{name} time"), 90.0)
+                            .mono()
+                            .hint("mixed"),
                         out,
                         move |t| {
                             Ok(parse_secs(t)?.map(|v| {
@@ -1255,7 +1341,12 @@ fn bulk(ui: &mut Ui, cues: &[&Cue], edit: &mut EditState, out: &mut Vec<Out>) {
                     ui.label("step");
                     ui.add(egui::TextEdit::singleline(&mut st.renumber_step).desired_width(56.0))
                         .accessible_name("Renumber step");
-                    let start = st.renumber_start.trim().replace(',', ".").parse::<f64>().ok();
+                    let start = st
+                        .renumber_start
+                        .trim()
+                        .replace(',', ".")
+                        .parse::<f64>()
+                        .ok();
                     let step = st
                         .renumber_step
                         .trim()
@@ -1264,7 +1355,10 @@ fn bulk(ui: &mut Ui, cues: &[&Cue], edit: &mut EditState, out: &mut Vec<Out>) {
                         .ok()
                         .filter(|s| *s > 0.0);
                     if ui
-                        .add_enabled(start.is_some() && step.is_some(), egui::Button::new("Apply"))
+                        .add_enabled(
+                            start.is_some() && step.is_some(),
+                            egui::Button::new("Apply"),
+                        )
                         .accessible_name("Apply renumber")
                         .clicked()
                     {
@@ -1278,11 +1372,21 @@ fn bulk(ui: &mut Ui, cues: &[&Cue], edit: &mut EditState, out: &mut Vec<Out>) {
                 ui.end_row();
                 label(ui, "Actions");
                 ui.horizontal(|ui| {
-                    if ui.button("Group").accessible_name("Group selected").clicked() {
+                    if ui
+                        .button("Group")
+                        .accessible_name("Group selected")
+                        .clicked()
+                    {
                         out.push(Out::CmdSelect(json!({ "cmd": "group_cues", "cues": ids })));
                     }
-                    if ui.button("Duplicate").accessible_name("Duplicate selected").clicked() {
-                        out.push(Out::CmdSelect(json!({ "cmd": "duplicate_cues", "cues": ids })));
+                    if ui
+                        .button("Duplicate")
+                        .accessible_name("Duplicate selected")
+                        .clicked()
+                    {
+                        out.push(Out::CmdSelect(
+                            json!({ "cmd": "duplicate_cues", "cues": ids }),
+                        ));
                     }
                     if ui
                         .button(RichText::new("Delete").color(theme::ERROR))

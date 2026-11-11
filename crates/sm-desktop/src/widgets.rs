@@ -29,7 +29,7 @@ pub fn go_button(app: &mut App, ui: &mut egui::Ui, size: Vec2) {
 /// PANIC: stops everything (double tap when that safety is on).
 pub fn panic_button(app: &mut App, ui: &mut egui::Ui, size: Vec2) {
     let armed = app.panic_armed();
-    let label = if armed { "PANIC — again!" } else { "PANIC" };
+    let label = if armed { "PANIC: press again" } else { "PANIC" };
     let text = RichText::new(label)
         .strong()
         .size((size.y * 0.32).clamp(13.0, 30.0))

@@ -86,6 +86,9 @@ pub struct App {
     recovery_asked: bool,
     pub goto_text: String,
     focus_goto: bool,
+    /// A text field had keyboard focus last frame (egui drops focus on Escape
+    /// before `logic` runs, so this frame alone cannot tell).
+    was_typing: bool,
     /// Path of a showfile to open at start (command line / file association).
     open_at_start: Option<PathBuf>,
 }
@@ -109,6 +112,7 @@ impl App {
             recovery_asked: false,
             goto_text: String::new(),
             focus_goto: false,
+            was_typing: false,
             open_at_start,
         };
         // The theme is applied on the first frame (`logic`), on the context that draws.
@@ -565,7 +569,7 @@ impl App {
             .iter()
             .map(|(k, v)| (Self::normalize_combo(k), v.clone()))
             .collect();
-        let typing = ctx.egui_wants_keyboard_input();
+        let typing = ctx.egui_wants_keyboard_input() || self.was_typing;
         let live = self.is_live();
         let mut fired = Vec::new();
         ctx.input_mut(|i| {
@@ -736,6 +740,7 @@ impl App {
         crate::setup::show(self, &ctx);
         self.modals(&ctx);
         self.draw_toasts(&ctx);
+        self.was_typing = ctx.egui_wants_keyboard_input();
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             let painter = ctx.layer_painter(egui::LayerId::new(
                 egui::Order::Foreground,
@@ -934,7 +939,7 @@ impl App {
             }
             ui.label(small(format!("Remotes {}", s.remote.clients.len())));
             if let Some(url) = s.remote.urls.first() {
-                ui.label(small(format!("{url}/remote"))).on_hover_text("Open this address on a tablet in the same network (Setup → Remote shows a QR code)");
+                ui.label(small(format!("{url}/remote"))).on_hover_text("Open this address on a tablet in the same network (Setup > Remote shows a QR code)");
             }
         });
     }

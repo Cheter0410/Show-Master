@@ -9,8 +9,7 @@ use crate::{theme, util};
 use egui::accesskit::Role;
 use egui::{
     pos2, vec2, Align, Color32, CursorIcon, Id, Key, Modifiers, Painter, Pos2, Rangef, Rect,
-    RichText, Sense, Shape, Stroke, TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo,
-    WidgetText,
+    RichText, Sense, Shape, Stroke, TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo, WidgetText,
 };
 use serde_json::{json, Value};
 use sm_core::model::{ContinueMode, Cue, CueKind, CueList};
@@ -507,12 +506,7 @@ fn paint_drop(ui: &Ui, drop: Option<DropTarget>, rows: &[Row<'_>], content: Rect
                     painter.hline(x, rect.bottom() - 1.0, stroke);
                 }
                 DropPos::Into => {
-                    painter.rect_stroke(
-                        rect.shrink(1.5),
-                        4.0,
-                        stroke,
-                        egui::StrokeKind::Inside,
-                    );
+                    painter.rect_stroke(rect.shrink(1.5), 4.0, stroke, egui::StrokeKind::Inside);
                 }
             }
         }
@@ -608,13 +602,25 @@ fn draw_row(
             0.0,
             theme::NEXT,
         );
-        painter.hline(rect.x_range(), rect.top() + 0.5, Stroke::new(1.0, theme::NEXT));
-        painter.hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0, theme::NEXT));
+        painter.hline(
+            rect.x_range(),
+            rect.top() + 0.5,
+            Stroke::new(1.0, theme::NEXT),
+        );
+        painter.hline(
+            rect.x_range(),
+            rect.bottom() - 0.5,
+            Stroke::new(1.0, theme::NEXT),
+        );
     }
     // progress bar of the running phase
     if let Some(a) = active {
         if let Some(p) = a.progress() {
-            let color = if a.paused { theme::PAUSED } else { theme::RUNNING };
+            let color = if a.paused {
+                theme::PAUSED
+            } else {
+                theme::RUNNING
+            };
             let bar = Rect::from_min_max(
                 pos2(rect.left(), rect.bottom() - 3.0),
                 pos2(rect.left() + rect.width() * p, rect.bottom()),
@@ -688,14 +694,11 @@ fn draw_row(
         twisty = Some(t);
         name_left += 18.0;
     }
-    let mut name_rect = Rect::from_x_y_ranges(Rangef::new(name_left, name_cell.right()), rect.y_range());
+    let mut name_rect =
+        Rect::from_x_y_ranges(Rangef::new(name_left, name_cell.right()), rect.y_range());
     if let Some(t) = loaded {
         let tag = format!("LOADED {}", util::fmt_time(t));
-        let galley = painter.layout_no_wrap(
-            tag,
-            egui::FontId::proportional(10.5),
-            Color32::BLACK,
-        );
+        let galley = painter.layout_no_wrap(tag, egui::FontId::proportional(10.5), Color32::BLACK);
         let w = galley.size().x + 10.0;
         if name_rect.width() > w + 40.0 {
             let r = Rect::from_center_size(
@@ -748,7 +751,11 @@ fn draw_row(
     };
     let phase_text = |phase: Phase| -> Option<(String, Color32)> {
         let a = active.filter(|a| a.phase == phase)?;
-        let c = if a.paused { theme::PAUSED } else { theme::RUNNING };
+        let c = if a.paused {
+            theme::PAUSED
+        } else {
+            theme::RUNNING
+        };
         Some(match a.remaining() {
             Some(r) => (format!("-{}", util::fmt_time(r)), c),
             None => (util::fmt_time(a.elapsed), c),
@@ -764,9 +771,7 @@ fn draw_row(
         Some((t, c)) => mono(t, c, true),
         None => match (cue.action_duration(), &cue.kind) {
             (None, CueKind::Audio(_)) => mono("∞".into(), fg, false),
-            (Some(d), CueKind::Audio(_) | CueKind::Fade(_)) => {
-                mono(util::fmt_time(d), fg, false)
-            }
+            (Some(d), CueKind::Audio(_) | CueKind::Fade(_)) => mono(util::fmt_time(d), fg, false),
             _ => mono(String::new(), fg, false),
         },
     };
@@ -820,7 +825,11 @@ fn draw_row(
     }
     if resp.drag_started() {
         let ids: Vec<u64> = if sel.contains(&id) {
-            ctx.order.iter().copied().filter(|c| sel.contains(c)).collect()
+            ctx.order
+                .iter()
+                .copied()
+                .filter(|c| sel.contains(c))
+                .collect()
         } else {
             *sel = vec![id];
             vec![id]
@@ -869,7 +878,12 @@ fn draw_row(
     if row.depth == 0 {
         let g = ui.interact(gutter, Id::unique(("edit_gutter", id)), Sense::click());
         if g.hovered() && !is_playhead {
-            next_tag(&painter, gutter, theme::NEXT.gamma_multiply(0.25), theme::NEXT);
+            next_tag(
+                &painter,
+                gutter,
+                theme::NEXT.gamma_multiply(0.25),
+                theme::NEXT,
+            );
         }
         let name = format!("Set playhead to {}", cue_label(cue));
         if g.clicked() {
@@ -885,7 +899,12 @@ fn draw_row(
     if let Some(t) = twisty {
         let open = !edit.table.collapsed.contains(&id);
         let tr = ui.interact(t, Id::unique(("edit_twisty", id)), Sense::click());
-        twisty_glyph(&painter, t.center(), open, if tr.hovered() { fg } else { muted });
+        twisty_glyph(
+            &painter,
+            t.center(),
+            open,
+            if tr.hovered() { fg } else { muted },
+        );
         if tr.clicked() && !edit.table.collapsed.remove(&id) {
             edit.table.collapsed.insert(id);
         }
@@ -943,7 +962,9 @@ fn draw_row(
             out,
             move |t| {
                 let v = if what == "number" { t.trim() } else { t };
-                Ok(Some(json!({ "cmd": "update_cue", "cue": id, "patch": { what: v } })))
+                Ok(Some(
+                    json!({ "cmd": "update_cue", "cue": id, "patch": { what: v } }),
+                ))
             },
         );
         if let Some(e) = edit.table.inline.as_mut() {
@@ -975,7 +996,11 @@ fn status_icon(painter: &Painter, c: Pos2, rs: RunState) {
         RunState::Idle => {}
         RunState::Running => {
             painter.add(Shape::convex_polygon(
-                vec![c + vec2(-4.0, -6.0), c + vec2(6.0, 0.0), c + vec2(-4.0, 6.0)],
+                vec![
+                    c + vec2(-4.0, -6.0),
+                    c + vec2(6.0, 0.0),
+                    c + vec2(-4.0, 6.0),
+                ],
                 theme::RUNNING,
                 Stroke::NONE,
             ));
@@ -1027,9 +1052,17 @@ fn continue_glyph(painter: &Painter, c: Pos2, mode: ContinueMode, color: Color32
 
 fn twisty_glyph(painter: &Painter, c: Pos2, open: bool, color: Color32) {
     let pts = if open {
-        vec![c + vec2(-5.0, -3.0), c + vec2(5.0, -3.0), c + vec2(0.0, 4.0)]
+        vec![
+            c + vec2(-5.0, -3.0),
+            c + vec2(5.0, -3.0),
+            c + vec2(0.0, 4.0),
+        ]
     } else {
-        vec![c + vec2(-3.0, -5.0), c + vec2(4.0, 0.0), c + vec2(-3.0, 5.0)]
+        vec![
+            c + vec2(-3.0, -5.0),
+            c + vec2(4.0, 0.0),
+            c + vec2(-3.0, 5.0),
+        ]
     };
     painter.add(Shape::convex_polygon(pts, color, Stroke::NONE));
 }
@@ -1038,8 +1071,20 @@ fn checkbox_glyph(painter: &Painter, r: Rect, on: bool, hovered: bool) {
     if on {
         painter.rect_filled(r, 3.0, theme::EDIT);
         let s = Stroke::new(2.0, Color32::WHITE);
-        painter.line_segment([r.left_center() + vec2(3.5, 0.0), r.center_bottom() + vec2(-1.0, -4.0)], s);
-        painter.line_segment([r.center_bottom() + vec2(-1.0, -4.0), r.right_top() + vec2(-3.5, 4.0)], s);
+        painter.line_segment(
+            [
+                r.left_center() + vec2(3.5, 0.0),
+                r.center_bottom() + vec2(-1.0, -4.0),
+            ],
+            s,
+        );
+        painter.line_segment(
+            [
+                r.center_bottom() + vec2(-1.0, -4.0),
+                r.right_top() + vec2(-3.5, 4.0),
+            ],
+            s,
+        );
     } else {
         let c = if hovered {
             Color32::from_gray(200)
@@ -1059,12 +1104,25 @@ fn context_menu(
     out: &mut Vec<Out>,
 ) {
     let id = row.cue.id;
-    let ids: Vec<u64> = ctx.order.iter().copied().filter(|c| sel.contains(c)).collect();
+    let ids: Vec<u64> = ctx
+        .order
+        .iter()
+        .copied()
+        .filter(|c| sel.contains(c))
+        .collect();
     let ids = if ids.is_empty() { vec![id] } else { ids };
     let n = ids.len();
-    let plural = if n == 1 { String::new() } else { format!(" {n} cues") };
+    let plural = if n == 1 {
+        String::new()
+    } else {
+        format!(" {n} cues")
+    };
     ui.set_min_width(190.0);
-    if ui.button("Preview").on_hover_text("Start this cue without moving the playhead").clicked() {
+    if ui
+        .button("Preview")
+        .on_hover_text("Start this cue without moving the playhead")
+        .clicked()
+    {
         out.push(Out::Cmd(json!({ "cmd": "start_cue", "cue": id })));
         ui.close();
     }
@@ -1085,7 +1143,9 @@ fn context_menu(
     }
     ui.separator();
     if ui.button(format!("Duplicate{plural}")).clicked() {
-        out.push(Out::CmdSelect(json!({ "cmd": "duplicate_cues", "cues": ids })));
+        out.push(Out::CmdSelect(
+            json!({ "cmd": "duplicate_cues", "cues": ids }),
+        ));
         ui.close();
     }
     if ui.button(format!("Group{plural}")).clicked() {
@@ -1093,7 +1153,11 @@ fn context_menu(
         ui.close();
     }
     if ui.button("Renumber…").clicked() {
-        let start = row.cue.number.parse::<f64>().map(|_| row.cue.number.clone());
+        let start = row
+            .cue
+            .number
+            .parse::<f64>()
+            .map(|_| row.cue.number.clone());
         edit.table.renumber = Some(Renumber {
             cues: ids.clone(),
             start: start.unwrap_or_else(|_| "1".into()),
@@ -1104,7 +1168,10 @@ fn context_menu(
     let all_armed = ids
         .iter()
         .all(|c| ctx.state.show.cue(*c).is_none_or(|c| c.armed));
-    if ui.button(if all_armed { "Disarm" } else { "Arm" }).clicked() {
+    if ui
+        .button(if all_armed { "Disarm" } else { "Arm" })
+        .clicked()
+    {
         out.push(Out::Cmd(json!({
             "cmd": "update_cues", "cues": ids, "patch": { "armed": !all_armed },
         })));
@@ -1133,16 +1200,18 @@ fn renumber_dialog(ctx: &egui::Context, st: &mut TableState, out: &mut Vec<Out>)
             RichText::new(format!("{} cue(s), in list order", r.cues.len())).color(theme::MUTED),
         );
         ui.add_space(6.0);
-        egui::Grid::new("renumber_grid").num_columns(2).show(ui, |ui| {
-            ui.label("Start");
-            ui.add(egui::TextEdit::singleline(&mut r.start).desired_width(90.0))
-                .accessible_name("Renumber start");
-            ui.end_row();
-            ui.label("Step");
-            ui.add(egui::TextEdit::singleline(&mut r.step).desired_width(90.0))
-                .accessible_name("Renumber step");
-            ui.end_row();
-        });
+        egui::Grid::new("renumber_grid")
+            .num_columns(2)
+            .show(ui, |ui| {
+                ui.label("Start");
+                ui.add(egui::TextEdit::singleline(&mut r.start).desired_width(90.0))
+                    .accessible_name("Renumber start");
+                ui.end_row();
+                ui.label("Step");
+                ui.add(egui::TextEdit::singleline(&mut r.step).desired_width(90.0))
+                    .accessible_name("Renumber step");
+                ui.end_row();
+            });
         let start = r.start.trim().replace(',', ".").parse::<f64>().ok();
         let step = r
             .step
@@ -1157,10 +1226,7 @@ fn renumber_dialog(ctx: &egui::Context, st: &mut TableState, out: &mut Vec<Out>)
                 keep = false;
             }
             let ok = start.is_some() && step.is_some();
-            if ui
-                .add_enabled(ok, egui::Button::new("Renumber"))
-                .clicked()
-            {
+            if ui.add_enabled(ok, egui::Button::new("Renumber")).clicked() {
                 if let (Some(start), Some(step)) = (start, step) {
                     out.push(Out::Cmd(json!({
                         "cmd": "renumber", "cues": r.cues, "start": start, "step": step,
@@ -1198,7 +1264,12 @@ mod tests {
         );
         CueList {
             id: 100,
-            cues: vec![cue(1, CueKind::Memo), cue(2, CueKind::Memo), g, cue(6, CueKind::Memo)],
+            cues: vec![
+                cue(1, CueKind::Memo),
+                cue(2, CueKind::Memo),
+                g,
+                cue(6, CueKind::Memo),
+            ],
             ..CueList::default()
         }
     }
@@ -1221,15 +1292,24 @@ mod tests {
     fn move_commands() {
         let l = list();
         let m = |c: &[u64], t| move_command(&l, c, t);
-        let v = m(&[1], DropTarget::Row(6, DropPos::After)).unwrap().unwrap();
+        let v = m(&[1], DropTarget::Row(6, DropPos::After))
+            .unwrap()
+            .unwrap();
         assert_eq!(v["index"], 4);
         assert_eq!(v["parent"], Value::Null);
-        let v = m(&[6, 1], DropTarget::Row(3, DropPos::Into)).unwrap().unwrap();
+        let v = m(&[6, 1], DropTarget::Row(3, DropPos::Into))
+            .unwrap()
+            .unwrap();
         assert_eq!(v["cues"], json!([1, 6]));
         assert_eq!(v["parent"], 3);
         assert_eq!(v["index"], 2);
-        let v = m(&[1], DropTarget::Row(5, DropPos::Before)).unwrap().unwrap();
-        assert_eq!((v["parent"].clone(), v["index"].clone()), (json!(3), json!(1)));
+        let v = m(&[1], DropTarget::Row(5, DropPos::Before))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (v["parent"].clone(), v["index"].clone()),
+            (json!(3), json!(1))
+        );
         // children travel with their group
         let v = m(&[3, 4], DropTarget::End).unwrap().unwrap();
         assert_eq!(v["cues"], json!([3]));
