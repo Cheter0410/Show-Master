@@ -8,6 +8,33 @@ cd "$(dirname "$0")/../.."
 [ "$(uname -s)" = "Darwin" ] || { echo "This script must run on macOS."; exit 1; }
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
 
+# Prerequisites: say exactly what is missing and how to get it.
+missing=0
+if ! xcode-select -p >/dev/null 2>&1; then
+  echo "Missing: Xcode command line tools.  Install:  xcode-select --install"; missing=1
+fi
+if ! command -v cargo >/dev/null 2>&1 || ! command -v rustup >/dev/null 2>&1; then
+  if [ -x "$HOME/.cargo/bin/cargo" ]; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+  else
+    echo "Missing: Rust.  Install:  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+    echo "         then open a new terminal window."; missing=1
+  fi
+fi
+if ! command -v npm >/dev/null 2>&1; then
+  for d in /opt/homebrew/bin /usr/local/bin; do [ -x "$d/npm" ] && export PATH="$d:$PATH"; done
+fi
+if ! command -v npm >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then
+    echo "Missing: Node.js.  Install:  brew install node"
+  else
+    echo "Missing: Node.js.  Install the LTS version from https://nodejs.org (macOS Installer .pkg),"
+    echo "         then open a new terminal window."
+  fi
+  missing=1
+fi
+[ "$missing" = 0 ] || { echo; echo "Install the missing tools above, then run this script again."; exit 1; }
+
 if [ ! -f ui/dist/index.html ] || [ -n "${REBUILD_UI:-}" ]; then
   (cd ui && npm ci && npm run build)
 fi
