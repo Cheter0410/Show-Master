@@ -400,6 +400,8 @@ impl Engine {
             events: Vec::new(),
         };
         e.set_show(show);
+        // A stopped generator rests at the configured start offset.
+        e.tc.anchor_frame = e.show.timecode.start.to_frame_number(rate);
         e
     }
 

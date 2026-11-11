@@ -18,8 +18,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": { target: backend, changeOrigin: false },
-      "/ws": { target: backend, ws: true, changeOrigin: false },
+      // changeOrigin: the backend sees its own host name, like a request from the local machine
+      "/api": { target: backend, changeOrigin: true },
+      "/ws": { target: backend, ws: true, changeOrigin: true },
     },
   },
   test: {

@@ -173,6 +173,16 @@ try {
     if (n !== "6") throw new Error(`playhead at ${n}, expected 6`);
   });
 
+  await step("Space never clicks a focused button", async () => {
+    await page.click('[data-testid="pause"]'); // focus stays on the Pause button, show is paused
+    await page.waitForFunction(() => /Resume/.test(document.querySelector('[data-testid="pause"]')?.textContent ?? ""));
+    await page.keyboard.press("Space"); // must GO (cue 6), not toggle pause again
+    await page.waitForFunction(() => document.querySelector('[data-testid="next-number"]')?.textContent === "7");
+    if (!mock.getState().paused_all) throw new Error("Space clicked the focused Pause button");
+    await page.click('[data-testid="pause"]');
+    mock.exec({ cmd: "set_playhead", cue: 6 });
+  });
+
   await page.waitForTimeout(1200);
   await shot(page, "desktop-live.png");
 

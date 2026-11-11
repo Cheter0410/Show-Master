@@ -162,24 +162,33 @@ export function CueList(p: {
   const amap = useMemo(() => activeMap(active), [active]);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Keep the NEXT row in view.
+  // Keep the NEXT row in view (also after the list box changes size, e.g. device rotation).
   useEffect(() => {
-    if (!p.follow || playhead == null) return;
     const box = ref.current;
-    const row = box?.querySelector<HTMLElement>(`[data-cue="${playhead}"]`);
-    if (!box || !row) return;
-    // Scroll so that the NEXT row sits about a third down, aligned to a row edge (no half-cut row on top).
-    const desired = row.offsetTop - box.clientHeight * 0.3;
-    let top = 0;
-    for (const el of Array.from(box.children) as HTMLElement[]) {
-      if (el.offsetTop <= desired) top = el.offsetTop;
-      else break;
-    }
-    const visibleTop = box.scrollTop;
-    const visibleBottom = visibleTop + box.clientHeight;
-    if (row.offsetTop < visibleTop + 40 || row.offsetTop + row.offsetHeight > visibleBottom - 80) {
+    if (!p.follow || playhead == null || !box) return;
+    const reveal = () => {
+      const row = box.querySelector<HTMLElement>(`[data-cue="${playhead}"]`);
+      if (!row) return;
+      const visibleTop = box.scrollTop;
+      const visibleBottom = visibleTop + box.clientHeight;
+      const margin = Math.min(80, Math.max(0, (box.clientHeight - row.offsetHeight) / 2));
+      if (row.offsetTop >= visibleTop && row.offsetTop + row.offsetHeight <= visibleBottom - margin) return;
+      // Scroll so that the NEXT row sits about a third down, aligned to a row edge (no half-cut row on top).
+      const desired = row.offsetTop - box.clientHeight * 0.3;
+      let top = 0;
+      for (const el of Array.from(box.children) as HTMLElement[]) {
+        if (el.offsetTop <= desired) top = el.offsetTop;
+        else break;
+      }
+      // Tiny list boxes (small phones): the NEXT row itself must always be fully visible.
+      if (row.offsetTop + row.offsetHeight > top + box.clientHeight) top = row.offsetTop;
       box.scrollTo({ top: Math.max(0, top), behavior: "auto" });
-    }
+    };
+    reveal();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(reveal);
+    ro.observe(box);
+    return () => ro.disconnect();
   }, [playhead, p.follow, rows.length]);
 
   const onSelect = useMemo(() => (id: number) => setApp({ selection: [id] }), []);

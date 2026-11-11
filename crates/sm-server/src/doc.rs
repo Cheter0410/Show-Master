@@ -304,6 +304,17 @@ impl Document {
         merge_patch(&mut doc, &patch);
         let mut new: Cue = serde_json::from_value(doc).map_err(|e| format!("invalid cue: {e}"))?;
         new.id = id;
+        // In a merge patch `null` removes a key, which would bring back the
+        // default level; for a fade it means "leave the level alone".
+        if let CueKind::Fade(f) = &mut new.kind {
+            if patch
+                .get("kind")
+                .and_then(|k| k.get("gain_db"))
+                .is_some_and(Value::is_null)
+            {
+                f.gain_db = None;
+            }
+        }
         new.pre_wait = new.pre_wait.max(0.0);
         new.post_wait = new.post_wait.max(0.0);
         if let CueKind::Audio(a) = &new.kind {

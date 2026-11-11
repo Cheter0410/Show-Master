@@ -123,9 +123,9 @@ textarea.input { resize: none; line-height: 1.35; }
 .check.disabled { opacity: 0.5; }
 .check input, .t-armed input { width: 16px; height: 16px; accent-color: var(--blue); margin: 0; }
 .slider { flex: 1 1 80px; min-width: 60px; accent-color: var(--blue); height: 22px; margin: 0; }
-.form-row { display: flex; align-items: center; gap: 10px; min-height: 32px; }
-.form-label { flex: none; width: 96px; color: var(--muted); font-size: 12.5px; }
-.form-ctl { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; flex-wrap: wrap; }
+.form-row { display: flex; align-items: flex-start; gap: 10px; min-height: 32px; }
+.form-label { flex: none; width: 96px; color: var(--muted); font-size: 12.5px; padding-top: 7px; }
+.form-ctl { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; flex-wrap: wrap; min-height: 32px; }
 .form-ctl > .hint { flex-basis: auto; }
 
 /* ---------- tags ---------- */
@@ -599,6 +599,13 @@ button.lrow-gutter:hover { box-shadow: inset 6px 0 0 var(--green-deep); }
   .r-selbar .btn.big { padding: 4px 10px; font-size: 14px; }
   .r-sel { font-size: 12.5px; white-space: normal; max-height: 48px; }
   .toasts { left: 12px; bottom: 12px; }
+}
+
+@media (max-width: 560px) and (max-height: 700px) {
+  .transport.touch { grid-template-rows: 56px 56px 56px; }
+  .transport.touch .go-label { font-size: 50px; }
+  .next-panel.compact .next-meta { display: none; }
+  .r-selbar { padding: 4px 6px; }
 }
 
 /* wide (iPad landscape and up): list left, NEXT + big transport right */

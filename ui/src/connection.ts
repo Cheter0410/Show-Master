@@ -51,7 +51,8 @@ function handle(msg: ServerMsg): void {
     case "hello":
       gotHello = true;
       sendPing();
-      setApp({ role: msg.role, clientId: msg.client_id });
+      // The server replays its recent log after every (re)connect.
+      setApp({ role: msg.role, clientId: msg.client_id, log: [] });
       break;
     case "state":
       backoff = BACKOFF_MIN;

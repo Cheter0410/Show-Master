@@ -151,15 +151,26 @@ fn deny() -> Response {
 async fn session(
     State(app): State<App>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Query(q): Query<HashMap<String, String>>,
+    headers: HeaderMap,
 ) -> Json<Value> {
     let (_, view_pin) = pins(&app);
+    let view_needs_pin = !view_pin.is_empty();
+    // A client that already holds a valid token gets it confirmed.
+    if let Some(token) = token_of(&q, &headers).filter(|t| !t.is_empty()) {
+        if let Some(role) = role_for(&app, &addr, Some(token)) {
+            return Json(
+                json!({ "role": role, "token": token, "view_needs_pin": view_needs_pin, "version": VERSION }),
+            );
+        }
+    }
     if addr.ip().is_loopback() {
         Json(
-            json!({ "role": "admin", "token": app.admin_token, "view_needs_pin": !view_pin.is_empty(), "version": VERSION }),
+            json!({ "role": "admin", "token": app.admin_token, "view_needs_pin": view_needs_pin, "version": VERSION }),
         )
     } else {
         Json(
-            json!({ "role": null, "token": null, "view_needs_pin": !view_pin.is_empty(), "version": VERSION }),
+            json!({ "role": null, "token": null, "view_needs_pin": view_needs_pin, "version": VERSION }),
         )
     }
 }

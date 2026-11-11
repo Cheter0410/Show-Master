@@ -84,6 +84,7 @@ cargo run -p sm-timecode --example ltc_roundtrip        # Prototyp (b): LTC mit 
 cargo run -p sm-rtpmidi --example rtp_midi_handshake    # Prototyp (c): rtp-midi-Handshake
 cargo run --release -p sm-audio --example audio_bench   # Prototyp (a): Multichannel-Streaming
 
+cargo build -p showmaster && node ui/e2e/real.mjs        # Browser-Test der echten App (braucht Playwright + Chromium)
 cd ui && npm run dev                   # UI-Entwicklung gegen einen laufenden showmaster
 ```
 

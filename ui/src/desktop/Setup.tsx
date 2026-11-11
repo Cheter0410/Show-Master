@@ -261,7 +261,7 @@ function TimecodeSetup({ doc }: { doc: State }) {
       <div className="setup-col">
         <h4>LTC (audio)</h4>
         <Row label="Enabled"><Check checked={tc.ltc_enabled} onChange={(v) => set({ ltc_enabled: v })} label="Send LTC on an audio output" /></Row>
-        <Row label="Device channel"><NumField value={tc.ltc_channel} integer min={1} max={64} width={80} disabled={!tc.ltc_enabled} onCommit={(v) => set({ ltc_channel: v })} /></Row>
+        <Row label="Device channel"><NumField value={tc.ltc_channel + 1} integer min={1} max={128} width={80} disabled={!tc.ltc_enabled} onCommit={(v) => set({ ltc_channel: Math.max(0, v - 1) })} /></Row>
         <Row label="Level"><DbField value={tc.ltc_level_db} width={80} max={0} disabled={!tc.ltc_enabled} onCommit={(v) => set({ ltc_level_db: v ?? -12 })} /><span className="unit">dBFS</span></Row>
         <h4>MTC (MIDI)</h4>
         <Row label="Enabled"><Check checked={tc.mtc_enabled} onChange={(v) => set({ mtc_enabled: v })} label="Send MIDI timecode" /></Row>
