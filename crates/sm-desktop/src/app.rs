@@ -687,6 +687,7 @@ impl App {
         }
         self.handle_close_request(ctx);
         self.handle_dropped_files(ctx);
+        crate::setup::capture_keys(self, ctx);
         self.hotkeys(ctx);
         self.toasts.retain(|t| t.until > Instant::now());
         // Clocks and meters move continuously.
@@ -766,7 +767,7 @@ impl App {
             }
             let s = &self.client.state;
             let title = if s.dirty {
-                format!("{} ●", s.show.name)
+                format!("{} *", s.show.name)
             } else {
                 s.show.name.clone()
             };
