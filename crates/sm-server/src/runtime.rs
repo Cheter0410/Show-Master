@@ -485,18 +485,29 @@ impl Runtime {
                 Err(RecvTimeoutError::Timeout) => None,
                 Err(RecvTimeoutError::Disconnected) => break,
             };
-            let now = self.io.now() + self.lookahead;
-            self.engine.advance(now);
-            let mut pending = first;
-            while let Some(req) = pending {
-                let result = self.handle_request(req.command, req.role, &req.origin);
-                if let Some(reply) = req.reply {
-                    let _ = reply.send(result);
+            // A bug must never take the command bus down mid-show: contain a
+            // panic to the request that caused it and keep running.
+            let step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let now = self.io.now() + self.lookahead;
+                self.engine.advance(now);
+                let mut pending = first;
+                while let Some(req) = pending {
+                    let result = self.handle_request(req.command, req.role, &req.origin);
+                    if let Some(reply) = req.reply {
+                        let _ = reply.send(result);
+                    }
+                    self.state_dirty = true;
+                    pending = rx.try_recv().ok();
                 }
+                self.pump();
+            }));
+            if step.is_err() {
+                self.note(
+                    "error",
+                    "Internal error in the engine thread - recovered, see log file".into(),
+                );
                 self.state_dirty = true;
-                pending = rx.try_recv().ok();
             }
-            self.pump();
             if last_slow.elapsed() >= Duration::from_secs(1) {
                 last_slow = Instant::now();
                 self.state_dirty = true; // peers, clients, device errors

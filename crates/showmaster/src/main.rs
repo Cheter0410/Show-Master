@@ -5,6 +5,8 @@
 //! (desktop UI on this machine, remote UI for tablets on the local network).
 //! It never contacts the internet.
 
+mod demo;
+
 use sm_server::runtime::{self, Config};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -24,6 +26,7 @@ OPTIONS:
     --local-only      Listen on 127.0.0.1 only, whatever the show says
     --log-dir <DIR>   Directory for log files
     --open            Open the user interface in the default browser
+    --make-demo <DIR> Write a demo show (showfile + generated audio) into DIR and open it
     -h, --help        Show this help
     -V, --version     Show the version
 ";
@@ -61,6 +64,13 @@ fn parse_args() -> Result<Args, String> {
                         .and_then(|p| p.parse().ok())
                         .ok_or("--port needs a number")?,
                 )
+            }
+            "--make-demo" => {
+                let dir = it
+                    .next()
+                    .map(PathBuf::from)
+                    .ok_or("--make-demo needs a directory")?;
+                args.show = Some(demo::make(&dir)?);
             }
             "--local-only" => args.local_only = true,
             "--open" => args.open = true,

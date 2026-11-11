@@ -52,7 +52,8 @@ Text frames, one JSON object each, discriminated by `t`.
 ```
 
 `patch.ops`: `p` is a path of object keys / array indices into the state document. `v` sets the value at
-that path (creating it), `d: true` deletes the key. Arrays are always replaced as a whole value. A client
+that path (creating it; a numeric last segment replaces that array element), `d: true` deletes the key.
+Arrays whose length changes are replaced as a whole value. A client
 that sees a `rev` gap must reconnect (the server then sends a fresh `state`).
 
 ### Client → server

@@ -60,6 +60,16 @@ impl Io {
         midi: Box<dyn MidiBackend>,
     ) -> Self {
         let audio = AudioSystem::open(&show.settings.audio);
+        Self::with_audio(show, show_dir, midi, audio)
+    }
+
+    /// Build on an already opened audio system (offline rendering, tests).
+    pub fn with_audio(
+        show: &Show,
+        show_dir: Option<PathBuf>,
+        midi: Box<dyn MidiBackend>,
+        audio: AudioSystem,
+    ) -> Self {
         let sr = audio.controller.sample_rate();
         let mut io = Self {
             audio,
@@ -76,6 +86,13 @@ impl Io {
         };
         io.configure(show);
         io
+    }
+
+    /// True once every prepared voice has its pre-roll buffered.
+    pub fn all_primed(&self) -> bool {
+        self.voices
+            .values()
+            .all(|v| self.audio.controller.is_primed(*v))
     }
 
     pub fn sample_rate(&self) -> u32 {

@@ -232,6 +232,42 @@ impl AudioSystem {
         }
     }
 
+    /// An audio system without a device: the caller drives the returned
+    /// renderer itself (offline bounce, tests).
+    pub fn offline(settings: &AudioSettings) -> (Self, sm_audio::Renderer) {
+        let channels = usize::from(settings.channels.max(1));
+        let (tx, rx) = rtrb::RingBuffer::new(64);
+        let ltc = Arc::new(LtcShared::default());
+        let generator = LtcGenerator {
+            encoder: LtcEncoder::new(settings.sample_rate),
+            rx,
+            shared: ltc.clone(),
+            buf: [0.0; LTC_CHUNK],
+        };
+        let (controller, renderer) = engine_with_generators(
+            EngineConfig::new(settings.sample_rate, channels),
+            vec![Box::new(generator)],
+        );
+        let status = AudioStatus {
+            backend: "offline".into(),
+            device: "offline".into(),
+            sample_rate: settings.sample_rate,
+            channels,
+            buffer_frames: None,
+            is_null: true,
+            error: None,
+            devices: Vec::new(),
+        };
+        let system = Self {
+            controller,
+            stream: Box::new(Offline),
+            ltc_tx: tx,
+            ltc,
+            status,
+        };
+        (system, renderer)
+    }
+
     pub fn status(&self) -> AudioStatus {
         let mut s = self.status.clone();
         if let Some(e) = self.stream.error() {
@@ -267,5 +303,24 @@ impl OutputStream for Dead {
     }
     fn error(&self) -> Option<String> {
         Some("no audio backend".into())
+    }
+}
+
+struct Offline;
+impl OutputStream for Offline {
+    fn info(&self) -> sm_audio::StreamInfo {
+        sm_audio::StreamInfo {
+            backend: "offline".into(),
+            device_name: "offline".into(),
+            sample_rate: 0,
+            channels: 0,
+            buffer_frames: None,
+        }
+    }
+    fn cpu_load(&self) -> f32 {
+        0.0
+    }
+    fn error(&self) -> Option<String> {
+        None
     }
 }
