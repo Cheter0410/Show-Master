@@ -109,6 +109,10 @@ pub trait OutputStream: Send {
 /// All backends available in this build, real hosts first, the null
 /// backend last.
 pub fn default_backends() -> Vec<Box<dyn AudioBackend>> {
+    let null: Box<dyn AudioBackend> = Box::new(NullBackend::new());
+    if crate::no_audio_devices() {
+        return vec![null];
+    }
     #[cfg(feature = "cpal-backend")]
     let real: Vec<Box<dyn AudioBackend>> = CpalBackend::available()
         .into_iter()
@@ -116,7 +120,6 @@ pub fn default_backends() -> Vec<Box<dyn AudioBackend>> {
         .collect();
     #[cfg(not(feature = "cpal-backend"))]
     let real: Vec<Box<dyn AudioBackend>> = Vec::new();
-    let null: Box<dyn AudioBackend> = Box::new(NullBackend::new());
     real.into_iter().chain(std::iter::once(null)).collect()
 }
 

@@ -316,6 +316,9 @@ impl AudioInputBackend for ManualInputBackend {
 
 /// The capture backends of this build (real hosts first).
 pub fn default_input_backend() -> Box<dyn AudioInputBackend> {
+    if crate::no_audio_devices() {
+        return Box::new(NoInputBackend);
+    }
     #[cfg(feature = "cpal-backend")]
     {
         Box::new(cpal_input::CpalInputBackend::default_host())

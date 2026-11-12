@@ -110,3 +110,11 @@ pub use types::{
     AudioError, AudioEvent, EngineConfig, FadeCurve, Meters, VoiceId, VoiceParams,
     MAX_FADE_CROSSPOINTS,
 };
+
+/// `SHOWMASTER_NO_AUDIO_DEVICES=1`: no real audio device is listed or opened
+/// (only the silent null output). Release builds run the tests this way, so
+/// they neither disturb the computer's audio nor print the audio libraries'
+/// device probing.
+pub fn no_audio_devices() -> bool {
+    std::env::var_os("SHOWMASTER_NO_AUDIO_DEVICES").is_some_and(|v| !v.is_empty() && v != "0")
+}

@@ -14,7 +14,16 @@
 # Sobald Mac, Windows und Linux im Entwurf sind, wird er veröffentlicht -
 # erst dann bieten installierte Programme das Update an.
 set -euo pipefail
-cd "$(dirname "$0")"
+# Aus einer Kopie laufen: zum Bauen wird der Stand der Version ausgecheckt,
+# und dabei kann sich diese Datei ändern, während Bash sie noch liest.
+if [ -z "${RELEASE_SH_COPY:-}" ]; then
+  RELEASE_SH_DIR=$(cd "$(dirname "$0")" && pwd)
+  copy=$(mktemp)
+  cp "$0" "$copy"
+  RELEASE_SH_COPY=$copy RELEASE_SH_DIR=$RELEASE_SH_DIR exec bash "$copy" "$@"
+fi
+trap 'rm -f "$RELEASE_SH_COPY"' EXIT
+cd "$RELEASE_SH_DIR"
 
 # --- Einstellungen für dieses Projekt ---------------------------------------
 APP="Show Master"
@@ -38,6 +47,23 @@ set_version() {
 # ---------------------------------------------------------------------------
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
+LOG="${TMPDIR:-/tmp}/release-$(basename "$(pwd)").log"
+# Einen Bauschritt leise ausführen: alles ins Protokoll, auf dem Bildschirm
+# nur die Schritte ("== ...") und Ergebnisse. Bei einem Fehler: die letzten
+# Zeilen und wo das ganze Protokoll liegt.
+quiet() {
+  local rc
+  set +e
+  "$@" 2>&1 | tee -a "$LOG" | grep --line-buffered -E '^== |^Tests ok|^Built |^Wine or Inno' | while IFS= read -r l; do printf '   · %s\n' "${l#== }"; done
+  rc=${PIPESTATUS[0]}
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    printf '\n\033[31mFehlgeschlagen. Die letzten Zeilen:\033[0m\n'
+    tail -n 30 "$LOG"
+    printf '\nGanzes Protokoll: %s\n' "$LOG"
+    exit 1
+  fi
+}
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 fail() { printf '\n\033[31m%s\033[0m\n' "$*"; exit 1; }
 [ "$(uname -s)" = "Darwin" ] && MAC=1 || MAC=
@@ -119,14 +145,14 @@ setup_linux() {
   if [ ${#need[@]} -gt 0 ]; then
     command -v pacman >/dev/null 2>&1 || fail "Für den Windows-Bau fehlen: ${need[*]} (siehe docs/release-anleitung.md)"
     step "Werkzeuge für den Windows-Bau installieren (einmalig)"
-    sudo pacman -S --needed --noconfirm "${need[@]}" || fail "Konnte ${need[*]} nicht installieren. Für wine muss [multilib] in /etc/pacman.conf aktiv sein."
+    sudo pacman -S --needed --noconfirm "${need[@]}" >>"$LOG" 2>&1 || fail "Konnte ${need[*]} nicht installieren. Für wine muss [multilib] in /etc/pacman.conf aktiv sein."
   fi
-  rustup target add x86_64-pc-windows-gnu >/dev/null
+  rustup target add x86_64-pc-windows-gnu >>"$LOG" 2>&1
   local iscc="$HOME/.wine/drive_c/InnoSetup/ISCC.exe"
   if [ ! -f "$iscc" ]; then
     step "Inno Setup (baut den Windows-Installer) einrichten (einmalig)"
-    curl -fL -o /tmp/innosetup.exe https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe
-    WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" wine /tmp/innosetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER '/DIR=C:\InnoSetup'
+    curl -fsSL -o /tmp/innosetup.exe https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe
+    WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" wine /tmp/innosetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER '/DIR=C:\InnoSetup' >>"$LOG" 2>&1
     [ -f "$iscc" ] || fail "Inno Setup ließ sich nicht einrichten (siehe docs/release-anleitung.md)."
   fi
 }
@@ -138,7 +164,7 @@ setup_mac() {
   fi
   if ! command -v cargo >/dev/null 2>&1 && [ ! -x "$HOME/.cargo/bin/cargo" ]; then
     step "Rust installieren (einmalig)"
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >>"$LOG" 2>&1
   fi
   # shellcheck disable=SC1091
   [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
@@ -175,7 +201,8 @@ bump_version() {
     git reset -q --hard HEAD~1
     echo "Ein anderer Rechner war gerade schneller - nehme dessen Version."
     git pull -q --ff-only
-    exec bash "$0" "$@"
+    rm -f "$RELEASE_SH_COPY"
+    RELEASE_SH_COPY= exec bash "$RELEASE_SH_DIR/release.sh" "$@"
   fi
 }
 
@@ -191,6 +218,7 @@ BACK=""
 back_to_branch() { [ -n "$BACK" ] && git checkout -q "$BACK" 2>/dev/null || true; }
 
 cmd_release() {
+  : > "$LOG"
   [ -d .git ] || fail "Das geht nur in einem Git-Checkout (git clone ...)."
   [ -n "$(git status --porcelain --untracked-files=no)" ] && fail "Es gibt lokale Änderungen (git status). Ein Release wird nur aus dem Stand auf GitHub gebaut."
   # Erst anmelden: schon der Pull braucht bei privaten Repos die Anmeldung.
@@ -227,7 +255,7 @@ cmd_release() {
 
   # Genau den Stand dieser Version bauen (beide Rechner bauen denselben Code).
   BACK=$(git symbolic-ref -q --short HEAD || git rev-parse HEAD)
-  trap back_to_branch EXIT
+  trap 'back_to_branch; rm -f "$RELEASE_SH_COPY"' EXIT
   if [ "$(git rev-parse HEAD)" != "$(git rev-parse "v$v^{commit}")" ]; then
     echo "Baue den Stand von v$v (nicht die neueren Änderungen danach)."
     git checkout -q "v$v"
@@ -236,11 +264,11 @@ cmd_release() {
   if [ -n "$MAC" ]; then
     setup_mac
     step "$APP $v für den Mac bauen (dauert beim ersten Mal ein paar Minuten)"
-    build_mac
+    quiet build_mac
   else
     setup_linux
     step "$APP $v für Linux und Windows bauen (dauert beim ersten Mal ein paar Minuten)"
-    build_linux
+    quiet build_linux
   fi
 
   local files=()
@@ -251,16 +279,19 @@ cmd_release() {
   if [ "$(release_state "$v")" = "none" ]; then
     local notes
     notes=$(notes_for "$v")
-    gh release create "v$v" -R "$RELEASES" --draft --title "$APP $v" --notes-file "$notes" "${files[@]}" \
-      || gh release upload "v$v" -R "$RELEASES" --clobber "${files[@]}"
+    gh release create "v$v" -R "$RELEASES" --draft --title "$APP $v" --notes-file "$notes" "${files[@]}" >>"$LOG" 2>&1 \
+      || gh release upload "v$v" -R "$RELEASES" --clobber "${files[@]}" >>"$LOG" 2>&1 \
+      || fail "Hochladen fehlgeschlagen (Protokoll: $LOG)"
     rm -f "$notes"
   else
-    gh release upload "v$v" -R "$RELEASES" --clobber "${files[@]}"
+    gh release upload "v$v" -R "$RELEASES" --clobber "${files[@]}" >>"$LOG" 2>&1 \
+      || fail "Hochladen fehlgeschlagen (Protokoll: $LOG)"
   fi
+  printf '   · %s\n' "${files[@]##*/}"
 
   if show_status "$v"; then
     step "Alles da - veröffentlichen"
-    gh release edit "v$v" -R "$RELEASES" --draft=false --latest
+    gh release edit "v$v" -R "$RELEASES" --draft=false --latest >>"$LOG" 2>&1
     bold "$APP $v ist veröffentlicht. Installierte Programme bieten das Update beim nächsten Start an."
   else
     bold "Hochgeladen. Veröffentlicht wird automatisch, sobald die fehlenden Teile oben sind."
@@ -270,6 +301,6 @@ cmd_release() {
 case "${1:-}" in
   "") cmd_release "$@" ;;
   status) cmd_status ;;
-  -h|--help|help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h|--help|help) sed -n '2,16p' "$RELEASE_SH_DIR/release.sh" | sed 's/^# \{0,1\}//' ;;
   *) fail "Unbekannt: $1 (./release.sh oder ./release.sh status)" ;;
 esac

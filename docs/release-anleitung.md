@@ -33,6 +33,11 @@ Show Master 0.4.1: Entwurf (noch nicht für Nutzer sichtbar)
   ✓ Linux    showmaster-0.4.1-linux-x86_64.tar.gz
 ```
 
+Auf dem Bildschirm stehen nur die Schritte und Ergebnisse; alles andere (Compiler, Tests, Installer)
+steht im Protokoll `/tmp/release-<Ordnername>.log`. Bei einem Fehler zeigt das Skript die letzten Zeilen
+daraus. Die Tests laufen ohne echte Audiogeräte (nur die stumme Ausgabe), damit sie den Ton des Rechners
+nicht stören.
+
 Tipp: Commit-Nachrichten so schreiben, dass sie als „Was ist neu“ taugen (z. B. „Waveform zoom“).
 
 ## Einmalig: Zugang für den zweiten Rechner
