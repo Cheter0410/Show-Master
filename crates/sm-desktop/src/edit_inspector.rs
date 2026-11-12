@@ -1400,11 +1400,16 @@ fn http_tab(
         let ok = r.validate();
         ui.label(
             RichText::new(match &ok {
-                Ok(_) => "Plain HTTP on the show network; the answer's status goes to the log.".to_string(),
+                Ok(_) => "Plain HTTP on the show network; the answer's status goes to the log."
+                    .to_string(),
                 Err(e) => e.clone(),
             })
             .small()
-            .color(if ok.is_ok() { theme::MUTED } else { theme::WARN }),
+            .color(if ok.is_ok() {
+                theme::MUTED
+            } else {
+                theme::WARN
+            }),
         );
         ui.end_row();
     });

@@ -60,7 +60,9 @@ pub fn parse_url(url: &str) -> Result<Target, String> {
         return Err("URL too long".into());
     }
     if url.starts_with("https://") {
-        return Err("HTTPS is not supported (no certificates in a show network) - use http://".into());
+        return Err(
+            "HTTPS is not supported (no certificates in a show network) - use http://".into(),
+        );
     }
     let rest = url
         .strip_prefix("http://")
@@ -129,7 +131,8 @@ impl HttpRequest {
             "{} {} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: ShowMaster\r\nConnection: close\r\n",
             self.method, t.path
         );
-        let send_body = !self.body.is_empty() || matches!(self.method.as_str(), "POST" | "PUT" | "PATCH");
+        let send_body =
+            !self.body.is_empty() || matches!(self.method.as_str(), "POST" | "PUT" | "PATCH");
         if send_body {
             if !self.content_type.is_empty() {
                 head.push_str(&format!("Content-Type: {}\r\n", self.content_type));
@@ -158,11 +161,17 @@ mod tests {
     #[test]
     fn urls() {
         let t = parse_url("http://10.0.0.5:8080/api/x?y=1").unwrap();
-        assert_eq!((t.host.as_str(), t.port, t.path.as_str()), ("10.0.0.5", 8080, "/api/x?y=1"));
+        assert_eq!(
+            (t.host.as_str(), t.port, t.path.as_str()),
+            ("10.0.0.5", 8080, "/api/x?y=1")
+        );
         assert_eq!(parse_url("http://beamer.local").unwrap().path, "/");
         assert_eq!(parse_url("http://h?x=1").unwrap().path, "/?x=1");
         let t = parse_url("http://[fe80::1]:81/a").unwrap();
-        assert_eq!((t.host.as_str(), t.port, t.addr()), ("fe80::1", 81, "[fe80::1]:81".to_string()));
+        assert_eq!(
+            (t.host.as_str(), t.port, t.addr()),
+            ("fe80::1", 81, "[fe80::1]:81".to_string())
+        );
         assert!(parse_url("https://x/").unwrap_err().contains("HTTPS"));
         assert!(parse_url("ftp://x/").is_err());
         assert!(parse_url("http://:80/").is_err());
@@ -194,6 +203,11 @@ mod tests {
         assert!(s.starts_with("POST /scene HTTP/1.1\r\nHost: h:8000\r\n"));
         assert!(s.contains("Content-Length: 11\r\n"));
         assert!(s.ends_with("\r\n\r\n{\"scene\":3}"));
-        assert!(HttpRequest { method: "BREW".into(), ..get }.encode().is_err());
+        assert!(HttpRequest {
+            method: "BREW".into(),
+            ..get
+        }
+        .encode()
+        .is_err());
     }
 }

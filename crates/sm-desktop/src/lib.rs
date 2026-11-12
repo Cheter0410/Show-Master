@@ -8,6 +8,7 @@
 pub mod app;
 pub mod background;
 pub mod client;
+pub mod clipboard;
 pub mod edit;
 pub mod global_hotkeys;
 pub mod live;

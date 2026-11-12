@@ -598,3 +598,42 @@ fn touch_select_mode_taps_add_and_remove_cues() {
     settle(&mut h);
     assert_eq!(h.state().view.selection, vec![id_of(&env, "3")]);
 }
+
+#[test]
+fn copy_and_paste_cues_with_the_keyboard() {
+    let env = Env::demo();
+    let mut h = harness(&env);
+    let before = cues(&env).len();
+    h.get_by_label("Cue 2 Fade intro").click();
+    settle(&mut h);
+    h.input_mut().events.push(egui::Event::Copy);
+    // The copied text goes to the system clipboard in the same pass.
+    h.run_steps(1);
+    let copied = h
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .find_map(|c| match c {
+            egui::OutputCommand::CopyText(t) => Some(t.clone()),
+            _ => None,
+        });
+    let text = copied.expect("nothing copied");
+    assert!(text.contains("\"showmaster\":\"cues\""));
+    // Paste after cue 7 (as from another show: the text is all it needs).
+    h.get_by_label("Cue 7 Note").click();
+    settle(&mut h);
+    h.input_mut().events.push(egui::Event::Paste(text));
+    env.wait(&mut h, "pasted", |s| {
+        s["show"]["cue_lists"][0]["cues"].as_array().unwrap().len() == before + 1
+    });
+    settle(&mut h);
+    let list = cues(&env);
+    let pasted = &list[list.iter().position(|c| c.2 == "Note").unwrap() + 1];
+    assert_eq!(pasted.2, "Fade intro");
+    // The copy's fade target is the original target cue (same show: found by number).
+    let state = env.state();
+    let copy = find_cue(&state, pasted.0).unwrap();
+    assert_eq!(copy["kind"]["target"], id_of(&env, "1"));
+    assert_eq!(h.state().view.selection, vec![pasted.0]);
+}

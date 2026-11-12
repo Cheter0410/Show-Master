@@ -65,7 +65,11 @@ impl Pairings {
         let p = Pairing {
             id,
             token: crate::http::random_token(),
-            role: if role == Role::Admin { Role::Control } else { role },
+            role: if role == Role::Admin {
+                Role::Control
+            } else {
+                role
+            },
             name: if name.is_empty() {
                 format!("Device {id}")
             } else {
@@ -145,7 +149,11 @@ mod tests {
         assert_eq!(again.revoke(a.id), Some(a.token.clone()));
         assert_eq!(Pairings::load(Some(file.clone())).role_of(&a.token), None);
         assert_eq!(again.revoke_all().len(), 1);
-        assert!(Pairings::load(Some(file)).public().as_array().unwrap().is_empty());
+        assert!(Pairings::load(Some(file))
+            .public()
+            .as_array()
+            .unwrap()
+            .is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

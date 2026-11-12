@@ -63,6 +63,8 @@ enum Modal {
     CloseWhileRunning,
     /// Shown the first time the window is closed: the show keeps running.
     RunsInBackground,
+    /// Name for a new template from the selected cues.
+    SaveTemplate(String),
     Message {
         title: String,
         text: String,
@@ -85,6 +87,10 @@ pub enum JobDone {
 pub struct App {
     /// Background jobs (show packages) the window waits for.
     jobs: Vec<std::sync::mpsc::Receiver<JobDone>>,
+    /// Cues copied in this window (also put on the system clipboard).
+    clip: Option<String>,
+    /// Text to hand to the system clipboard in the next pass.
+    to_clipboard: Option<String>,
     pub client: Client,
     pub view: View,
     pub edit: crate::edit::EditState,
@@ -136,6 +142,8 @@ impl App {
             panic_tap: None,
             allow_close: false,
             jobs: Vec::new(),
+            clip: None,
+            to_clipboard: None,
             style_key: None,
             prefs: crate::prefs::Prefs::default(),
             global_hotkeys: Default::default(),
@@ -505,10 +513,24 @@ impl App {
         let stem: String = show
             .name
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == ' ' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
-        let stem = if stem.trim().is_empty() { "show".to_string() } else { stem.trim().to_string() };
-        let (ext, label) = if pdf { ("pdf", "PDF") } else { ("csv", "CSV (spreadsheet)") };
+        let stem = if stem.trim().is_empty() {
+            "show".to_string()
+        } else {
+            stem.trim().to_string()
+        };
+        let (ext, label) = if pdf {
+            ("pdf", "PDF")
+        } else {
+            ("csv", "CSV (spreadsheet)")
+        };
         let Some(path) = rfd::FileDialog::new()
             .set_title("Export cue sheet")
             .add_filter(label, &[ext])
@@ -599,7 +621,11 @@ impl App {
             .as_deref()
             .and_then(|p| Path::new(p).parent())
             .map(Path::to_path_buf);
-        let name = if show.name.trim().is_empty() { "Show".to_string() } else { show.name.trim().to_string() };
+        let name = if show.name.trim().is_empty() {
+            "Show".to_string()
+        } else {
+            show.name.trim().to_string()
+        };
         let Some(out) = rfd::FileDialog::new()
             .set_title("Export show package")
             .add_filter("Show Master package", &[sm_core::package::EXTENSION])
@@ -646,12 +672,13 @@ impl App {
         else {
             return;
         };
-        self.spawn_job("Unpacking the show", move || {
-            match sm_core::package::import(&package, &dest) {
+        self.spawn_job(
+            "Unpacking the show",
+            move || match sm_core::package::import(&package, &dest) {
                 Ok(show) => JobDone::Open(show),
                 Err(e) => JobDone::Error(format!("Could not open the package: {e}")),
-            }
-        });
+            },
+        );
     }
 
     fn handle_dropped_files(&mut self, ctx: &egui::Context) {
@@ -822,11 +849,103 @@ impl App {
         for action in fired {
             self.run_action(&action);
         }
+        // Copy / cut / paste of cues (Ctrl/Cmd + C, X, V), Edit mode, not while typing.
+        if !typing && !live {
+            let mut clip_events = Vec::new();
+            ctx.input_mut(|i| {
+                i.events.retain(|e| match e {
+                    egui::Event::Copy => {
+                        clip_events.push(("copy", None));
+                        false
+                    }
+                    egui::Event::Cut => {
+                        clip_events.push(("cut", None));
+                        false
+                    }
+                    egui::Event::Paste(t) => {
+                        clip_events.push(("paste", Some(t.clone())));
+                        false
+                    }
+                    _ => true,
+                });
+            });
+            for (what, text) in clip_events {
+                match (what, text) {
+                    ("paste", Some(t)) => self.paste_cues(&t),
+                    (a, _) => self.run_action(a),
+                }
+            }
+        }
+    }
+
+    /// Copy the selected cues (to this window and the system clipboard).
+    pub fn copy_selection(&mut self, cut: bool) {
+        let dir = self
+            .client
+            .state
+            .show_path
+            .as_deref()
+            .and_then(|p| Path::new(p).parent())
+            .map(Path::to_path_buf);
+        let ids = self.view.selection.clone();
+        let Some(text) =
+            crate::clipboard::copy_payload(&self.client.state.show, dir.as_deref(), &ids)
+        else {
+            return;
+        };
+        self.clip = Some(text.clone());
+        self.to_clipboard = Some(text);
+        let n = ids.len();
+        if cut {
+            self.cmd(json!({ "cmd": "delete_cues", "cues": ids }));
+            self.view.selection.clear();
+            self.toast(format!("Cut {n} cue{}", if n == 1 { "" } else { "s" }));
+        } else {
+            self.toast(format!(
+                "Copied {n} cue{} - paste in any show",
+                if n == 1 { "" } else { "s" }
+            ));
+        }
+    }
+
+    /// Paste cues from clipboard / template text after the selection.
+    pub fn paste_cues(&mut self, text: &str) {
+        let list = self.current_list();
+        let after = self.view.selection.last().copied();
+        match crate::clipboard::paste_command(text, list, after) {
+            Some(cmd) => self.cmd_then(cmd, |app, r| match r {
+                Ok(v) => {
+                    if let Some(ids) = v["cues"].as_array() {
+                        app.view.selection = ids.iter().filter_map(Value::as_u64).collect();
+                        app.edit.table.scroll_to = app.view.selection.first().copied();
+                    }
+                }
+                Err(e) => app.toast_error(App::error_text(&e)),
+            }),
+            None => self.toast_error("The clipboard holds no Show Master cues."),
+        }
     }
 
     pub fn run_action(&mut self, action: &str) {
         let editing = !self.is_live();
         match action {
+            "copy" if editing => self.copy_selection(false),
+            "cut" if editing => self.copy_selection(true),
+            "paste" if editing => {
+                if let Some(t) = self.clip.clone() {
+                    self.paste_cues(&t);
+                }
+            }
+            "save_template" if editing && !self.view.selection.is_empty() => {
+                let name = self
+                    .view
+                    .selection
+                    .first()
+                    .and_then(|id| self.client.state.show.cue(*id))
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default();
+                self.modal = Some(Modal::SaveTemplate(name));
+            }
             "go" => self.go(),
             "panic" => {
                 self.panic();
@@ -968,7 +1087,10 @@ impl App {
             };
             if let Some(show) = requested.iter().find(|p| ext(p) == SHOW_EXTENSION) {
                 self.open_show(show.clone());
-            } else if let Some(pkg) = requested.iter().find(|p| ext(p) == sm_core::package::EXTENSION) {
+            } else if let Some(pkg) = requested
+                .iter()
+                .find(|p| ext(p) == sm_core::package::EXTENSION)
+            {
                 self.import_package(Some(pkg.clone()));
             } else {
                 let audio: Vec<PathBuf> = requested
@@ -1092,6 +1214,9 @@ impl App {
             }
         });
         crate::setup::show(self, &ctx);
+        if let Some(t) = self.to_clipboard.take() {
+            ctx.copy_text(t);
+        }
         self.modals(&ctx);
         self.draw_toasts(&ctx);
         self.was_typing = ctx.egui_wants_keyboard_input();
@@ -1790,6 +1915,34 @@ impl App {
                             keep = false;
                             self.prefs.set_background_hint_seen();
                             self.hide_window(ui.ctx());
+                        }
+                    });
+                }
+                Modal::SaveTemplate(name) => {
+                    ui.heading("Save as template");
+                    ui.label("The selected cues can then be inserted into any show (Add cue > Templates).");
+                    let mut text = name.clone();
+                    let resp = ui.add(egui::TextEdit::singleline(&mut text).hint_text("Template name").desired_width(280.0));
+                    if text != *name {
+                        next = Some(Modal::SaveTemplate(text.clone()));
+                    }
+                    let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            keep = false;
+                        }
+                        if ui.add_enabled(!text.trim().is_empty(), egui::Button::new("Save")).clicked() || (enter && !text.trim().is_empty()) {
+                            keep = false;
+                            next = None;
+                            let dir = self.client.state.show_path.as_deref().and_then(|p| Path::new(p).parent()).map(Path::to_path_buf);
+                            let ids = self.view.selection.clone();
+                            match crate::clipboard::copy_payload(&self.client.state.show, dir.as_deref(), &ids)
+                                .ok_or_else(|| "nothing selected".to_string())
+                                .and_then(|p| crate::clipboard::save_template(&text, &p))
+                            {
+                                Ok(_) => self.toast(format!("Template \"{}\" saved", text.trim())),
+                                Err(e) => self.toast_error(format!("Could not save the template: {e}")),
+                            }
                         }
                     });
                 }

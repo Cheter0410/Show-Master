@@ -36,6 +36,19 @@ pub enum EditCommand {
     DuplicateCues {
         cues: Vec<CueId>,
     },
+    /// Insert copied cues (clipboard, template), possibly from another show:
+    /// new ids; fade / control targets inside the pasted set follow the
+    /// copies, other targets are looked up by cue number (`targets`: old id
+    /// -> number), otherwise cleared.
+    PasteCues {
+        cues: Vec<Cue>,
+        #[serde(default)]
+        list: Option<ListId>,
+        #[serde(default)]
+        after: Option<CueId>,
+        #[serde(default)]
+        targets: std::collections::HashMap<String, String>,
+    },
     MoveCues {
         cues: Vec<CueId>,
         #[serde(default)]
@@ -165,6 +178,35 @@ fn container_mut(show: &mut Show, list: ListId, parent: Option<CueId>) -> Option
             _ => None,
         },
         None => show.list_mut(list).map(|l| &mut l.cues),
+    }
+}
+
+/// New ids for `cue` and its children, recording old -> new.
+fn reassign_ids_mapped(
+    cue: &mut Cue,
+    show: &mut Show,
+    map: &mut std::collections::HashMap<CueId, CueId>,
+) {
+    let new = show.alloc_id();
+    map.insert(cue.id, new);
+    cue.id = new;
+    if let CueKind::Group(g) = &mut cue.kind {
+        for c in &mut g.children {
+            reassign_ids_mapped(c, show, map);
+        }
+    }
+}
+
+fn retarget(cue: &mut Cue, f: &dyn Fn(Option<CueId>) -> Option<CueId>) {
+    match &mut cue.kind {
+        CueKind::Fade(x) => x.target = f(x.target),
+        CueKind::Control(x) => x.target = f(x.target),
+        CueKind::Group(g) => {
+            for c in &mut g.children {
+                retarget(c, f);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -466,6 +508,73 @@ impl Document {
                 }
                 Ok(json!({ "cues": new_ids }))
             }
+            EditCommand::PasteCues {
+                mut cues,
+                list,
+                after,
+                targets,
+            } => {
+                if cues.is_empty() {
+                    return Err("nothing to paste".into());
+                }
+                let mut map = std::collections::HashMap::new();
+                for c in &mut cues {
+                    reassign_ids_mapped(c, &mut self.show, &mut map);
+                }
+                // Targets: inside the pasted set, else by number in this show.
+                let by_number = |n: &str| -> Option<CueId> {
+                    let mut found = None;
+                    self.show.for_each_cue(|_, c| {
+                        if found.is_none() && !n.is_empty() && c.number == n {
+                            found = Some(c.id);
+                        }
+                    });
+                    found
+                };
+                let resolved: std::collections::HashMap<CueId, Option<CueId>> = targets
+                    .iter()
+                    .filter_map(|(old, num)| Some((old.parse::<CueId>().ok()?, by_number(num))))
+                    .collect();
+                let fix = |t: Option<CueId>| -> Option<CueId> {
+                    let t = t?;
+                    map.get(&t)
+                        .copied()
+                        .or_else(|| resolved.get(&t).copied().flatten())
+                };
+                // Numbers already used in this show are cleared (no duplicates).
+                let mut used = std::collections::HashSet::new();
+                self.show.for_each_cue(|_, c| {
+                    if !c.number.is_empty() {
+                        used.insert(c.number.clone());
+                    }
+                });
+                for c in &mut cues {
+                    retarget(c, &fix);
+                    if used.contains(&c.number) {
+                        c.number.clear();
+                    }
+                }
+                let (list_id, parent, mut index) = match after.and_then(|a| locate(&self.show, a)) {
+                    Some((l, p, i)) => (l, p, i + 1),
+                    None => {
+                        let l = list
+                            .filter(|l| self.show.list(*l).is_some())
+                            .or_else(|| self.show.cue_lists.first().map(|l| l.id))
+                            .ok_or("no cue list")?;
+                        let len = self.show.list(l).map_or(0, |x| x.cues.len());
+                        (l, None, len)
+                    }
+                };
+                let ids: Vec<CueId> = cues.iter().map(|c| c.id).collect();
+                let container = container_mut(&mut self.show, list_id, parent)
+                    .ok_or("target container is not a group")?;
+                for c in cues {
+                    let at = index.min(container.len());
+                    container.insert(at, c);
+                    index = at + 1;
+                }
+                Ok(json!({ "cues": ids }))
+            }
             EditCommand::MoveCues {
                 cues,
                 list,
@@ -668,6 +777,49 @@ mod tests {
 
     fn order(doc: &Document) -> Vec<CueId> {
         doc.show.cue_lists[0].cues.iter().map(|c| c.id).collect()
+    }
+
+    #[test]
+    fn paste_remaps_ids_targets_and_numbers() {
+        let mut doc = Document::default();
+        let existing = add(&mut doc, "memo", None, None); // number "1"
+        doc.show.cue_mut(existing).unwrap().number = "10".into();
+        // Clipboard from another show: audio (id 500, number 1), a fade on it,
+        // and a control cue on cue 10 of the source show (id 900).
+        let clip: Vec<Cue> = serde_json::from_value(json!([
+            { "id": 500, "number": "1", "kind": { "type": "audio", "file": "/abs/a.wav" } },
+            { "id": 501, "number": "2", "kind": { "type": "fade", "target": 500 } },
+            { "id": 502, "number": "10", "kind": { "type": "control", "action": "stop", "target": 900 } },
+            { "id": 503, "kind": { "type": "fade", "target": 777 } }
+        ]))
+        .unwrap();
+        let r = doc
+            .apply(
+                EditCommand::PasteCues {
+                    cues: clip,
+                    list: None,
+                    after: Some(existing),
+                    targets: [("900".to_string(), "10".to_string())].into(),
+                },
+                &NoProbe,
+            )
+            .unwrap();
+        let ids: Vec<CueId> = r["cues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_u64().unwrap())
+            .collect();
+        assert_eq!(order(&doc), [vec![existing], ids.clone()].concat());
+        assert!(ids.iter().all(|i| ![500, 501, 502, 503].contains(i)));
+        let c = |i: usize| doc.show.cue(ids[i]).unwrap().clone();
+        assert!(matches!(c(1).kind, CueKind::Fade(f) if f.target == Some(ids[0])));
+        assert!(matches!(c(2).kind, CueKind::Control(x) if x.target == Some(existing)));
+        assert!(matches!(c(3).kind, CueKind::Fade(f) if f.target.is_none()));
+        // "10" exists already: cleared; "1" and "2" are free here.
+        assert_eq!((c(0).number.as_str(), c(2).number.as_str()), ("1", ""));
+        doc.apply(EditCommand::Undo, &NoProbe).unwrap();
+        assert_eq!(order(&doc), vec![existing]);
     }
 
     #[test]

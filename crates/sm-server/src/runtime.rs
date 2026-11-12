@@ -611,7 +611,12 @@ impl Runtime {
             .handle
             .clients
             .lock()
-            .map(|c| c.iter().filter(|c| c.token == token).map(|c| c.id).collect())
+            .map(|c| {
+                c.iter()
+                    .filter(|c| c.token == token)
+                    .map(|c| c.id)
+                    .collect()
+            })
             .unwrap_or_default();
         for id in ids {
             let _ = self.handle.events.send(Outbound::Kick(id));

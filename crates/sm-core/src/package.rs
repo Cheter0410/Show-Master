@@ -38,7 +38,9 @@ pub fn export(show: &Show, show_dir: Option<&Path>, out: &Path) -> Result<Export
     let mut missing = Vec::new();
     // Decide the name inside the package for every distinct source file.
     show.for_each_cue_mut(|cue| {
-        let CueKind::Audio(a) = &mut cue.kind else { return };
+        let CueKind::Audio(a) = &mut cue.kind else {
+            return;
+        };
         if a.file.is_empty() {
             return;
         }
@@ -79,8 +81,10 @@ pub fn export(show: &Show, show_dir: Option<&Path>, out: &Path) -> Result<Export
         let mut files: Vec<(&String, &PathBuf)> = used.iter().collect();
         files.sort();
         for (name, src) in &files {
-            zip.start_file(format!("media/{name}"), stored).map_err(err)?;
-            let mut f = BufReader::new(File::open(src).map_err(|e| format!("{}: {e}", src.display()))?);
+            zip.start_file(format!("media/{name}"), stored)
+                .map_err(err)?;
+            let mut f =
+                BufReader::new(File::open(src).map_err(|e| format!("{}: {e}", src.display()))?);
             bytes += io::copy(&mut f, &mut zip).map_err(err)?;
         }
         zip.finish().map_err(err)?.flush().map_err(err)?;
@@ -107,7 +111,10 @@ pub fn export(show: &Show, show_dir: Option<&Path>, out: &Path) -> Result<Export
 pub fn import(package: &Path, dest_parent: &Path) -> Result<PathBuf, String> {
     let mut zip = ZipArchive::new(BufReader::new(File::open(package).map_err(err)?))
         .map_err(|e| format!("not a show package: {e}"))?;
-    let has_show = (0..zip.len()).any(|i| zip.by_index(i).is_ok_and(|f| f.name().is_ok_and(|n| n == SHOW_ENTRY)));
+    let has_show = (0..zip.len()).any(|i| {
+        zip.by_index(i)
+            .is_ok_and(|f| f.name().is_ok_and(|n| n == SHOW_ENTRY))
+    });
     if !has_show {
         return Err("not a show package (no show.smshow inside)".into());
     }
@@ -164,8 +171,10 @@ mod tests {
         fs::create_dir_all(&other).unwrap();
         fs::write(show_dir.join("media/a.wav"), b"AAAA").unwrap();
         fs::write(other.join("a.wav"), b"BBBB").unwrap(); // same name, other file
-        let mut show = Show::default();
-        show.name = "Gala".into();
+        let mut show = Show {
+            name: "Gala".into(),
+            ..Show::default()
+        };
         for file in [
             "media/a.wav".to_string(),
             other.join("a.wav").display().to_string(),
@@ -208,7 +217,10 @@ mod tests {
         assert_eq!(fs::read(base.join("media/a.wav")).unwrap(), b"AAAA");
         assert_eq!(fs::read(base.join("media/2-a.wav")).unwrap(), b"BBBB");
         // Importing twice does not overwrite.
-        assert_eq!(import(&pkg, &dest).unwrap(), dest.join("Gala 2").join("Gala.smshow"));
+        assert_eq!(
+            import(&pkg, &dest).unwrap(),
+            dest.join("Gala 2").join("Gala.smshow")
+        );
     }
 
     #[test]
@@ -220,10 +232,13 @@ mod tests {
         // A crafted archive with ../ is unpacked without escaping.
         let evil = dir.path().join("evil.smpack");
         let mut z = ZipWriter::new(File::create(&evil).unwrap());
-        z.start_file("../../escape.txt", SimpleFileOptions::default()).unwrap();
+        z.start_file("../../escape.txt", SimpleFileOptions::default())
+            .unwrap();
         z.write_all(b"x").unwrap();
-        z.start_file(SHOW_ENTRY, SimpleFileOptions::default()).unwrap();
-        z.write_all(showfile::to_string(&Show::default()).unwrap().as_bytes()).unwrap();
+        z.start_file(SHOW_ENTRY, SimpleFileOptions::default())
+            .unwrap();
+        z.write_all(showfile::to_string(&Show::default()).unwrap().as_bytes())
+            .unwrap();
         z.finish().unwrap();
         let dest = dir.path().join("in");
         fs::create_dir_all(&dest).unwrap();

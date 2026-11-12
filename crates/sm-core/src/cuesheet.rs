@@ -75,7 +75,15 @@ pub fn action_text(cue: &Cue, show: &Show) -> String {
             label(show, f.target),
             if f.stop_target { ", then stop" } else { "" }
         ),
-        CueKind::Midi(m) => format!("{} {}", if m.port.is_empty() { "(no port)" } else { &m.port }, m.message.to_text()),
+        CueKind::Midi(m) => format!(
+            "{} {}",
+            if m.port.is_empty() {
+                "(no port)"
+            } else {
+                &m.port
+            },
+            m.message.to_text()
+        ),
         CueKind::Osc(o) => o.summary(),
         CueKind::Http(h) => h.summary(),
         CueKind::Timecode(t) => match &t.tc {
@@ -132,7 +140,11 @@ pub fn rows(show: &Show) -> Vec<SheetRow> {
                     CueKind::Memo => "Memo",
                 },
                 action: action_text(c, show),
-                duration: c.action_duration().filter(|d| *d > 0.0).map(secs).unwrap_or_default(),
+                duration: c
+                    .action_duration()
+                    .filter(|d| *d > 0.0)
+                    .map(secs)
+                    .unwrap_or_default(),
                 pre_wait: secs(c.pre_wait),
                 post_wait: secs(c.post_wait),
                 cont: match c.continue_mode {
@@ -306,25 +318,63 @@ const LINE: f32 = 11.0;
 /// A4 landscape cue sheet. `subtitle` goes under the show name (e.g. the date).
 pub fn to_pdf(show: &Show, subtitle: &str) -> Vec<u8> {
     let cols = [
-        Col { title: "#", width: 38.0 },
-        Col { title: "Name", width: 150.0 },
-        Col { title: "Type", width: 50.0 },
-        Col { title: "Action", width: 165.0 },
-        Col { title: "Dur.", width: 38.0 },
-        Col { title: "Pre", width: 32.0 },
-        Col { title: "Post", width: 32.0 },
-        Col { title: "Continue", width: 62.0 },
-        Col { title: "TC trigger", width: 58.0 },
-        Col { title: "Notes", width: PAGE_W - 2.0 * MARGIN - 625.0 },
+        Col {
+            title: "#",
+            width: 38.0,
+        },
+        Col {
+            title: "Name",
+            width: 150.0,
+        },
+        Col {
+            title: "Type",
+            width: 50.0,
+        },
+        Col {
+            title: "Action",
+            width: 165.0,
+        },
+        Col {
+            title: "Dur.",
+            width: 38.0,
+        },
+        Col {
+            title: "Pre",
+            width: 32.0,
+        },
+        Col {
+            title: "Post",
+            width: 32.0,
+        },
+        Col {
+            title: "Continue",
+            width: 62.0,
+        },
+        Col {
+            title: "TC trigger",
+            width: 58.0,
+        },
+        Col {
+            title: "Notes",
+            width: PAGE_W - 2.0 * MARGIN - 625.0,
+        },
     ];
-    let title = if show.name.is_empty() { "Show" } else { show.name.as_str() };
+    let title = if show.name.is_empty() {
+        "Show"
+    } else {
+        show.name.as_str()
+    };
 
     // Content streams are built as text with byte strings spliced in below.
     let mut streams: Vec<Vec<u8>> = Vec::new();
     let mut cur: Vec<u8> = Vec::new();
     let txt = |buf: &mut Vec<u8>, x: f32, y: f32, bold: bool, size: f32, s: &str| {
         buf.extend_from_slice(
-            format!("BT /{} {size:.1} Tf {x:.1} {y:.1} Td ", if bold { "F2" } else { "F1" }).as_bytes(),
+            format!(
+                "BT /{} {size:.1} Tf {x:.1} {y:.1} Td ",
+                if bold { "F2" } else { "F1" }
+            )
+            .as_bytes(),
         );
         buf.extend_from_slice(&pdf_str(s));
         buf.extend_from_slice(b" Tj ET\n");
@@ -332,9 +382,23 @@ pub fn to_pdf(show: &Show, subtitle: &str) -> Vec<u8> {
     let header = |buf: &mut Vec<u8>, n: usize| -> f32 {
         let top = PAGE_H - MARGIN;
         txt(buf, MARGIN, top - 12.0, true, 15.0, title);
-        txt(buf, MARGIN, top - 26.0, false, 9.0, &format!("Cue sheet  {subtitle}"));
+        txt(
+            buf,
+            MARGIN,
+            top - 26.0,
+            false,
+            9.0,
+            &format!("Cue sheet  {subtitle}"),
+        );
         let p = format!("Page {n}");
-        txt(buf, PAGE_W - MARGIN - text_w(&p, 9.0, false), top - 26.0, false, 9.0, &p);
+        txt(
+            buf,
+            PAGE_W - MARGIN - text_w(&p, 9.0, false),
+            top - 26.0,
+            false,
+            9.0,
+            &p,
+        );
         let mut x = MARGIN;
         let hy = top - 46.0;
         for c in &cols {
@@ -342,8 +406,13 @@ pub fn to_pdf(show: &Show, subtitle: &str) -> Vec<u8> {
             x += c.width;
         }
         buf.extend_from_slice(
-            format!("0.5 w {MARGIN:.1} {:.1} m {:.1} {:.1} l S\n", hy - 4.0, PAGE_W - MARGIN, hy - 4.0)
-                .as_bytes(),
+            format!(
+                "0.5 w {MARGIN:.1} {:.1} m {:.1} {:.1} l S\n",
+                hy - 4.0,
+                PAGE_W - MARGIN,
+                hy - 4.0
+            )
+            .as_bytes(),
         );
         hy - 4.0 - LINE
     };
@@ -356,7 +425,14 @@ pub fn to_pdf(show: &Show, subtitle: &str) -> Vec<u8> {
                 streams.push(std::mem::take(&mut cur));
                 y = header(&mut cur, streams.len() + 1);
             }
-            txt(&mut cur, MARGIN, y - 2.0, true, 10.0, &format!("List: {}", r.list));
+            txt(
+                &mut cur,
+                MARGIN,
+                y - 2.0,
+                true,
+                10.0,
+                &format!("List: {}", r.list),
+            );
             y -= LINE + 4.0;
             last_list = Some(r.list.clone());
         }
@@ -396,8 +472,13 @@ pub fn to_pdf(show: &Show, subtitle: &str) -> Vec<u8> {
         }
         y -= height;
         cur.extend_from_slice(
-            format!("0.85 G 0.3 w {MARGIN:.1} {:.1} m {:.1} {:.1} l S 0 G\n", y + LINE - 3.0, PAGE_W - MARGIN, y + LINE - 3.0)
-                .as_bytes(),
+            format!(
+                "0.85 G 0.3 w {MARGIN:.1} {:.1} m {:.1} {:.1} l S 0 G\n",
+                y + LINE - 3.0,
+                PAGE_W - MARGIN,
+                y + LINE - 3.0
+            )
+            .as_bytes(),
         );
     }
     streams.push(cur);
@@ -408,8 +489,14 @@ pub fn to_pdf(show: &Show, subtitle: &str) -> Vec<u8> {
     objs.push(b"<< /Type /Catalog /Pages 2 0 R >>".to_vec());
     let kids: Vec<String> = (0..n).map(|i| format!("{} 0 R", 5 + 2 * i)).collect();
     objs.push(format!("<< /Type /Pages /Kids [{}] /Count {n} >>", kids.join(" ")).into_bytes());
-    objs.push(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec());
-    objs.push(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>".to_vec());
+    objs.push(
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
+            .to_vec(),
+    );
+    objs.push(
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>"
+            .to_vec(),
+    );
     for (i, s) in streams.iter().enumerate() {
         objs.push(
             format!(
@@ -454,8 +541,10 @@ mod tests {
     use crate::model::{AudioCue, GroupCue};
 
     fn show() -> Show {
-        let mut s = Show::default();
-        s.name = "Müller; \"Gala\"".into();
+        let mut s = Show {
+            name: "Müller; \"Gala\"".into(),
+            ..Show::default()
+        };
         let mut add = |kind: CueKind, number: &str, name: &str, notes: &str| {
             let id = s.alloc_id();
             Cue {
@@ -526,7 +615,15 @@ mod tests {
         assert!(pages >= 3, "{pages} pages");
         assert!(text.contains(&format!("/Count {pages}")));
         // xref offsets point at the objects.
-        let xref_at: usize = text.rsplit("startxref\n").next().unwrap().lines().next().unwrap().parse().unwrap();
+        let xref_at: usize = text
+            .rsplit("startxref\n")
+            .next()
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
         assert!(pdf[xref_at..].starts_with(b"xref"));
         let entries: Vec<usize> = text[xref_at..]
             .lines()

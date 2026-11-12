@@ -341,7 +341,10 @@ pub(super) fn remote_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
                 }
             });
         if s.remote.pairings.len() > 1 && ui.button("Revoke all").clicked() {
-            st.send_toast(json!({ "cmd": "revoke_all_pairings" }), "All paired devices revoked");
+            st.send_toast(
+                json!({ "cmd": "revoke_all_pairings" }),
+                "All paired devices revoked",
+            );
         }
     }
 

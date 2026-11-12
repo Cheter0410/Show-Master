@@ -1285,6 +1285,38 @@ fn context_menu(
         ui.close();
     }
     ui.separator();
+    let copy_key = if cfg!(target_os = "macos") {
+        "Cmd"
+    } else {
+        "Ctrl"
+    };
+    if ui
+        .button(format!("Copy{plural}"))
+        .on_hover_text(format!(
+            "{copy_key}+C - paste into this or another show with {copy_key}+V"
+        ))
+        .clicked()
+    {
+        *sel = ids.clone();
+        out.push(Out::Action("copy"));
+        ui.close();
+    }
+    if ui.button("Paste after this").clicked() {
+        *sel = vec![id];
+        out.push(Out::Action("paste"));
+        ui.close();
+    }
+    super::template_menu(ui, out);
+    if ui
+        .button(format!("Save{plural} as template…"))
+        .on_hover_text("Reuse these cues in other shows: Add cue > Templates")
+        .clicked()
+    {
+        *sel = ids.clone();
+        out.push(Out::Action("save_template"));
+        ui.close();
+    }
+    ui.separator();
     if ui.button(format!("Duplicate{plural}")).clicked() {
         out.push(Out::CmdSelect(
             json!({ "cmd": "duplicate_cues", "cues": ids }),

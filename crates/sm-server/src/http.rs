@@ -163,7 +163,12 @@ fn role_for(app: &AppState, addr: &SocketAddr, token: Option<&str>) -> Option<Ro
             return Some(role);
         }
         // A paired device (QR code with token).
-        return app.handle.pairings.lock().ok().and_then(|p| p.role_of(token));
+        return app
+            .handle
+            .pairings
+            .lock()
+            .ok()
+            .and_then(|p| p.role_of(token));
     }
     // The machine running the show is trusted: its own UI needs no login.
     addr.ip().is_loopback().then_some(Role::Admin)
@@ -455,7 +460,13 @@ async fn api_waveform(
 }
 
 /// The cue sheet, for any role that may see the cue list (`view` and up).
-fn cuesheet(app: &AppState, addr: &SocketAddr, q: &HashMap<String, String>, headers: &HeaderMap, pdf: bool) -> Response {
+fn cuesheet(
+    app: &AppState,
+    addr: &SocketAddr,
+    q: &HashMap<String, String>,
+    headers: &HeaderMap,
+    pdf: bool,
+) -> Response {
     if role_for(app, addr, token_of(q, headers)).is_none() {
         return deny();
     }
@@ -467,13 +478,23 @@ fn cuesheet(app: &AppState, addr: &SocketAddr, q: &HashMap<String, String>, head
         let date = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
         ("application/pdf", sm_core::cuesheet::to_pdf(&show, &date))
     } else {
-        ("text/csv; charset=utf-8", sm_core::cuesheet::to_csv(&show).into_bytes())
+        (
+            "text/csv; charset=utf-8",
+            sm_core::cuesheet::to_csv(&show).into_bytes(),
+        )
     };
-    let name = if pdf { "cue-sheet.pdf" } else { "cue-sheet.csv" };
+    let name = if pdf {
+        "cue-sheet.pdf"
+    } else {
+        "cue-sheet.csv"
+    };
     (
         [
             (header::CONTENT_TYPE, ctype.to_string()),
-            (header::CONTENT_DISPOSITION, format!("inline; filename=\"{name}\"")),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{name}\""),
+            ),
             (header::CACHE_CONTROL, "no-store".to_string()),
         ],
         body,

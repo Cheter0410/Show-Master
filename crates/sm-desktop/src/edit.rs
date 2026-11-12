@@ -35,12 +35,13 @@ pub const ADD_TYPES: [(&str, &str); 9] = [
 ];
 
 /// Commands that change the show document (rejected in live mode).
-const EDIT_COMMANDS: [&str; 13] = [
+const EDIT_COMMANDS: [&str; 14] = [
     "add_cue",
     "update_cue",
     "update_cues",
     "delete_cues",
     "duplicate_cues",
+    "paste_cues",
     "move_cues",
     "renumber",
     "group_cues",
@@ -79,6 +80,8 @@ pub(crate) enum Out {
     ShowList(u64),
     /// Run an app action (delete, duplicate...) after drawing.
     Action(&'static str),
+    /// Insert the cues of this template after the selection.
+    InsertTemplate(String),
 }
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
@@ -226,6 +229,10 @@ fn apply(app: &mut App, outs: Vec<Out>) {
                 app.view.selection.clear();
             }
             Out::Action(a) => app.run_action(a),
+            Out::InsertTemplate(name) => match crate::clipboard::load_template(&name) {
+                Ok(text) => app.paste_cues(&text),
+                Err(e) => app.toast_error(format!("Template \"{name}\": {e}")),
+            },
         }
     }
 }
@@ -239,6 +246,29 @@ fn is_edit(cmd: &Value) -> bool {
 // ---------------------------------------------------------------------------
 // Add-cue row, list tabs, mini transport
 // ---------------------------------------------------------------------------
+
+/// "Insert template" submenu (saved groups of cues).
+pub(crate) fn template_menu(ui: &mut egui::Ui, out: &mut Vec<Out>) {
+    ui.menu_button("Insert template", |ui| {
+        let templates = crate::clipboard::templates();
+        if templates.is_empty() {
+            ui.label(
+                RichText::new("No templates yet: right-click cues > Save as template")
+                    .color(theme::MUTED),
+            );
+        }
+        for name in &templates {
+            if ui
+                .button(name)
+                .on_hover_text("Insert these cues after the selection")
+                .clicked()
+            {
+                out.push(Out::InsertTemplate(name.clone()));
+                ui.close();
+            }
+        }
+    });
+}
 
 /// Add-cue buttons (one per type), or the same entries inside a menu.
 fn add_buttons(app: &App, ui: &mut egui::Ui, out: &mut Vec<Out>, in_menu: bool) {
@@ -266,6 +296,10 @@ fn add_buttons(app: &App, ui: &mut egui::Ui, out: &mut Vec<Out>, in_menu: bool) 
                 ui.close();
             }
         }
+    }
+    if in_menu {
+        ui.separator();
+        template_menu(ui, out);
     }
 }
 

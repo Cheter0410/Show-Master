@@ -71,14 +71,12 @@ fn run(rx: mpsc::Receiver<Job>, log: Log) {
             let log = log.clone();
             let _ = std::thread::Builder::new()
                 .name("sm-http-req".into())
-                .spawn(move || {
-                    match request(&job.addr, &job.bytes) {
-                        Ok(status) => tracing::info!("HTTP cue {}: {status}", job.summary),
-                        Err(e) => {
-                            if let Ok(mut l) = log.lock() {
-                                if l.len() < 64 {
-                                    l.push(format!("HTTP cue {} failed: {e}", job.summary));
-                                }
+                .spawn(move || match request(&job.addr, &job.bytes) {
+                    Ok(status) => tracing::info!("HTTP cue {}: {status}", job.summary),
+                    Err(e) => {
+                        if let Ok(mut l) = log.lock() {
+                            if l.len() < 64 {
+                                l.push(format!("HTTP cue {} failed: {e}", job.summary));
                             }
                         }
                     }
@@ -105,8 +103,10 @@ fn request(addr: &str, bytes: &[u8]) -> Result<String, String> {
         .next()
         .ok_or("address not found")?;
     let mut s = TcpStream::connect_timeout(&sock, CONNECT_TIMEOUT).map_err(|e| e.to_string())?;
-    s.set_read_timeout(Some(IO_TIMEOUT)).map_err(|e| e.to_string())?;
-    s.set_write_timeout(Some(IO_TIMEOUT)).map_err(|e| e.to_string())?;
+    s.set_read_timeout(Some(IO_TIMEOUT))
+        .map_err(|e| e.to_string())?;
+    s.set_write_timeout(Some(IO_TIMEOUT))
+        .map_err(|e| e.to_string())?;
     s.write_all(bytes).map_err(|e| e.to_string())?;
     let mut buf = [0u8; 256];
     let mut got = Vec::new();
@@ -150,7 +150,12 @@ mod tests {
         });
         let out = HttpOut::new();
         let due = Instant::now() + Duration::from_millis(50);
-        out.send_at(due, addr, b"GET /x HTTP/1.1\r\nHost: h\r\n\r\n".to_vec(), "GET http://h/x".into());
+        out.send_at(
+            due,
+            addr,
+            b"GET /x HTTP/1.1\r\nHost: h\r\n\r\n".to_vec(),
+            "GET http://h/x".into(),
+        );
         let (at, req) = got.join().unwrap();
         assert!(at >= due);
         assert!(req.starts_with("GET /x"));
@@ -161,9 +166,17 @@ mod tests {
     #[test]
     fn refused_connection_is_reported() {
         // A port nothing listens on.
-        let free = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+        let free = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
         let out = HttpOut::new();
-        out.send_at(Instant::now(), free.to_string(), b"GET / HTTP/1.1\r\n\r\n".to_vec(), "GET x".into());
+        out.send_at(
+            Instant::now(),
+            free.to_string(),
+            b"GET / HTTP/1.1\r\n\r\n".to_vec(),
+            "GET x".into(),
+        );
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             if let Some(msg) = out.take_errors().first() {

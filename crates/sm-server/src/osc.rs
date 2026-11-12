@@ -234,14 +234,26 @@ mod tests {
         let c = |a: &str, args: &[Value]| short_command(a, args, &ids);
         assert_eq!(c("/go", &[]), Some(json!({ "cmd": "go" })));
         assert_eq!(c("/stop", &[]), Some(json!({ "cmd": "stop_all" })));
-        assert_eq!(c("/cue/12/start", &[]), Some(json!({ "cmd": "start_cue", "cue": 7 })));
-        assert_eq!(c("/cue/13.1/stop", &[]), Some(json!({ "cmd": "stop_cue", "cue": 11 })));
+        assert_eq!(
+            c("/cue/12/start", &[]),
+            Some(json!({ "cmd": "start_cue", "cue": 7 }))
+        );
+        assert_eq!(
+            c("/cue/13.1/stop", &[]),
+            Some(json!({ "cmd": "stop_cue", "cue": 11 }))
+        );
         assert_eq!(
             c("/cue/12/load", &[json!(4.5)]),
             Some(json!({ "cmd": "load_cue", "cue": 7, "time": 4.5 }))
         );
-        assert_eq!(c("/playhead/13", &[]), Some(json!({ "cmd": "set_playhead", "cue": 9 })));
-        assert_eq!(c("/master", &[json!(-6.0)]), Some(json!({ "cmd": "set_master", "db": -6.0 })));
+        assert_eq!(
+            c("/playhead/13", &[]),
+            Some(json!({ "cmd": "set_playhead", "cue": 9 }))
+        );
+        assert_eq!(
+            c("/master", &[json!(-6.0)]),
+            Some(json!({ "cmd": "set_master", "db": -6.0 }))
+        );
         assert_eq!(
             c("/tc/locate", &[json!("01:00:00:00")]),
             Some(json!({ "cmd": "tc_relocate", "to": "01:00:00:00" }))
@@ -250,7 +262,18 @@ mod tests {
         assert_eq!(c("/cue/12/explode", &[]), None);
         assert_eq!(c("/master", &[]), None);
         // Every produced command parses.
-        for a in ["/go", "/stop", "/panic", "/pause", "/resume", "/reset", "/next", "/previous", "/cue/12/arm", "/tc/start"] {
+        for a in [
+            "/go",
+            "/stop",
+            "/panic",
+            "/pause",
+            "/resume",
+            "/reset",
+            "/next",
+            "/previous",
+            "/cue/12/arm",
+            "/tc/start",
+        ] {
             parse_command(c(a, &[]).unwrap()).unwrap();
         }
     }
