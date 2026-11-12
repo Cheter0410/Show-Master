@@ -94,7 +94,7 @@ export function StatusBar() {
   const midiPorts = useApp((s) => s.doc?.midi.ports.length ?? 0);
   const peers = useApp((s) => s.doc?.midi.rtp.peers);
   const clients = useApp((s) => s.doc?.remote.clients.length ?? 0);
-  const cpu = useApp((s) => (s.tick ? Math.round(s.tick.cpu * 100) : null));
+  const cpu = useApp((s) => (s.tick ? Math.round((s.tick.process_cpu ?? s.tick.cpu) * 100) : null));
   const underruns = useApp((s) => s.tick?.underruns ?? 0);
   const voices = useApp((s) => s.tick?.voices ?? 0);
   const latency = useApp((s) => s.latencyMs);

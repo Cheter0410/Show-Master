@@ -286,6 +286,8 @@ fn main() -> std::process::ExitCode {
         }
     };
     let log_path = init_logging(args.log_dir.clone().unwrap_or_else(default_log_dir));
+    // Show computers must not be throttled (macOS App Nap, timer coalescing).
+    sm_audio::priority::keep_awake();
     tracing::info!(
         "Show Master {} starting (log: {})",
         runtime::VERSION,

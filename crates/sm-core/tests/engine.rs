@@ -859,3 +859,62 @@ fn http_cue_sends_its_request() {
         .iter()
         .any(|ev| matches!(&ev.kind, EventKind::CueError { cue, .. } if *cue == bad)));
 }
+
+#[test]
+fn gain_and_routing_edits_reach_a_running_cue() {
+    let mut b = B::new();
+    let c = b.cue(audio(10.0));
+    let mut e = b.engine();
+    e.drain_actions();
+    e.command(Command::Go { list: None }).unwrap();
+    e.advance(48_000);
+    e.drain_actions();
+    // Gain knob while it plays.
+    let mut show = e.show().clone();
+    if let CueKind::Audio(a) = &mut show.cue_mut(c).unwrap().kind {
+        a.gain_db = -6.0;
+    }
+    e.set_show(show.clone());
+    let fades: Vec<_> = e
+        .drain_actions()
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::FadeVoice {
+                master,
+                crosspoints,
+                ..
+            } => Some((master, crosspoints)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fades.len(), 1);
+    assert!((fades[0].0.unwrap() - 0.501).abs() < 0.01);
+    // Routing: send the left channel to output 2 instead; the old crosspoint fades out.
+    if let CueKind::Audio(a) = &mut show.cue_mut(c).unwrap().kind {
+        a.routing = vec![Crosspoint {
+            src: 0,
+            out: 1,
+            db: 0.0,
+        }];
+    }
+    e.set_show(show.clone());
+    let fade = e
+        .drain_actions()
+        .into_iter()
+        .find_map(|a| match a {
+            Action::FadeVoice { crosspoints, .. } => Some(crosspoints),
+            _ => None,
+        })
+        .expect("routing change sent");
+    assert!(fade.iter().any(|&(s, d, g)| s == 0 && d == 1 && g > 0.9));
+    assert!(
+        fade.iter().any(|&(_, d, g)| d == 0 && g == 0.0),
+        "old crosspoint silenced: {fade:?}"
+    );
+    // Nothing changed: nothing sent.
+    e.set_show(show);
+    assert!(!e
+        .drain_actions()
+        .iter()
+        .any(|a| matches!(a, Action::FadeVoice { .. })));
+}

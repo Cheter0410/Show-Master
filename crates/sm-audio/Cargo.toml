@@ -24,6 +24,18 @@ symphonia = { version = "0.5", default-features = false, features = ["wav", "fla
 rubato = "0.16"
 cpal = { version = "0.15", optional = true }
 
+# Thread priority of the streaming / engine threads, and keeping macOS from
+# throttling a show computer (App Nap).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSProcessInfo", "NSString"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Threading", "Win32_Foundation"] }
+
 [dev-dependencies]
 hound = "3.5"
 

@@ -59,7 +59,7 @@ pub fn engine_with_generators(
     config.max_voices = config.max_voices.clamp(1, 4096);
     config.command_capacity = config.command_capacity.max(64);
     if !config.ring_seconds.is_finite() || config.ring_seconds <= 0.0 {
-        config.ring_seconds = 2.0;
+        config.ring_seconds = 4.0;
     }
 
     let shared = Arc::new(Shared::new(config.out_channels));

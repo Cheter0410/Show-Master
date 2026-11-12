@@ -88,6 +88,7 @@
 pub mod backend;
 mod controller;
 pub mod input;
+pub mod priority;
 mod ramp;
 mod renderer;
 pub mod source;

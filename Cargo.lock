@@ -4184,6 +4184,7 @@ name = "showmaster"
 version = "0.2.0"
 dependencies = [
  "serde_json",
+ "sm-audio",
  "sm-core",
  "sm-desktop",
  "sm-mdns",
@@ -4263,12 +4264,16 @@ version = "0.2.0"
 dependencies = [
  "cpal",
  "hound",
+ "libc",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
  "rtrb",
  "rubato",
  "serde",
  "symphonia",
  "thiserror 2.0.21",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

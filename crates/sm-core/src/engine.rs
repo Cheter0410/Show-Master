@@ -362,6 +362,9 @@ struct Trig {
     chase: bool,
 }
 
+/// Level and crosspoints (source, output, gain) of a playing voice.
+type VoiceMix = (f32, Vec<(u16, u16, f32)>);
+
 pub struct Engine {
     show: Show,
     sr: u32,
@@ -457,7 +460,35 @@ impl Engine {
     /// running; cues that were removed are stopped.
     pub fn set_show(&mut self, show: Show) {
         let t = self.now;
+        // Level and routing of running audio cues follow edits (gain knob,
+        // routing matrix) with a short ramp instead of waiting for the next start.
+        let before = self.running_mix();
         self.show = show;
+        let after = self.running_mix();
+        let ramp = self.fr(0.03);
+        for (voice, (gain, matrix)) in after {
+            let Some((old_gain, old_matrix)) = before.get(&voice) else {
+                continue;
+            };
+            if *old_gain == gain && *old_matrix == matrix {
+                continue;
+            }
+            // Crosspoints that are gone are faded to silence.
+            let mut crosspoints = matrix.clone();
+            for &(s, d, _) in old_matrix {
+                if !matrix.iter().any(|&(s2, d2, _)| s2 == s && d2 == d) {
+                    crosspoints.push((s, d, 0.0));
+                }
+            }
+            self.actions.push(Action::FadeVoice {
+                voice,
+                at: t,
+                frames: ramp,
+                curve: Curve::Linear,
+                master: Some(gain),
+                crosspoints,
+            });
+        }
         let gone: Vec<u64> = self
             .insts
             .iter()
@@ -828,6 +859,27 @@ impl Engine {
             .filter_map(|x| {
                 let out = self.show.patch.outputs.get(usize::from(x.out))?;
                 Some((x.src, out.channel, db_to_lin(x.db)))
+            })
+            .collect()
+    }
+
+    /// Gain and routing matrix of every running audio voice, from the show.
+    fn running_mix(&self) -> HashMap<VoiceId, VoiceMix> {
+        let outputs = self.show.patch.outputs.len();
+        self.insts
+            .iter()
+            .filter_map(|i| {
+                let voice = i.voice?;
+                let CueKind::Audio(a) = &self.show.cue(i.cue)?.kind else {
+                    return None;
+                };
+                Some((
+                    voice,
+                    (
+                        db_to_lin(a.gain_db),
+                        self.matrix(&a.effective_routing(outputs)),
+                    ),
+                ))
             })
             .collect()
     }

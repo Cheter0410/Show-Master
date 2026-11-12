@@ -81,6 +81,7 @@ impl Drop for Streamer {
 }
 
 fn run(job_rx: Receiver<StreamJob>, err_tx: Sender<(u64, String)>, stop: Arc<AtomicBool>) {
+    crate::priority::boost_current_thread();
     let mut jobs: Vec<StreamJob> = Vec::new();
     let mut scratch: Vec<f32> = Vec::new();
     loop {
@@ -99,6 +100,12 @@ fn run(job_rx: Receiver<StreamJob>, err_tx: Sender<(u64, String)>, stop: Arc<Ato
         // away from the audio callback.
         jobs.retain(|j| !j.shared.cancel.load(Ordering::Acquire));
 
+        // The emptiest rings first: a voice close to running dry must not
+        // wait behind voices that still hold seconds of audio.
+        jobs.sort_by_key(|j| {
+            let cap = j.producer.buffer().capacity().max(1);
+            (cap - j.producer.slots()) * 1000 / cap
+        });
         let mut did_work = false;
         for job in jobs.iter_mut() {
             if job.shared.eos.load(Ordering::Relaxed) {

@@ -339,7 +339,10 @@ pub struct Tick {
     pub active: Vec<Active>,
     pub next_auto: Option<f64>,
     pub meters: Meters,
+    /// Audio callback load (fraction of the buffer time).
     pub cpu: f32,
+    /// Whole process, fraction of one core.
+    pub process_cpu: f32,
     pub underruns: u64,
     pub voices: usize,
     pub alarms: Vec<String>,

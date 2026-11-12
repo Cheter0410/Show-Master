@@ -490,6 +490,8 @@ struct Runtime {
     state_dirty: bool,
     /// External outputs muted (backup computer in standby).
     ext_muted: bool,
+    /// CPU load of the whole process (status bar).
+    cpu_meter: sm_audio::priority::CpuMeter,
     /// Incoming MIDI: mapping state, last message, when the UI last saw it.
     inputs: crate::inputs::InputState,
     last_state: Value,
@@ -524,6 +526,7 @@ pub fn spawn(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let thread = std::thread::Builder::new()
         .name("sm-engine".into())
         .spawn(move || {
+            sm_audio::priority::boost_current_thread();
             let mut rt = Runtime::new(config, h);
             rt.publish(true);
             let _ = ready_tx.send(());
@@ -608,6 +611,7 @@ impl Runtime {
             urls: (None, Vec::new()),
             state_dirty: true,
             ext_muted: false,
+            cpu_meter: Default::default(),
             inputs: crate::inputs::InputState::default(),
             last_state: Value::Null,
             rev: 0,
@@ -1010,7 +1014,7 @@ impl Runtime {
                 r
             }
             AnyCommand::Edit(cmd) => {
-                if self.mode == Mode::Live {
+                if self.mode == Mode::Live && !cmd.is_live_safe() {
                     return Err("live_mode".into());
                 }
                 let result = self.doc.apply(cmd, &Probe)?;
@@ -1533,7 +1537,7 @@ impl Runtime {
             "active": snap.active,
             "next_auto": snap.next_auto,
             "meters": { "peak": meters.peak, "rms": meters.rms, "clip": meters.clip },
-            "cpu": status.cpu, "underruns": status.underruns, "voices": status.voices,
+            "cpu": status.cpu, "process_cpu": self.cpu_meter.sample(), "underruns": status.underruns, "voices": status.voices,
             "alarms": alarms,
         })
     }

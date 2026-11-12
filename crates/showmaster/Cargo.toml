@@ -8,6 +8,7 @@ rust-version.workspace = true
 build = "build.rs"
 
 [dependencies]
+sm-audio.workspace = true
 sm-core.workspace = true
 sm-server.workspace = true
 sm-mdns.workspace = true

@@ -263,7 +263,7 @@ pub(crate) fn audio_tab(
     });
 }
 
-/// Gain slider -60..+12 dB; the value is sent once, on release.
+/// Gain slider -60..+12 dB; sent while dragging and on release.
 fn gain_slider(ui: &mut Ui, edit: &mut EditState, out: &mut Vec<Out>, id: u64, gain_db: f32) {
     let sid = Id::unique(("audio_gain_slider", id));
     let mut v = match edit.insp.slider {
@@ -284,7 +284,14 @@ fn gain_slider(ui: &mut Ui, edit: &mut EditState, out: &mut Vec<Out>, id: u64, g
         return;
     }
     if r.dragged() {
+        // Sent while dragging too, so a playing cue follows the fader (the
+        // server makes the whole drag one undo step).
+        let prev = edit.insp.slider.filter(|(s, _)| *s == sid).map(|(_, p)| p);
         edit.insp.slider = Some((sid, v));
+        if prev.is_some_and(|p| (p - v).abs() > 0.001) {
+            let db = if v <= -60.0 { DB_FLOOR } else { v };
+            out.push(Out::Cmd(kind_patch(id, json!({ "gain_db": db }))));
+        }
     }
     if r.drag_stopped() || (r.changed() && !r.dragged()) {
         edit.insp.slider = None;

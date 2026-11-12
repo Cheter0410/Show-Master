@@ -308,7 +308,10 @@ impl MidiHub {
         let (b, r, e) = (backend.clone(), rtp.clone(), errors.clone());
         let thread = std::thread::Builder::new()
             .name("sm-midi".into())
-            .spawn(move || sender_loop(rx, b, r, e))
+            .spawn(move || {
+                sm_audio::priority::boost_current_thread();
+                sender_loop(rx, b, r, e)
+            })
             .ok();
         Self {
             tx,

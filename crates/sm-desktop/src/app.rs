@@ -1686,7 +1686,12 @@ impl App {
             items.push((format!("{b} frames"), None, 5, None));
         }
         items.push((format!("{} out", s.audio.channels), None, 5, None));
-        items.push((format!("CPU {:.0}%", t.cpu * 100.0), None, 1, None));
+        items.push((
+            format!("CPU {:.0}% · audio {:.1}%", t.process_cpu * 100.0, t.cpu * 100.0),
+            (t.cpu > 0.7).then_some(theme::WARN),
+            1,
+            Some("CPU: the whole program (100% = one core). Audio: time the audio callback needs per buffer - above 70% dropouts get likely."),
+        ));
         items.push((
             format!("Underruns {}", t.underruns),
             (t.underruns > 0).then_some(theme::ERROR),

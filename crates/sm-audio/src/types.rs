@@ -77,7 +77,7 @@ impl EngineConfig {
             out_channels,
             max_voices: 128,
             declick_frames: (sample_rate as u64 * 3 / 1000) as u32,
-            ring_seconds: 2.0,
+            ring_seconds: 4.0,
             preroll_frames: sample_rate / 2,
             command_capacity: 1024,
             safety_clamp: true,

@@ -389,6 +389,7 @@ export interface Tick {
   next_auto: number | null;
   meters: Meters;
   cpu: number;
+  process_cpu?: number;
   underruns: number;
   voices: number;
   alarms: string[];

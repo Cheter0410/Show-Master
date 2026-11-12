@@ -85,6 +85,57 @@ pub enum EditCommand {
     Redo,
 }
 
+impl EditCommand {
+    /// Edits that may be made during a show (Live mode): only the level,
+    /// routing and notes of cues - they reach running cues smoothly and
+    /// cannot change what GO does next.
+    pub fn is_live_safe(&self) -> bool {
+        fn safe(patch: &Value) -> bool {
+            let Some(obj) = patch.as_object() else {
+                return false;
+            };
+            obj.iter().all(|(k, v)| match k.as_str() {
+                "notes" => true,
+                "kind" => {
+                    v.as_object().is_some_and(|kind| {
+                        kind.keys()
+                            .all(|k| matches!(k.as_str(), "gain_db" | "routing" | "type"))
+                    }) && v.get("type").is_none_or(|t| t == "audio")
+                }
+                _ => false,
+            })
+        }
+        match self {
+            EditCommand::UpdateCue { patch, .. } | EditCommand::UpdateCues { patch, .. } => {
+                safe(patch)
+            }
+            _ => false,
+        }
+    }
+
+    /// For level / routing patches: which cues and fields they change, so
+    /// that a stream of them (a fader being dragged) is one undo step.
+    fn coalesce_key(&self) -> Option<String> {
+        let (cues, patch) = match self {
+            EditCommand::UpdateCue { cue, patch } => (vec![*cue], patch),
+            EditCommand::UpdateCues { cues, patch } => (cues.clone(), patch),
+            _ => return None,
+        };
+        let kind = patch.as_object()?.get("kind")?.as_object()?;
+        if patch.as_object()?.len() != 1
+            || kind.is_empty()
+            || !kind
+                .keys()
+                .all(|k| matches!(k.as_str(), "gain_db" | "routing"))
+        {
+            return None;
+        }
+        let mut fields: Vec<&String> = kind.keys().collect();
+        fields.sort();
+        Some(format!("{cues:?}{fields:?}"))
+    }
+}
+
 /// Media facts needed when a file is assigned to an audio cue.
 pub struct MediaInfo {
     pub duration: Option<f64>,
@@ -112,6 +163,9 @@ pub struct Document {
     pub dirty: bool,
     undo: std::collections::VecDeque<Show>,
     redo: Vec<Show>,
+    /// The last live-safe patch (cues + changed fields) and when: a stream
+    /// of them (a fader being dragged) is one undo step.
+    coalesce: Option<(String, std::time::Instant)>,
 }
 
 /// RFC 7396 JSON merge patch.
@@ -227,6 +281,7 @@ impl Document {
             dirty: false,
             undo: std::collections::VecDeque::new(),
             redo: Vec::new(),
+            coalesce: None,
         }
     }
 
@@ -258,6 +313,9 @@ impl Document {
 
     /// Apply an edit. On success the previous state is pushed on the undo stack.
     pub fn apply(&mut self, cmd: EditCommand, probe: &dyn MediaProbe) -> Result<Value, String> {
+        if matches!(cmd, EditCommand::Undo | EditCommand::Redo) {
+            self.coalesce = None;
+        }
         match cmd {
             EditCommand::Undo => {
                 let prev = self.undo.pop_back().ok_or("nothing to undo")?;
@@ -275,9 +333,20 @@ impl Document {
             _ => {}
         }
         let before = self.show.clone();
+        let key = cmd.coalesce_key();
         match self.edit(cmd, probe) {
             Ok(result) => {
                 if self.show != before {
+                    let now = std::time::Instant::now();
+                    let same = matches!((&key, &self.coalesce), (Some(k), Some((p, at)))
+                        if k == p && now.duration_since(*at).as_secs_f64() < 2.0
+                            && !self.undo.is_empty());
+                    self.coalesce = key.map(|k| (k, now));
+                    if same {
+                        self.redo.clear();
+                        self.dirty = true;
+                        return Ok(result);
+                    }
                     self.push_undo(before);
                     self.redo.clear();
                     self.dirty = true;
@@ -1060,5 +1129,66 @@ mod tests {
                 &NoProbe
             )
             .is_err());
+    }
+    #[test]
+    fn live_safe_edits() {
+        let gain: EditCommand = serde_json::from_value(
+            json!({ "cmd": "update_cue", "cue": 1, "patch": { "kind": { "gain_db": -3.0, "routing": [] } } }),
+        )
+        .unwrap();
+        assert!(gain.is_live_safe());
+        let notes: EditCommand = serde_json::from_value(
+            json!({ "cmd": "update_cues", "cues": [1], "patch": { "notes": "x" } }),
+        )
+        .unwrap();
+        assert!(notes.is_live_safe());
+        let file: EditCommand = serde_json::from_value(
+            json!({ "cmd": "update_cue", "cue": 1, "patch": { "kind": { "file": "a.wav" } } }),
+        )
+        .unwrap();
+        assert!(!file.is_live_safe());
+        let name: EditCommand = serde_json::from_value(
+            json!({ "cmd": "update_cue", "cue": 1, "patch": { "name": "x" } }),
+        )
+        .unwrap();
+        assert!(!name.is_live_safe());
+        let del: EditCommand =
+            serde_json::from_value(json!({ "cmd": "delete_cues", "cues": [1] })).unwrap();
+        assert!(!del.is_live_safe());
+    }
+
+    #[test]
+    fn fader_drag_is_one_undo_step() {
+        let mut doc = Document::default();
+        let a = doc
+            .apply(
+                EditCommand::AddCue {
+                    kind: "audio".into(),
+                    list: None,
+                    after: None,
+                    parent: None,
+                    file: None,
+                    target: None,
+                },
+                &NoProbe,
+            )
+            .unwrap()["cue"]
+            .as_u64()
+            .unwrap();
+        for db in [-1.0, -2.0, -3.0] {
+            doc.apply(
+                EditCommand::UpdateCue {
+                    cue: a,
+                    patch: json!({ "kind": { "gain_db": db } }),
+                },
+                &NoProbe,
+            )
+            .unwrap();
+        }
+        doc.apply(EditCommand::Undo, &NoProbe).unwrap();
+        match &doc.show.cue(a).unwrap().kind {
+            CueKind::Audio(x) => assert_eq!(x.gain_db, 0.0),
+            _ => panic!(),
+        }
     }
 }
