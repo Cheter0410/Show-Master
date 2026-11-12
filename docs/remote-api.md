@@ -314,3 +314,8 @@ rejections `live_mode`.
 If `settings.remote.osc_port` is non-zero, UDP OSC messages `/showmaster/<cmd>` are accepted from the local
 network with the same names as the transport commands, e.g. `/showmaster/go`, `/showmaster/goto_number "14"`,
 `/showmaster/start_cue 5`. OSC has no authentication – enable only on trusted show networks.
+
+Short addresses (QLab-style, cue *numbers* instead of ids): `/go`, `/stop` (stop all), `/panic`, `/pause`,
+`/resume`, `/toggle_pause`, `/reset`, `/next`, `/previous`, `/master -6.0`, `/playhead/12`,
+`/cue/12/start|stop|pause|resume|arm|disarm`, `/cue/12/load 4.5` (seconds), `/tc/start|stop|pause|resume`,
+`/tc/locate "01:00:10:00"`. Unknown addresses and numbers are ignored.

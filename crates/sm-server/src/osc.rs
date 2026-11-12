@@ -2,7 +2,7 @@
 //! command bus (transport commands only).
 
 use crate::runtime::{parse_command, Handle, Role};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use std::net::UdpSocket;
 
 fn padded(len: usize) -> usize {
@@ -49,6 +49,79 @@ pub fn decode(buf: &[u8]) -> Option<(String, Vec<Value>)> {
         }
     }
     Some((addr, args))
+}
+
+/// Short addresses (QLab-style) onto a command document. `cue_id` turns a
+/// cue number into its id.
+///
+/// `/go`, `/stop` (stop all), `/panic`, `/pause`, `/resume`, `/toggle_pause`,
+/// `/reset`, `/next`, `/previous`, `/master <dB>`, `/playhead/<number>`,
+/// `/cue/<number>/start|stop|pause|resume|load|arm|disarm` (`load` takes the
+/// time in seconds), `/tc/start|stop|pause|resume`, `/tc/locate <HH:MM:SS:FF>`.
+pub fn short_command(
+    addr: &str,
+    args: &[Value],
+    cue_id: &dyn Fn(&str) -> Option<u64>,
+) -> Option<Value> {
+    let parts: Vec<&str> = addr.trim_start_matches('/').split('/').collect();
+    let first = args.first();
+    let cmd = match parts.as_slice() {
+        ["go"] => json!({ "cmd": "go" }),
+        ["stop"] | ["stop_all"] => json!({ "cmd": "stop_all" }),
+        ["panic"] => json!({ "cmd": "panic" }),
+        ["pause"] => json!({ "cmd": "pause_all" }),
+        ["resume"] => json!({ "cmd": "resume_all" }),
+        ["toggle_pause"] => json!({ "cmd": "toggle_pause" }),
+        ["reset"] => json!({ "cmd": "reset" }),
+        ["next"] => json!({ "cmd": "next" }),
+        ["previous"] => json!({ "cmd": "previous" }),
+        ["master"] => json!({ "cmd": "set_master", "db": first?.as_f64()? }),
+        ["playhead", number] => json!({ "cmd": "set_playhead", "cue": cue_id(number)? }),
+        ["cue", number, action] => {
+            let cue = cue_id(number)?;
+            match *action {
+                "start" | "go" => json!({ "cmd": "start_cue", "cue": cue }),
+                "stop" => json!({ "cmd": "stop_cue", "cue": cue }),
+                "pause" => json!({ "cmd": "pause_cue", "cue": cue }),
+                "resume" => json!({ "cmd": "resume_cue", "cue": cue }),
+                "load" => json!({
+                    "cmd": "load_cue", "cue": cue,
+                    "time": first.and_then(Value::as_f64).unwrap_or(0.0),
+                }),
+                "arm" => json!({ "cmd": "arm_cue", "cue": cue, "armed": true }),
+                "disarm" => json!({ "cmd": "arm_cue", "cue": cue, "armed": false }),
+                _ => return None,
+            }
+        }
+        ["tc", "start"] => json!({ "cmd": "tc_start" }),
+        ["tc", "stop"] => json!({ "cmd": "tc_stop" }),
+        ["tc", "pause"] => json!({ "cmd": "tc_pause" }),
+        ["tc", "resume"] => json!({ "cmd": "tc_resume" }),
+        ["tc", "locate"] => json!({ "cmd": "tc_relocate", "to": first?.as_str()? }),
+        _ => return None,
+    };
+    Some(cmd)
+}
+
+/// Id of the cue with this number (any list) in the published state.
+fn cue_by_number(state: &Value, number: &str) -> Option<u64> {
+    fn walk(cues: &[Value], number: &str) -> Option<u64> {
+        for c in cues {
+            if c["number"].as_str() == Some(number) {
+                return c["id"].as_u64();
+            }
+            if let Some(kids) = c["kind"]["children"].as_array() {
+                if let Some(id) = walk(kids, number) {
+                    return Some(id);
+                }
+            }
+        }
+        None
+    }
+    state["show"]["cue_lists"]
+        .as_array()?
+        .iter()
+        .find_map(|l| walk(l["cues"].as_array()?, number))
 }
 
 /// Map an OSC message onto a command document.
@@ -99,7 +172,12 @@ pub fn listen(socket: UdpSocket, handle: Handle) {
         let Some((addr, args)) = buf.get(..n).and_then(decode) else {
             continue;
         };
-        let Some(cmd) = to_command(&addr, &args) else {
+        let cmd = to_command(&addr, &args).or_else(|| {
+            let state = handle.state();
+            short_command(&addr, &args, &|n| cue_by_number(&state, n))
+        });
+        let Some(cmd) = cmd else {
+            tracing::debug!("OSC {addr}: unknown address");
             continue;
         };
         match parse_command(cmd) {
@@ -144,5 +222,36 @@ mod tests {
         assert!(decode(b"garbage").is_none());
         assert!(decode(b"/x\0\0,i\0\0\x00").is_none());
         assert!(to_command("/other/go", &[]).is_none());
+    }
+
+    #[test]
+    fn short_addresses() {
+        let state = json!({ "show": { "cue_lists": [ { "cues": [
+            { "id": 7, "number": "12", "kind": { "type": "memo" } },
+            { "id": 9, "number": "13", "kind": { "type": "group", "children": [
+                { "id": 11, "number": "13.1", "kind": { "type": "memo" } } ] } } ] } ] } });
+        let ids = |n: &str| cue_by_number(&state, n);
+        let c = |a: &str, args: &[Value]| short_command(a, args, &ids);
+        assert_eq!(c("/go", &[]), Some(json!({ "cmd": "go" })));
+        assert_eq!(c("/stop", &[]), Some(json!({ "cmd": "stop_all" })));
+        assert_eq!(c("/cue/12/start", &[]), Some(json!({ "cmd": "start_cue", "cue": 7 })));
+        assert_eq!(c("/cue/13.1/stop", &[]), Some(json!({ "cmd": "stop_cue", "cue": 11 })));
+        assert_eq!(
+            c("/cue/12/load", &[json!(4.5)]),
+            Some(json!({ "cmd": "load_cue", "cue": 7, "time": 4.5 }))
+        );
+        assert_eq!(c("/playhead/13", &[]), Some(json!({ "cmd": "set_playhead", "cue": 9 })));
+        assert_eq!(c("/master", &[json!(-6.0)]), Some(json!({ "cmd": "set_master", "db": -6.0 })));
+        assert_eq!(
+            c("/tc/locate", &[json!("01:00:00:00")]),
+            Some(json!({ "cmd": "tc_relocate", "to": "01:00:00:00" }))
+        );
+        assert_eq!(c("/cue/99/start", &[]), None);
+        assert_eq!(c("/cue/12/explode", &[]), None);
+        assert_eq!(c("/master", &[]), None);
+        // Every produced command parses.
+        for a in ["/go", "/stop", "/panic", "/pause", "/resume", "/reset", "/next", "/previous", "/cue/12/arm", "/tc/start"] {
+            parse_command(c(a, &[]).unwrap()).unwrap();
+        }
     }
 }

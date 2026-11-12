@@ -39,3 +39,6 @@ ohne Polling steht der WebSocket `/ws` zur Verfügung (`docs/remote-api.md`).
 
 Alternativ `settings.remote.osc_port` setzen (z. B. 7401) und `/showmaster/go`,
 `/showmaster/goto_number "14"`, `/showmaster/start_cue 5` senden. OSC hat keine Authentifizierung.
+Kurzformen mit Cue-*Nummern* wie bei QLab: `/go`, `/stop`, `/panic`, `/pause`, `/resume`, `/next`,
+`/previous`, `/master -6`, `/playhead/12`, `/cue/12/start` (auch `stop`, `pause`, `resume`, `load 4.5`,
+`arm`, `disarm`), `/tc/start`, `/tc/locate "01:00:10:00"`.
