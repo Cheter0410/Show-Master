@@ -21,8 +21,8 @@ revidieren lassen.
   Das Fenster ist nur ein weiterer Client am Command-Bus (wie iPad, HTTP-API, OSC); Engine und Audio
   laufen in eigenen Threads, ein hängendes Fenster stört die Wiedergabe nicht. Die Weboberfläche
   (React) bleibt für `/remote` und `/view`; ihre Desktop-Ansicht unter `/` existiert weiter, ist aber
-  nicht mehr der Hauptweg. Hotkeys wirken, solange das Fenster den Fokus hat (keine systemweiten
-  Hotkeys).
+  nicht mehr der Hauptweg. Hotkeys wirken, solange das Fenster den Fokus hat; systemweite Hotkeys
+  sind optional pro Rechner einstellbar (*Setup → Hotkeys*).
 - **cpal reicht** als Audio-Schicht (CoreAudio, WASAPI, ALSA; ASIO und JACK als Feature). Der Mixer
   hängt nur an den Traits `AudioBackend`/`OutputStream`; ein eigenes Backend ließe sich ergänzen.
   PipeWire wird über dessen ALSA- bzw. JACK-Schnittstelle angesprochen. Ob 32+ Kanäle mit niedriger
