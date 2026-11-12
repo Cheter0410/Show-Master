@@ -34,6 +34,10 @@ pub struct IoStatus {
 pub struct Io {
     audio: AudioSystem,
     audio_settings: AudioSettings,
+    devices: crate::audio::DeviceWatcher,
+    last_reconnect: Option<std::time::Instant>,
+    /// Grows while reconnect attempts keep landing on the silent fallback.
+    reconnect_backoff: std::time::Duration,
     pub midi: MidiHub,
     mtc: MtcGenerator,
     mtc_port: Option<String>,
@@ -42,6 +46,14 @@ pub struct Io {
     /// whenever the stream is reopened; engine time never goes backwards).
     base: u64,
     voices: HashMap<VoiceId, sm_audio::VoiceId>,
+    /// Voices whose file is being opened in the background, with the
+    /// commands that arrived meanwhile (replayed once the file is open).
+    opening: HashMap<VoiceId, Opening>,
+    opener: Opener,
+    /// Lateness (ms) of cues that started after their file finished opening.
+    late_starts: Vec<u64>,
+    /// Bumped when the stream is reopened; results of older jobs are dropped.
+    generation: u64,
     /// Voices that have been started (stop-all only touches these, so the
     /// pre-opened standby voices stay ready for the next GO).
     started: std::collections::HashSet<VoiceId>,
@@ -74,12 +86,19 @@ impl Io {
         let mut io = Self {
             audio,
             audio_settings: show.settings.audio.clone(),
+            devices: crate::audio::DeviceWatcher::new(std::time::Duration::from_secs(3)),
+            last_reconnect: None,
+            reconnect_backoff: std::time::Duration::from_secs(5),
             midi: MidiHub::new(midi),
             mtc: MtcGenerator::new(sr),
             mtc_port: None,
             clock: ClockMap::new(sr),
             base: 0,
             voices: HashMap::new(),
+            opening: HashMap::new(),
+            opener: Opener::new(),
+            late_starts: Vec::new(),
+            generation: 0,
             started: Default::default(),
             show_dir,
             underruns_before: 0,
@@ -89,10 +108,18 @@ impl Io {
     }
 
     /// True once every prepared voice has its pre-roll buffered.
-    pub fn all_primed(&self) -> bool {
-        self.voices
-            .values()
-            .all(|v| self.audio.controller.is_primed(*v))
+    pub fn all_primed(&mut self) -> bool {
+        let _ = self.collect_opened();
+        self.opening.is_empty()
+            && self
+                .voices
+                .values()
+                .all(|v| self.audio.controller.is_primed(*v))
+    }
+
+    /// Number of files still being opened in the background.
+    pub fn opening_count(&self) -> usize {
+        self.opening.len()
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -145,6 +172,8 @@ impl Io {
         self.base = self.now();
         self.voices.clear();
         self.started.clear();
+        self.opening.clear();
+        self.generation += 1;
         self.audio = AudioSystem::open(&show.settings.audio);
         self.audio_settings = show.settings.audio.clone();
         let sr = self.sample_rate();
@@ -155,11 +184,56 @@ impl Io {
         self.mtc = MtcGenerator::new(sr);
         self.underruns_before = 0;
         self.configure(show);
+        let wanted_null = show
+            .settings
+            .audio
+            .backend
+            .as_deref()
+            .is_some_and(|b| b.eq_ignore_ascii_case("null"));
+        self.reconnect_backoff = if self.audio.status().is_null && !wanted_null {
+            (self.reconnect_backoff * 2).min(std::time::Duration::from_secs(60))
+        } else {
+            std::time::Duration::from_secs(5)
+        };
         sr != old_sr
     }
 
     pub fn audio_status(&self) -> AudioStatus {
-        self.audio.status()
+        let mut status = self.audio.status();
+        if let Some(devices) = self.devices.devices() {
+            status.devices = devices;
+        }
+        status
+    }
+
+    /// Why the audio output should be reopened now, if it should (device came
+    /// back after being lost, or became available while on the silent
+    /// fallback). Rate limited; never blocks (uses the watcher's last scan).
+    pub fn reconnect_reason(&mut self, cues_running: bool) -> Option<&'static str> {
+        if self
+            .last_reconnect
+            .is_some_and(|t| t.elapsed() < self.reconnect_backoff)
+        {
+            return None;
+        }
+        let devices = self.devices.devices()?;
+        let status = self.audio.status();
+        let failed = self.audio.stream_failed();
+        if !crate::audio::should_reconnect(
+            &self.audio_settings,
+            &status,
+            failed,
+            &devices,
+            cues_running,
+        ) {
+            return None;
+        }
+        self.last_reconnect = Some(std::time::Instant::now());
+        Some(if failed {
+            "the audio device failed"
+        } else {
+            "an audio device is available again"
+        })
     }
 
     pub fn status(&self) -> IoStatus {
@@ -182,57 +256,102 @@ impl Io {
         frame.saturating_sub(self.base)
     }
 
-    fn open_voice(&mut self, spec: &VoiceSpec) -> Result<sm_audio::VoiceId, String> {
-        let sr = self.sample_rate();
-        let path = resolve_media(self.show_dir.as_deref(), &spec.file);
-        let mut opts = FileSourceOpts::new(sr);
-        opts.start_seconds = spec.start;
-        opts.end_seconds = spec.end;
-        opts.loop_count = spec.loop_count;
-        if spec.offset_frames > 0 {
-            let mut offset = spec.offset_frames as f64 / f64::from(sr);
-            if spec.loop_count != 1 {
-                // The offset counts from the first pass: skip whole passes.
-                let info = sm_audio::probe(&path).map_err(|e| e.to_string())?;
-                let end = spec.end.or(info.duration_seconds).unwrap_or(0.0);
-                let region = end - spec.start;
-                if region > 0.0 {
-                    let passes = (offset / region).floor();
-                    offset -= passes * region;
-                    if spec.loop_count > 1 {
-                        opts.loop_count = spec.loop_count.saturating_sub(passes as u32).max(1);
-                    }
-                }
-            }
-            opts.offset_seconds = offset;
-        }
-        let source = FileSource::open(&path, opts).map_err(|e| format!("{}: {e}", spec.file))?;
-        let params = VoiceParams {
-            gain: spec.gain,
-            matrix: spec.matrix.clone(),
+    /// Queue opening a voice's file on a background thread.
+    fn request_open(&mut self, voice: VoiceId, spec: VoiceSpec) {
+        let job = OpenJob {
+            voice,
+            generation: self.generation,
+            path: resolve_media(self.show_dir.as_deref(), &spec.file),
+            sample_rate: self.sample_rate(),
+            spec,
         };
-        self.audio
-            .controller
-            .prepare_voice(Box::new(source), params)
-            .map_err(|e| e.to_string())
+        self.opening.insert(voice, Opening::default());
+        if let Err(job) = self.opener.submit(job) {
+            // Opener threads gone (should not happen): open right here.
+            let result = open_source(&job);
+            self.opener.results_push(job.voice, job.generation, result);
+        }
+    }
+
+    /// Take finished background opens: register the voices with the mixer and
+    /// replay the commands that arrived meanwhile. Returns failed voices.
+    fn collect_opened(&mut self) -> Vec<(VoiceId, String)> {
+        let mut failed = Vec::new();
+        for (voice, generation, result) in self.opener.poll() {
+            if generation != self.generation {
+                continue;
+            }
+            let Some(pending) = self.opening.remove(&voice) else {
+                continue;
+            };
+            if pending.cancelled {
+                continue; // stopped or discarded before the file was open
+            }
+            match result.and_then(|(source, params)| {
+                self.audio
+                    .controller
+                    .prepare_voice(source, params)
+                    .map_err(|e| e.to_string())
+            }) {
+                Ok(v) => {
+                    self.voices.insert(voice, v);
+                    let clock = self.audio.controller.clock();
+                    for op in &pending.ops {
+                        if let Action::StartVoice { at, .. } = op {
+                            let late = clock.saturating_sub(self.local(*at));
+                            let ms = late * 1000 / u64::from(self.sample_rate().max(1));
+                            if ms > 10 {
+                                self.late_starts.push(ms);
+                            }
+                        }
+                    }
+                    failed.extend(self.apply(pending.ops));
+                }
+                Err(e) => failed.push((voice, e)),
+            }
+        }
+        failed
+    }
+
+    fn queue(&mut self, voice: VoiceId, action: Action) {
+        if let Some(p) = self.opening.get_mut(&voice) {
+            p.ops.push(action);
+        }
     }
 
     /// Execute engine actions. Returns voices that failed (to be reported
     /// back to the engine) with a message.
     pub fn apply(&mut self, actions: Vec<Action>) -> Vec<(VoiceId, String)> {
-        let mut failed = Vec::new();
+        let failed = Vec::new();
         for action in actions {
             let result: Result<(), String> = match action {
-                Action::PrepareVoice { voice, spec, .. } => match self.open_voice(&spec) {
-                    Ok(v) => {
-                        self.voices.insert(voice, v);
-                        Ok(())
+                Action::PrepareVoice { voice, spec, .. } => {
+                    self.request_open(voice, spec);
+                    Ok(())
+                }
+                // Commands for a voice whose file is still opening wait for it.
+                Action::StartVoice { voice, .. } if self.opening.contains_key(&voice) => {
+                    self.started.insert(voice);
+                    self.queue(voice, action);
+                    Ok(())
+                }
+                Action::StopVoice { voice, .. } | Action::DiscardVoice { voice }
+                    if self.opening.contains_key(&voice) =>
+                {
+                    if let Some(p) = self.opening.get_mut(&voice) {
+                        p.cancelled = true;
                     }
-                    Err(e) => {
-                        failed.push((voice, e));
-                        Ok(())
-                    }
-                },
+                    self.started.remove(&voice);
+                    Ok(())
+                }
+                Action::PauseVoice { voice, .. }
+                | Action::ResumeVoice { voice, .. }
+                | Action::FadeVoice { voice, .. }
+                    if self.opening.contains_key(&voice) =>
+                {
+                    self.queue(voice, action);
+                    Ok(())
+                }
                 Action::StartVoice {
                     voice,
                     at,
@@ -305,6 +424,9 @@ impl Io {
                     let at = self.local(at);
                     let mut result = Ok(());
                     for id in std::mem::take(&mut self.started) {
+                        if let Some(p) = self.opening.get_mut(&id) {
+                            p.cancelled = true;
+                        }
                         if let Some(v) = self.voices.remove(&id) {
                             if let Err(e) = self.audio.controller.stop(
                                 v,
@@ -350,8 +472,11 @@ impl Io {
     /// Housekeeping, called every engine tick with the engine's logical time.
     /// Returns (failed voices, log messages).
     pub fn tick(&mut self, logical_now: u64) -> (Vec<(VoiceId, String)>, Vec<String>) {
-        let mut failed = Vec::new();
+        let mut failed = self.collect_opened();
         let mut log = Vec::new();
+        for ms in std::mem::take(&mut self.late_starts) {
+            log.push(format!("Cue started {ms} ms late: its audio file opened slowly (preload by putting the cue on the playhead, or use a faster disk)"));
+        }
         for ev in self.audio.controller.poll_events() {
             match ev {
                 sm_audio::AudioEvent::VoiceEnded { voice } => {
@@ -385,5 +510,133 @@ impl Io {
             }
         });
         (failed, log)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Background file opening
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+struct Opening {
+    ops: Vec<Action>,
+    cancelled: bool,
+}
+
+struct OpenJob {
+    voice: VoiceId,
+    generation: u64,
+    path: PathBuf,
+    sample_rate: u32,
+    spec: VoiceSpec,
+}
+
+type Opened = Result<(Box<dyn sm_audio::SampleSource>, VoiceParams), String>;
+type OpenResult = (VoiceId, u64, Opened);
+
+/// Open and position a file source (disk I/O and decoder set-up). Runs on an
+/// opener thread, never on the engine thread.
+fn open_source(job: &OpenJob) -> Opened {
+    let spec = &job.spec;
+    let sr = job.sample_rate;
+    let mut opts = FileSourceOpts::new(sr);
+    opts.start_seconds = spec.start;
+    opts.end_seconds = spec.end;
+    opts.loop_count = spec.loop_count;
+    if spec.offset_frames > 0 {
+        let mut offset = spec.offset_frames as f64 / f64::from(sr.max(1));
+        if spec.loop_count != 1 {
+            // The offset counts from the first pass: skip whole passes.
+            let info = sm_audio::probe(&job.path).map_err(|e| e.to_string())?;
+            let end = spec.end.or(info.duration_seconds).unwrap_or(0.0);
+            let region = end - spec.start;
+            if region > 0.0 {
+                let passes = (offset / region).floor();
+                offset -= passes * region;
+                if spec.loop_count > 1 {
+                    opts.loop_count = spec.loop_count.saturating_sub(passes as u32).max(1);
+                }
+            }
+        }
+        opts.offset_seconds = offset;
+    }
+    let source = FileSource::open(&job.path, opts).map_err(|e| format!("{}: {e}", spec.file))?;
+    Ok((
+        Box::new(source),
+        VoiceParams {
+            gain: spec.gain,
+            matrix: spec.matrix.clone(),
+        },
+    ))
+}
+
+/// Two worker threads that open files; results are collected by the engine.
+struct Opener {
+    jobs: Option<std::sync::mpsc::Sender<OpenJob>>,
+    results_tx: std::sync::mpsc::Sender<OpenResult>,
+    results: std::sync::mpsc::Receiver<OpenResult>,
+    threads: Vec<std::thread::JoinHandle<()>>,
+}
+
+const OPENER_THREADS: usize = 2;
+
+impl Opener {
+    fn new() -> Self {
+        let (jobs_tx, jobs_rx) = std::sync::mpsc::channel::<OpenJob>();
+        let (results_tx, results) = std::sync::mpsc::channel::<OpenResult>();
+        let jobs_rx = std::sync::Arc::new(std::sync::Mutex::new(jobs_rx));
+        let mut threads = Vec::new();
+        for n in 0..OPENER_THREADS {
+            let rx = jobs_rx.clone();
+            let tx = results_tx.clone();
+            let spawned = std::thread::Builder::new()
+                .name(format!("sm-open-{n}"))
+                .spawn(move || loop {
+                    let job = match rx.lock() {
+                        Ok(guard) => guard.recv(),
+                        Err(_) => return,
+                    };
+                    let Ok(job) = job else { return };
+                    let result = open_source(&job);
+                    if tx.send((job.voice, job.generation, result)).is_err() {
+                        return;
+                    }
+                });
+            match spawned {
+                Ok(t) => threads.push(t),
+                Err(e) => tracing::error!("cannot start file opener thread: {e}"),
+            }
+        }
+        let jobs = (!threads.is_empty()).then_some(jobs_tx);
+        Self {
+            jobs,
+            results_tx,
+            results,
+            threads,
+        }
+    }
+
+    fn submit(&self, job: OpenJob) -> Result<(), Box<OpenJob>> {
+        match &self.jobs {
+            Some(tx) => tx.send(job).map_err(|e| Box::new(e.0)),
+            None => Err(Box::new(job)),
+        }
+    }
+
+    fn results_push(&self, voice: VoiceId, generation: u64, result: Opened) {
+        let _ = self.results_tx.send((voice, generation, result));
+    }
+
+    fn poll(&self) -> Vec<OpenResult> {
+        self.results.try_iter().collect()
+    }
+}
+
+impl Drop for Opener {
+    fn drop(&mut self) {
+        self.jobs = None; // workers see the closed channel and exit
+        for t in self.threads.drain(..) {
+            let _ = t.join();
+        }
     }
 }

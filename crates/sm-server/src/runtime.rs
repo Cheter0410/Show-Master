@@ -554,6 +554,10 @@ impl Runtime {
             if last_slow.elapsed() >= Duration::from_secs(1) {
                 last_slow = Instant::now();
                 self.state_dirty = true; // peers, clients, device errors
+                if let Some(reason) = self.io.reconnect_reason(self.any_running()) {
+                    self.note("warn", format!("Reconnecting audio: {reason}"));
+                    self.reopen_audio();
+                }
                 if self
                     .updater
                     .as_ref()
@@ -697,29 +701,34 @@ impl Runtime {
     }
 
     /// Push the edited show into engine and I/O.
+    /// Stop everything and reopen the audio output with the show's settings.
+    fn reopen_audio(&mut self) {
+        let _ = self.engine.command(Command::StopAll);
+        self.pump();
+        let rate_changed = self.io.reopen_audio(&self.doc.show);
+        if rate_changed {
+            self.engine = Engine::new(self.doc.show.clone(), self.io.sample_rate());
+        }
+        self.update_lookahead();
+        let status = self.io.audio_status();
+        self.note(
+            "info",
+            format!(
+                "Audio output: {} / {} @ {} Hz, {} ch",
+                status.backend, status.device, status.sample_rate, status.channels
+            ),
+        );
+        if let Some(e) = status.error {
+            self.note("warn", format!("Audio: {e}"));
+        }
+    }
+
     fn show_changed(&mut self) {
         if self
             .io
             .audio_settings_changed(&self.doc.show.settings.audio)
         {
-            let _ = self.engine.command(Command::StopAll);
-            self.pump();
-            let rate_changed = self.io.reopen_audio(&self.doc.show);
-            if rate_changed {
-                self.engine = Engine::new(self.doc.show.clone(), self.io.sample_rate());
-            }
-            self.update_lookahead();
-            let status = self.io.audio_status();
-            self.note(
-                "info",
-                format!(
-                    "Audio output: {} / {} @ {} Hz, {} ch",
-                    status.backend, status.device, status.sample_rate, status.channels
-                ),
-            );
-            if let Some(e) = status.error {
-                self.note("warn", format!("Audio: {e}"));
-            }
+            self.reopen_audio();
         }
         self.engine.set_show(self.doc.show.clone());
         for w in self.io.configure(&self.doc.show) {

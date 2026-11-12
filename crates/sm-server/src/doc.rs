@@ -89,12 +89,15 @@ impl MediaProbe for NoProbe {
     }
 }
 
+/// Number of undo steps kept per session.
+pub const UNDO_LIMIT: usize = 500;
+
 #[derive(Default)]
 pub struct Document {
     pub show: Show,
     pub path: Option<PathBuf>,
     pub dirty: bool,
-    undo: Vec<Show>,
+    undo: std::collections::VecDeque<Show>,
     redo: Vec<Show>,
 }
 
@@ -180,7 +183,7 @@ impl Document {
             show,
             path,
             dirty: false,
-            undo: Vec::new(),
+            undo: std::collections::VecDeque::new(),
             redo: Vec::new(),
         }
     }
@@ -197,6 +200,14 @@ impl Document {
         self.path.as_deref().and_then(Path::parent)
     }
 
+    fn push_undo(&mut self, show: Show) {
+        self.undo.push_back(show);
+        // Every step is a full copy of the show: keep memory bounded on long days.
+        while self.undo.len() > UNDO_LIMIT {
+            self.undo.pop_front();
+        }
+    }
+
     /// Change the show outside the undo history (runtime arm/disarm, notes).
     pub fn touch(&mut self, f: impl FnOnce(&mut Show)) {
         f(&mut self.show);
@@ -207,14 +218,15 @@ impl Document {
     pub fn apply(&mut self, cmd: EditCommand, probe: &dyn MediaProbe) -> Result<Value, String> {
         match cmd {
             EditCommand::Undo => {
-                let prev = self.undo.pop().ok_or("nothing to undo")?;
+                let prev = self.undo.pop_back().ok_or("nothing to undo")?;
                 self.redo.push(std::mem::replace(&mut self.show, prev));
                 self.dirty = true;
                 return Ok(Value::Null);
             }
             EditCommand::Redo => {
                 let next = self.redo.pop().ok_or("nothing to redo")?;
-                self.undo.push(std::mem::replace(&mut self.show, next));
+                let current = std::mem::replace(&mut self.show, next);
+                self.push_undo(current);
                 self.dirty = true;
                 return Ok(Value::Null);
             }
@@ -224,7 +236,7 @@ impl Document {
         match self.edit(cmd, probe) {
             Ok(result) => {
                 if self.show != before {
-                    self.undo.push(before);
+                    self.push_undo(before);
                     self.redo.clear();
                     self.dirty = true;
                 }
@@ -706,6 +718,28 @@ mod tests {
             let _ = doc.apply(EditCommand::Undo, &NoProbe);
         }
         assert!(order(&doc).is_empty() && !doc.can_undo() && doc.can_redo());
+    }
+
+    #[test]
+    fn undo_history_is_bounded() {
+        let mut doc = Document::default();
+        let id = add(&mut doc, "memo", None, None);
+        for i in 0..UNDO_LIMIT + 50 {
+            doc.apply(
+                EditCommand::UpdateCue {
+                    cue: id,
+                    patch: json!({ "name": format!("n{i}") }),
+                },
+                &NoProbe,
+            )
+            .unwrap();
+        }
+        let mut steps = 0;
+        while doc.apply(EditCommand::Undo, &NoProbe).is_ok() {
+            steps += 1;
+        }
+        assert_eq!(steps, UNDO_LIMIT);
+        assert_eq!(doc.show.cue(id).unwrap().name, format!("n{}", 49));
     }
 
     #[test]

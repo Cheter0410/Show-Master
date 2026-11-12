@@ -268,6 +268,11 @@ impl AudioSystem {
         (system, renderer)
     }
 
+    /// The open stream reported an error (device unplugged, driver failure).
+    pub fn stream_failed(&self) -> bool {
+        self.stream.error().is_some()
+    }
+
     pub fn status(&self) -> AudioStatus {
         let mut s = self.status.clone();
         if let Some(e) = self.stream.error() {
@@ -322,5 +327,153 @@ impl OutputStream for Offline {
     }
     fn error(&self) -> Option<String> {
         None
+    }
+}
+
+/// Keeps an up-to-date device list on its own thread, so that neither the
+/// engine nor the window ever waits for a (sometimes slow) device scan.
+pub struct DeviceWatcher {
+    devices: Arc<std::sync::Mutex<Option<Vec<DeviceEntry>>>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl DeviceWatcher {
+    pub fn new(interval: std::time::Duration) -> Self {
+        let devices = Arc::new(std::sync::Mutex::new(None));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (d, st) = (devices.clone(), stop.clone());
+        let thread = std::thread::Builder::new()
+            .name("sm-devices".into())
+            .spawn(move || {
+                while !st.load(Ordering::Relaxed) {
+                    let list = list_devices();
+                    if let Ok(mut g) = d.lock() {
+                        *g = Some(list);
+                    }
+                    let until = std::time::Instant::now() + interval;
+                    while std::time::Instant::now() < until && !st.load(Ordering::Relaxed) {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
+            })
+            .ok();
+        Self {
+            devices,
+            stop,
+            thread,
+        }
+    }
+
+    /// The latest scan, `None` before the first one finished.
+    pub fn devices(&self) -> Option<Vec<DeviceEntry>> {
+        self.devices.lock().ok().and_then(|g| g.clone())
+    }
+}
+
+impl Drop for DeviceWatcher {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+/// Should the output be reopened? Yes when the device the show wants is
+/// available and either the running stream failed (device lost) or we are on
+/// the silent fallback while nothing plays.
+pub fn should_reconnect(
+    wanted: &AudioSettings,
+    status: &AudioStatus,
+    stream_failed: bool,
+    devices: &[DeviceEntry],
+    cues_running: bool,
+) -> bool {
+    if wanted.backend.as_deref().is_some_and(is_null) {
+        return false; // the show asks for the silent output
+    }
+    let backend_ok = |d: &DeviceEntry| {
+        !is_null(&d.backend)
+            && wanted
+                .backend
+                .as_deref()
+                .is_none_or(|b| d.backend.eq_ignore_ascii_case(b))
+    };
+    let available = devices
+        .iter()
+        .any(|d| backend_ok(d) && wanted.device.as_deref().is_none_or(|id| d.id == id));
+    if !available {
+        return false;
+    }
+    stream_failed || (status.is_null && !cues_running)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dev(backend: &str, id: &str) -> DeviceEntry {
+        DeviceEntry {
+            backend: backend.into(),
+            id: id.into(),
+            name: id.into(),
+            max_output_channels: 2,
+            sample_rates: vec![48_000],
+            is_default: true,
+        }
+    }
+
+    fn status(is_null: bool) -> AudioStatus {
+        AudioStatus {
+            backend: String::new(),
+            device: String::new(),
+            sample_rate: 48_000,
+            channels: 2,
+            buffer_frames: None,
+            is_null,
+            error: None,
+            devices: vec![],
+        }
+    }
+
+    #[test]
+    fn reconnect_rules() {
+        let any = AudioSettings::default();
+        let usb = AudioSettings {
+            backend: Some("CoreAudio".into()),
+            device: Some("USB".into()),
+            ..AudioSettings::default()
+        };
+        let null = AudioSettings {
+            backend: Some("null".into()),
+            ..AudioSettings::default()
+        };
+        let real = [dev("CoreAudio", "USB"), dev("Null", "null")];
+        let only_null = [dev("Null", "null")];
+        // Device lost and back: reconnect even while cues "run" (they are silent anyway).
+        assert!(should_reconnect(&usb, &status(false), true, &real, true));
+        // Fallback to silence at start, device appears: only when nothing plays.
+        assert!(should_reconnect(&any, &status(true), false, &real, false));
+        assert!(!should_reconnect(&any, &status(true), false, &real, true));
+        // Wanted device not there (yet).
+        assert!(!should_reconnect(
+            &usb,
+            &status(true),
+            true,
+            &only_null,
+            false
+        ));
+        assert!(!should_reconnect(
+            &usb,
+            &status(true),
+            false,
+            &[dev("CoreAudio", "Other")],
+            false
+        ));
+        // Healthy stream: nothing to do.
+        assert!(!should_reconnect(&usb, &status(false), false, &real, false));
+        // The show wants the silent output.
+        assert!(!should_reconnect(&null, &status(true), false, &real, false));
     }
 }
