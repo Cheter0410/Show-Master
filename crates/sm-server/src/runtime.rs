@@ -57,6 +57,13 @@ pub enum SysCommand {
     SaveShow {
         #[serde(default)]
         path: Option<String>,
+        /// Put the show into its own folder: `<dir>/<name>/<name>.smshow`
+        /// (not nested again when `<dir>` already is that folder).
+        #[serde(default)]
+        folder: bool,
+        /// Bring the media into the show folder's `media/`: "copy" or "move".
+        #[serde(default)]
+        media: Option<String>,
     },
     CollectMedia,
     Recover {
@@ -384,6 +391,7 @@ impl MediaProbe for Probe {
         Some(MediaInfo {
             duration: info.duration_seconds,
             channels: info.channels as u16,
+            sample_rate: info.sample_rate,
         })
     }
 }
@@ -834,6 +842,13 @@ impl Runtime {
             EventKind::CueResumed { cue } => {
                 ("info", format!("Cue {} resumed", self.cue_label(cue)))
             }
+            EventKind::LoopReleased { cue, in_secs } => (
+                "info",
+                format!(
+                    "Cue {} loop released - leaves the loop in {in_secs:.1} s",
+                    self.cue_label(cue)
+                ),
+            ),
             EventKind::CueLoaded { cue, time } => (
                 "info",
                 format!("Cue {} loaded to {time:.2} s", self.cue_label(cue)),
@@ -1201,8 +1216,23 @@ impl Runtime {
                 self.note("info", format!("Opened {}", path.display()));
                 Ok(Value::Null)
             }
-            SysCommand::SaveShow { path } => {
-                let path = match path.filter(|p| !p.is_empty()) {
+            SysCommand::SaveShow {
+                path,
+                folder,
+                media,
+            } => {
+                let move_media = match media.as_deref() {
+                    None | Some("" | "keep") => None,
+                    Some("copy") => Some(false),
+                    Some("move") => Some(true),
+                    Some(other) => return Err(format!("unknown media mode {other}")),
+                };
+                if move_media.is_some() && self.mode == Mode::Live {
+                    return Err("live_mode".into());
+                }
+                let given = path.filter(|p| !p.is_empty());
+                let fresh = given.is_some();
+                let mut path = match given {
                     Some(p) => {
                         let mut p = PathBuf::from(p);
                         if p.extension().is_none() {
@@ -1212,6 +1242,32 @@ impl Runtime {
                     }
                     None => self.doc.path.clone().ok_or("path_required")?,
                 };
+                let stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Show")
+                    .to_string();
+                if folder && fresh {
+                    let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+                    if parent.file_name().and_then(|n| n.to_str()) != Some(stem.as_str()) {
+                        let file = path
+                            .file_name()
+                            .map(|f| f.to_os_string())
+                            .unwrap_or_default();
+                        path = parent.join(&stem).join(file);
+                    }
+                    if let Some(dir) = path.parent() {
+                        std::fs::create_dir_all(dir)
+                            .map_err(|e| format!("{}: {e}", dir.display()))?;
+                    }
+                }
+                // A show still called "Untitled Show" takes the file's name.
+                if fresh
+                    && (self.doc.show.name.trim().is_empty()
+                        || self.doc.show.name == sm_core::model::Show::default().name)
+                {
+                    self.doc.show.name = stem.clone();
+                }
                 // Saving to a new location: media paths stay valid by making them absolute first.
                 let old_dir = self.doc.show_dir().map(Path::to_path_buf);
                 let new_dir = path.parent().map(Path::to_path_buf);
@@ -1225,6 +1281,22 @@ impl Runtime {
                         }
                     });
                 }
+                let mut gathered = json!(null);
+                if let (Some(mv), Some(dir)) = (move_media, new_dir.as_deref()) {
+                    let (n, errors) = showfile::gather_media(&mut self.doc.show, dir, mv);
+                    for e in &errors {
+                        self.note("error", format!("Media: {e}"));
+                    }
+                    self.note(
+                        "info",
+                        format!(
+                            "{} {n} media file(s) into the show folder, {} problem(s)",
+                            if mv { "Moved" } else { "Copied" },
+                            errors.len()
+                        ),
+                    );
+                    gathered = json!({ "files": n, "errors": errors, "moved": mv });
+                }
                 showfile::save(&self.doc.show, &path).map_err(|e| e.to_string())?;
                 self.doc.path = Some(path.clone());
                 self.doc.dirty = false;
@@ -1232,7 +1304,7 @@ impl Runtime {
                 self.io.set_show_dir(new_dir);
                 self.engine.set_show(self.doc.show.clone());
                 self.note("info", format!("Saved {}", path.display()));
-                Ok(json!({ "path": path }))
+                Ok(json!({ "path": path, "media": gathered }))
             }
             SysCommand::CollectMedia => {
                 if self.mode == Mode::Live {

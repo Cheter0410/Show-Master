@@ -669,6 +669,26 @@ fn transport_coupled_timecode_follows_the_show() {
 }
 
 #[test]
+fn free_run_timecode_pauses_with_the_pause_button_when_set() {
+    for follow in [false, true] {
+        let mut b = B::new();
+        b.0.timecode.start = Timecode::new(0, 0, 10, 0);
+        b.0.timecode.pause_with_transport = follow;
+        let mut e = b.engine();
+        e.command(Command::TcStart { from: None }).unwrap();
+        e.advance(SR as u64);
+        e.command(Command::PauseAll).unwrap();
+        e.advance(3 * SR as u64);
+        let expect = if follow { "00:00:11:00" } else { "00:00:13:00" };
+        assert_eq!(e.snapshot().tc_position, expect);
+        e.command(Command::ResumeAll).unwrap();
+        e.advance(4 * SR as u64);
+        let expect = if follow { "00:00:12:00" } else { "00:00:14:00" };
+        assert_eq!(e.snapshot().tc_position, expect);
+    }
+}
+
+#[test]
 fn editing_the_show_while_running() {
     let mut b = B::new();
     let a = b.cue(audio(60.0));
@@ -917,4 +937,152 @@ fn gain_and_routing_edits_reach_a_running_cue() {
         .drain_actions()
         .iter()
         .any(|a| matches!(a, Action::FadeVoice { .. })));
+}
+
+fn vamp_cue(rate: Option<u32>) -> CueKind {
+    CueKind::Audio(AudioCue {
+        file: "a.wav".into(),
+        file_duration: Some(20.0),
+        file_rate: rate,
+        start: 1.0,
+        vamp: Some(Vamp {
+            start: 4.0,
+            end: 6.0,
+        }),
+        ..AudioCue::default()
+    })
+}
+
+#[test]
+fn vamp_loops_until_released_then_switches_at_a_loop_end() {
+    for rate in [None, Some(44_100)] {
+        let mut b = B::new();
+        let c = b.cue(vamp_cue(rate));
+        let mut e = b.engine();
+        e.command(Command::Go { list: None }).unwrap();
+        let acts = e.drain_actions();
+        let spec = acts
+            .iter()
+            .find_map(|a| match a {
+                Action::PrepareVoice { spec, .. } => Some(spec.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            (spec.loop_count, spec.end, spec.loop_from),
+            (0, Some(6.0), Some(4.0))
+        );
+        let (first, t0) = starts(&acts)[0];
+        // Open-ended while vamping: still running after a minute.
+        e.advance(t0 + 60 * u64::from(SR));
+        let snap = e.snapshot();
+        assert!(snap.active[0].vamping && snap.active[0].duration.is_none());
+        e.drain_actions();
+        // Released 60.3 s in: loop ends at 5 s + n * 2 s; 61 s is far enough
+        // ahead (0.5 s to open the rest of the file).
+        e.advance(t0 + 60 * u64::from(SR) + 3 * u64::from(SR) / 10);
+        e.command(Command::ReleaseLoop { cue: c }).unwrap();
+        assert!(
+            e.command(Command::ReleaseLoop { cue: c }).is_err(),
+            "only once"
+        );
+        let acts = e.drain_actions();
+        let spec = acts
+            .iter()
+            .find_map(|a| match a {
+                Action::PrepareVoice { spec, .. } => Some(spec.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let r = u64::from(rate.unwrap_or(SR));
+        let h_src = 6 * r - spec.start_frame.unwrap();
+        assert!(
+            h_src * u64::from(SR) >= 128 * r,
+            "at least 128 frames of overlap"
+        );
+        assert_eq!((spec.loop_count, spec.loop_from, spec.end), (1, None, None));
+        // The switch happens at the loop end 61 s into the voice: the new
+        // voice starts h_src source frames earlier, on an exact frame.
+        e.advance(t0 + 62 * u64::from(SR));
+        let acts = e.drain_actions();
+        let (next, at) = starts(&acts)[0];
+        assert_ne!(next, first);
+        assert_eq!(
+            (at - t0) * r,
+            (61 * r - h_src) * u64::from(SR),
+            "no sub-sample offset"
+        );
+        let xfade = acts
+            .iter()
+            .find_map(|a| match a {
+                Action::StopVoice {
+                    voice,
+                    at: s,
+                    fade_frames,
+                    ..
+                } if *voice == first && *s == at => Some(*fade_frames),
+                _ => None,
+            })
+            .expect("old voice fades out at the switch");
+        assert!((256..=640).contains(&xfade), "crossfade {xfade}");
+        // Now it has an end: 61 s + the 14 s after the vamp.
+        let snap = e.snapshot();
+        assert!(!snap.active[0].vamping);
+        let d = snap.active[0].duration.unwrap();
+        assert!((d - 75.0).abs() < 0.01, "duration {d}");
+        e.advance(t0 + 76 * u64::from(SR));
+        assert!(e.snapshot().active.is_empty());
+    }
+}
+
+#[test]
+fn vamp_released_in_the_pre_wait_plays_straight_through() {
+    let mut b = B::new();
+    let c = b.with(vamp_cue(None), |c| c.pre_wait = 2.0);
+    let mut e = b.engine();
+    e.command(Command::Go { list: None }).unwrap();
+    e.command(Command::ReleaseLoop { cue: c }).unwrap();
+    e.drain_actions();
+    e.advance(3 * u64::from(SR));
+    let acts = e.drain_actions();
+    let spec = acts
+        .iter()
+        .find_map(|a| match a {
+            Action::PrepareVoice { spec, .. } => Some(spec.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!((spec.loop_count, spec.loop_from, spec.end), (1, None, None));
+    let d = e.snapshot().active[0].duration.unwrap();
+    assert!((d - 19.0).abs() < 0.01);
+}
+
+#[test]
+fn release_loop_control_cue_and_stop_during_switch() {
+    let mut b = B::new();
+    let a = b.cue(vamp_cue(None));
+    b.cue(CueKind::Control(ControlCue {
+        action: ControlAction::ReleaseLoop,
+        target: Some(a),
+        time: 0.0,
+    }));
+    let mut e = b.engine();
+    e.command(Command::Go { list: None }).unwrap();
+    e.advance(10 * u64::from(SR));
+    e.command(Command::Go { list: None }).unwrap();
+    assert!(!e.snapshot().active.iter().any(|x| x.vamping));
+    let acts = e.drain_actions();
+    let pending = acts
+        .iter()
+        .find_map(|a| match a {
+            Action::PrepareVoice { voice, spec, .. } if spec.start_frame.is_some() => Some(*voice),
+            _ => None,
+        })
+        .unwrap();
+    // Stopped before the switch: the prepared rest is discarded.
+    e.command(Command::StopAll).unwrap();
+    let acts = e.drain_actions();
+    assert!(acts
+        .iter()
+        .any(|a| matches!(a, Action::DiscardVoice { voice } if *voice == pending)));
 }

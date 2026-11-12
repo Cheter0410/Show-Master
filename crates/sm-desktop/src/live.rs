@@ -137,10 +137,6 @@ fn caption(ui: &mut egui::Ui, text: &str, hc: bool) {
 
 /// Fill the central area in Live mode.
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
-    // Throttled master fader changes.
-    if let Some(db) = app.live.fader.due() {
-        app.cmd(json!({ "cmd": "set_master", "db": db }));
-    }
     let channels = app.client.state.audio.channels;
     app.live
         .ballistics
@@ -334,6 +330,9 @@ fn cue_zone(app: &mut App, ui: &mut egui::Ui, rect: Rect, hc: bool) {
                 app.cmd(json!({ "cmd": "set_playhead", "cue": cue, "list": list }));
             }
             cues::CueAction::Select(cue) => app.view.selection = vec![cue],
+            cues::CueAction::ReleaseLoop(cue) => {
+                app.cmd(json!({ "cmd": "release_loop", "cue": cue }));
+            }
         }
     }
 }
@@ -762,16 +761,11 @@ fn tools_zone(app: &mut App, ui: &mut egui::Ui, rect: Rect, hc: bool) {
     log_panel(app, ui, log, hc);
 }
 
-/// Meters + master fader in `mix`.
+/// Meters in `mix` (the master level is set in Setup > Audio: no fader to
+/// knock during a show).
 fn mix_panel(app: &mut App, ui: &mut egui::Ui, mix: Rect, hc: bool) {
-    let fader_w = 62.0;
     card(ui, mix, hc);
-    let inner = mix.shrink(10.0);
-    let meter_rect = Rect::from_min_max(
-        inner.min,
-        Pos2::new(inner.right() - fader_w - 8.0, inner.bottom()),
-    );
-    let fader_rect = Rect::from_min_max(Pos2::new(inner.right() - fader_w, inner.top()), inner.max);
+    let meter_rect = mix.shrink(10.0);
     let outputs = &app.client.state.show.patch.outputs;
     let name_of = |ch: usize| {
         outputs
@@ -790,10 +784,16 @@ fn mix_panel(app: &mut App, ui: &mut egui::Ui, mix: Rect, hc: bool) {
     if m.reset_clip {
         app.cmd(json!({ "cmd": "reset_clip" }));
     }
-    let engine_db = app.client.state.master_db;
-    meters::master_fader(ui, fader_rect, &mut app.live.fader, engine_db);
-    if let Some(db) = app.live.fader.due() {
-        app.cmd(json!({ "cmd": "set_master", "db": db }));
+    // A master below / above 0 dB is easy to forget: say so.
+    let db = app.client.state.master_db;
+    if db.abs() > 0.05 {
+        ui.painter().text(
+            meter_rect.right_top(),
+            Align2::RIGHT_TOP,
+            format!("Master {db:+.1} dB"),
+            FontId::proportional(11.0),
+            theme::WARN,
+        );
     }
 }
 
@@ -882,29 +882,50 @@ fn log_panel(app: &mut App, ui: &mut egui::Ui, rect: Rect, hc: bool) {
     } else {
         Color32::from_gray(220)
     };
+    // Every row is painted into a rect of exactly `row_h` (no widgets whose
+    // height depends on the text, no spacing), so the list scrolled to the
+    // bottom stays still when entries arrive or old ones drop off.
+    ui.spacing_mut().item_spacing.y = 0.0;
+    let time_w = 64.0;
     egui::ScrollArea::vertical()
         .id_salt("live_log_scroll")
         .stick_to_bottom(true)
         .auto_shrink([false, false])
         .show_rows(ui, row_h, log.len(), |ui, range| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             for e in &log[range] {
                 let color = match e.level {
                     "error" => theme::ERROR,
                     "warn" => theme::WARN,
                     _ => text,
                 };
-                ui.horizontal(|ui| {
-                    ui.set_height(row_h);
-                    ui.label(
-                        RichText::new(log_time(e.time_ms))
-                            .font(FontId::monospace(12.0))
-                            .color(theme::MUTED),
-                    );
-                    ui.add(
-                        egui::Label::new(RichText::new(&e.message).size(13.0).color(color))
-                            .truncate(),
-                    );
-                });
+                let (r, resp) = ui.allocate_exact_size(
+                    Vec2::new(ui.available_width(), row_h),
+                    egui::Sense::hover(),
+                );
+                let p = ui.painter_at(r);
+                p.text(
+                    Pos2::new(r.left(), r.center().y),
+                    Align2::LEFT_CENTER,
+                    log_time(e.time_ms),
+                    FontId::monospace(12.0),
+                    theme::MUTED,
+                );
+                let galley = ui.painter().layout(
+                    e.message.clone(),
+                    FontId::proportional(13.0),
+                    color,
+                    f32::INFINITY,
+                );
+                let cut = galley.size().x > r.width() - time_w;
+                p.galley(
+                    Pos2::new(r.left() + time_w, r.center().y - galley.size().y / 2.0),
+                    galley,
+                    color,
+                );
+                if cut {
+                    resp.on_hover_text(&e.message);
+                }
             }
         });
 }

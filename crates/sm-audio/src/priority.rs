@@ -121,7 +121,9 @@ impl CpuMeter {
         match self.last {
             Some((t, c)) if now.duration_since(t).as_secs_f64() >= 0.5 => {
                 let wall = now.duration_since(t).as_secs_f64();
-                self.value = ((cpu - c) / wall).max(0.0) as f32;
+                // Share of the whole computer (all cores), like a load meter.
+                let cores = std::thread::available_parallelism().map_or(1, |n| n.get()) as f64;
+                self.value = ((cpu - c) / wall / cores).clamp(0.0, 1.0) as f32;
                 self.last = Some((now, cpu));
             }
             None => self.last = Some((now, cpu)),

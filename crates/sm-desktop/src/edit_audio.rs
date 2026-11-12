@@ -3,7 +3,7 @@
 //! worker thread and cached per file.
 
 use super::fields::{self, Opts};
-use super::inspector::{curve_combo, kind_patch, time_field};
+use super::inspector::{curve_combo, kind_patch, label, time_field};
 use super::{fmt_db_field, fmt_secs, parse_db, parse_secs, EditState, Out};
 use crate::model::{Phase, Tick, UiState};
 use crate::{theme, util};
@@ -209,6 +209,7 @@ pub(crate) fn audio_tab(
                 }
             });
             ui.end_row();
+            vamp_rows(ui, edit, out, id, a);
         });
         ui.add_space(24.0);
         grid(("audio_b", id)).show(ui, |ui| {
@@ -430,11 +431,39 @@ fn waveform(
                 Stroke::NONE,
             ));
         }
+        // vamp: an orange band along the bottom
+        if let Some(v) = a.active_vamp() {
+            let band = Rect::from_x_y_ranges(
+                x_of(v.start)..=x_of(v.end),
+                (rect.bottom() - 12.0)..=rect.bottom(),
+            );
+            painter.rect_filled(band, 2.0, theme::PAUSED.gamma_multiply(0.55));
+            painter.text(
+                band.center(),
+                egui::Align2::CENTER_CENTER,
+                "LOOP",
+                egui::FontId::proportional(10.0),
+                Color32::BLACK,
+            );
+        }
         // play cursor
         if let Some(act) = tick.active(id).filter(|t| t.phase == Phase::Running) {
             let len = end - start;
-            if len > 0.0 {
-                let pos = start + act.elapsed % len;
+            let pos = match a.active_vamp() {
+                Some(v) if act.vamping => {
+                    let intro = v.end - start;
+                    let l = v.end - v.start;
+                    Some(if act.elapsed < intro {
+                        start + act.elapsed
+                    } else {
+                        v.start + (act.elapsed - intro) % l
+                    })
+                }
+                // Released: the position is not known here.
+                Some(_) => None,
+                None => (len > 0.0).then(|| start + act.elapsed % len),
+            };
+            if let Some(pos) = pos {
                 painter.vline(x_of(pos), rect.y_range(), Stroke::new(1.5, Color32::WHITE));
             }
             ui.ctx().request_repaint();
@@ -731,6 +760,62 @@ pub(crate) fn routing_tab(ui: &mut Ui, show: &Show, cue: &Cue, out: &mut Vec<Out
                     }
                 });
         });
+}
+
+/// "Loop a part" (vamp): the part loops until it is released in the show.
+fn vamp_rows(ui: &mut Ui, edit: &mut EditState, out: &mut Vec<Out>, id: u64, a: &AudioCue) {
+    label(ui, "Vamp");
+    let mut on = a.vamp.is_some();
+    if ui
+        .checkbox(&mut on, "Loop a part")
+        .accessible_name("Loop a part (vamp)")
+        .on_hover_text(
+            "The part loops until it is released (Release loop in Live, a Control cue \
+             \"Release loop\", or OSC /showmaster/cue/<n>/release); then the cue plays \
+             on to the end. Shown in orange on the waveform.",
+        )
+        .changed()
+    {
+        let v = if on {
+            let start = a.start.max(0.0);
+            let end = a.end.or(a.file_duration).unwrap_or(start + 6.0);
+            let third = ((end - start) / 3.0).max(0.01);
+            let r = |x: f64| (x * 100.0).round() / 100.0;
+            json!({ "start": r(start + third), "end": r(start + 2.0 * third) })
+        } else {
+            Value::Null
+        };
+        out.push(Out::Cmd(kind_patch(id, json!({ "vamp": v }))));
+    }
+    ui.end_row();
+    let Some(v) = a.vamp else { return };
+    label(ui, "Loop from");
+    time_field(
+        ui,
+        edit,
+        out,
+        ("vamp_start", id),
+        "Loop start time",
+        v.start,
+        move |x| kind_patch(id, json!({ "vamp": { "start": x, "end": v.end } })),
+    );
+    ui.end_row();
+    label(ui, "Loop to");
+    time_field(
+        ui,
+        edit,
+        out,
+        ("vamp_end", id),
+        "Loop end time",
+        v.end,
+        move |x| kind_patch(id, json!({ "vamp": { "start": v.start, "end": x } })),
+    );
+    ui.end_row();
+    if a.active_vamp().is_none() {
+        label(ui, "");
+        ui.label(RichText::new("The loop lies outside the cue's start / end.").color(theme::WARN));
+        ui.end_row();
+    }
 }
 
 #[cfg(test)]

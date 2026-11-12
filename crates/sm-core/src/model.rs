@@ -9,7 +9,7 @@ pub type ListId = u64;
 
 /// Current showfile schema version. Bump together with a migration step in
 /// [`crate::showfile`].
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
@@ -333,6 +333,10 @@ pub struct TimecodeSettings {
     /// External timecode input (used when `source` is `external`).
     #[serde(default)]
     pub input: TcInputSettings,
+    /// Free run: the Pause button (pause all) also pauses the generator and
+    /// Resume continues it. Follow transport always does.
+    #[serde(default)]
+    pub pause_with_transport: bool,
 }
 
 impl Default for TimecodeSettings {
@@ -348,6 +352,7 @@ impl Default for TimecodeSettings {
             mtc_port: String::new(),
             source: TcSource::Generator,
             input: TcInputSettings::default(),
+            pause_with_transport: false,
         }
     }
 }
@@ -674,9 +679,11 @@ pub enum CueKind {
 #[serde(rename_all = "snake_case")]
 pub enum Curve {
     Linear,
-    #[default]
     EqualPower,
     SCurve,
+    /// Soft start, soft end, even change in loudness (the default).
+    #[default]
+    Smooth,
 }
 
 /// One routing matrix cell: source channel -> logical output, level in dB.
@@ -710,6 +717,21 @@ pub struct AudioCue {
     pub loop_count: u32,
     /// Routing matrix; empty = default routing (channel i -> output i, mono -> outputs 1+2).
     pub routing: Vec<Crosspoint>,
+    /// Native sample rate of the file (cached like `file_duration`); makes
+    /// releasing a vamp sample-accurate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_rate: Option<u32>,
+    /// Vamp: this part of the file loops until it is released (in a show:
+    /// "Release loop"); then playback runs on to the end.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vamp: Option<Vamp>,
+}
+
+/// A loop inside an audio cue, in seconds of file time.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct Vamp {
+    pub start: f64,
+    pub end: f64,
 }
 
 impl Default for AudioCue {
@@ -724,9 +746,11 @@ impl Default for AudioCue {
             gain_db: 0.0,
             fade_in: 0.0,
             fade_out: 0.0,
-            fade_curve: Curve::EqualPower,
+            fade_curve: Curve::Smooth,
             loop_count: 1,
             routing: Vec::new(),
+            file_rate: None,
+            vamp: None,
         }
     }
 }
@@ -738,7 +762,27 @@ impl AudioCue {
         Some((end - self.start.max(0.0)).max(0.0))
     }
 
+    /// The vamp, when it lies inside the cue's region (at least 10 ms long).
+    pub fn active_vamp(&self) -> Option<Vamp> {
+        let v = self.vamp?;
+        let start = self.start.max(0.0);
+        let end = self.end.or(self.file_duration).unwrap_or(f64::INFINITY);
+        let (a, b) = (v.start.max(start), v.end.min(end));
+        (b - a >= 0.01).then_some(Vamp { start: a, end: b })
+    }
+
+    /// Total length in seconds; `None` = unknown or open-ended (looping
+    /// forever, or a vamp that has not been released).
     pub fn duration(&self) -> Option<f64> {
+        if self.active_vamp().is_some() {
+            return None;
+        }
+        self.play_through_duration()
+    }
+
+    /// Length ignoring the vamp (also the length once a vamp is released
+    /// before the cue started).
+    pub fn play_through_duration(&self) -> Option<f64> {
         if self.loop_count == 0 {
             return None;
         }
@@ -789,7 +833,7 @@ impl Default for FadeCue {
         Self {
             target: None,
             duration: 3.0,
-            curve: Curve::EqualPower,
+            curve: Curve::Smooth,
             gain_db: Some(-120.0),
             crosspoints: Vec::new(),
             stop_target: true,
@@ -841,6 +885,8 @@ pub enum ControlAction {
     Disarm,
     GoTo,
     Reset,
+    /// Release the target's vamp (it leaves its loop at the end of the pass).
+    ReleaseLoop,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]

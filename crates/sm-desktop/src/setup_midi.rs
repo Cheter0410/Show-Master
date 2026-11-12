@@ -322,6 +322,21 @@ pub(super) fn timecode_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) 
                 st.update_show(json!({ "timecode": { "mode": mode } }));
             }
         });
+        row(ui, "", |ui| {
+            let follow = tc.mode == TcMode::Transport;
+            let mut on = follow || tc.pause_with_transport;
+            if ui
+                .add_enabled(
+                    !follow,
+                    egui::Checkbox::new(&mut on, "Pause button also pauses the timecode"),
+                )
+                .on_hover_text("Pause (all) pauses the generator, Resume continues it")
+                .on_disabled_hover_text("Follow transport always pauses with the show")
+                .changed()
+            {
+                st.update_show(json!({ "timecode": { "pause_with_transport": on } }));
+            }
+        });
         row(ui, "Test", |ui| {
             for (label, cmd) in [
                 ("Start", "tc_start"),

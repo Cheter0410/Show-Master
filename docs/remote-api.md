@@ -20,7 +20,7 @@ Roles are enforced on the server for every command, never only in the UI.
 | Method & path | Role | Purpose |
 |---|---|---|
 | `GET /`, `/remote`, `/view` | – | the web UI (single-page app, all assets embedded in the binary) |
-| `GET /api/session` | – | `{ "role": "admin"|null, "token": "...", "view_needs_pin": bool, "version": "0.2.0" }`; loopback callers get an admin token |
+| `GET /api/session` | – | `{ "role": "admin"|null, "token": "...", "view_needs_pin": bool, "version": "0.3.0" }`; loopback callers get an admin token |
 | `POST /api/login` body `{ "pin": "1234", "role": "control"|"view" }` | – | `{ "token": "...", "role": "control" }` or `401` |
 | `GET /ws?token=T` | any | WebSocket, see below |
 | `GET /api/v1/state?token=T` | any | full state document (same as WS `state.state`, plus `tick`) – button feedback for Stream Deck/Companion |
@@ -43,7 +43,7 @@ Text frames, one JSON object each, discriminated by `t`.
 ### Server → client
 
 ```jsonc
-{ "t": "hello", "role": "admin", "client_id": 3, "version": "0.2.0" }
+{ "t": "hello", "role": "admin", "client_id": 3, "version": "0.3.0" }
 { "t": "state", "rev": 12, "state": { /* State */ } }          // full document; sent first and on resync
 { "t": "patch", "rev": 13, "ops": [ { "p": ["show","name"], "v": "New" }, { "p": ["errors","17"], "d": true } ] }
 { "t": "tick", /* Tick, ~20 Hz */ }
@@ -69,7 +69,7 @@ that sees a `rev` gap must reconnect (the server then sends a fresh `state`).
 
 ```jsonc
 {
-  "version": "0.2.0",
+  "version": "0.3.0",
   "mode": "edit" | "live",
   "show": { /* the showfile document, see below */ },
   "show_path": "/path/show.smshow" | null,
@@ -199,8 +199,9 @@ Cue:
   "armed": true, "tc_trigger": "01:00:10:00" | null,
   "kind": { "type": "audio", "file": "media/intro.wav", "hash": null, "file_duration": 93.2, "channels": 2,
             "start": 0.0, "end": null, "gain_db": 0.0, "fade_in": 0.0, "fade_out": 0.0,
-            "fade_curve": "linear"|"equal_power"|"s_curve", "loop_count": 1 /* 0 = infinite */,
-            "routing": [ { "src": 0, "out": 0, "db": 0.0 } ] /* empty = default routing */ }
+            "fade_curve": "smooth"|"linear"|"equal_power"|"s_curve", "loop_count": 1 /* 0 = infinite */,
+            "routing": [ { "src": 0, "out": 0, "db": 0.0 } ] /* empty = default routing */,
+            "file_rate": 44100 /* cached */, "vamp": { "start": 4.0, "end": 6.0 } /* optional: loops until released */ }
   // { "type": "fade", "target": 5, "duration": 3.0, "curve": "equal_power", "gain_db": -120.0|null, "crosspoints": [], "stop_target": true }
   // { "type": "midi", "port": "Desk", "message": { "msg": "note_on", "channel": 1, "note": 60, "velocity": 100 } }
   //      msg: note_on | note_off | control_change{channel,controller,value} | program_change{channel,program}
@@ -211,7 +212,7 @@ Cue:
   // { "type": "http", "method": "GET"|"POST"|"PUT"|"PATCH"|"DELETE", "url": "http://10.0.0.5/api/x", "body": "", "content_type": "application/json" }
   //      plain HTTP/1.1 (no https), sent from a worker thread; failures are logged
   // { "type": "timecode", "tc": { "action": "start" | "stop" | "pause" | "resume" } | { "action": "start_from", "from": "…" } | { "action": "relocate", "to": "…" } }
-  // { "type": "control", "action": "start"|"stop"|"pause"|"resume"|"load_to_time"|"arm"|"disarm"|"go_to"|"reset", "target": 5, "time": 0.0 }
+  // { "type": "control", "action": "start"|"stop"|"pause"|"resume"|"load_to_time"|"arm"|"disarm"|"go_to"|"release_loop"|"reset", "target": 5, "time": 0.0 }
   // { "type": "group", "mode": "parallel"|"playlist"|"random", "children": [ /* Cue */ ] }
   // { "type": "memo" }
 }
@@ -268,17 +269,18 @@ Every command is `{ "cmd": "<name>", …fields }`.
 | `set_playhead` | `cue` (id or null), `list?` | |
 | `goto_number` | `number` | "Go to cue 14" – moves the playhead |
 | `start_cue`, `stop_cue`, `pause_cue`, `resume_cue`, `reset_cue` | `cue` | single cue; `start_cue` = preview, does not move the playhead |
+| `release_loop` | `cue` | release a vamping audio cue: it leaves its loop at the next loop end (at least 0.5 s ahead, sample-exact crossover) and plays on; `tick.active[].vamping` is true until then |
 | `load_cue` | `cue`, `time` | load to time (s) |
 | `arm_cue` | `cue`, `armed` | |
 | `reset` | | stop all, playhead to top, clear loads/errors, show clock reset |
 | `reset_show_clock` | | |
 | `tc_start` (`from?`), `tc_stop`, `tc_pause`, `tc_resume`, `tc_relocate` (`to`) | | timecode generator |
-| `set_master` | `db` | master fader |
+| `set_master` | `db` | master level (Setup > Audio; the Live view only meters) |
 | `midi_panic` | | |
 | `reset_clip` | | clear clip indicators |
 | `set_notes` | `text` | stage manager memo |
 
-### Editing (role `admin`, rejected in live mode)
+### Editing (role `admin`, rejected in live mode - except `update_cue` / `update_cues` patches that only change `kind.gain_db`, `kind.routing` or `notes`; level and routing changes ramp a playing cue in 30 ms, and a stream of them on the same cues within 2 s is one undo step)
 
 | cmd | fields | |
 |---|---|---|
@@ -303,7 +305,7 @@ Every command is `{ "cmd": "<name>", …fields }`.
 | `run_preflight` | | |
 | `new_show` | `force?` | fails with `unsaved_changes` unless forced |
 | `open_show` | `path`, `force?` | |
-| `save_show` | `path?` | `path` required for a never-saved show |
+| `save_show` | `path?`, `folder?`, `media?` | `path` required for a never-saved show. `folder: true` saves into `<dir>/<name>/<name>.smshow` (not nested again when `<dir>` is already that folder); `media: "copy"` or `"move"` brings every audio file into its `media/` folder. A show still called "Untitled Show" takes the file name. |
 | `collect_media` | | copy media into `<show dir>/media`, store hashes |
 | `recover` | `accept`: bool | load or discard the autosave |
 | `kick_client` | `id` | disconnect a remote client |
@@ -325,5 +327,5 @@ network with the same names as the transport commands, e.g. `/showmaster/go`, `/
 
 Short addresses (QLab-style, cue *numbers* instead of ids): `/go`, `/stop` (stop all), `/panic`, `/pause`,
 `/resume`, `/toggle_pause`, `/reset`, `/next`, `/previous`, `/master -6.0`, `/playhead/12`,
-`/cue/12/start|stop|pause|resume|arm|disarm`, `/cue/12/load 4.5` (seconds), `/tc/start|stop|pause|resume`,
+`/cue/12/start|stop|pause|resume|arm|disarm|release`, `/cue/12/load 4.5` (seconds), `/tc/start|stop|pause|resume`,
 `/tc/locate "01:00:10:00"`. Unknown addresses and numbers are ignored.

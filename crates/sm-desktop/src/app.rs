@@ -65,6 +65,8 @@ enum Modal {
     RunsInBackground,
     /// Name for a new template from the selected cues.
     SaveTemplate(String),
+    /// "Save as": the show goes into its own folder there; copy or move the media?
+    SaveMedia(PathBuf),
     /// Kiosk unlock: PIN typed so far, and what to do afterwards (quit).
     Unlock(String, bool),
     Message {
@@ -87,6 +89,10 @@ pub enum JobDone {
 }
 
 pub struct App {
+    /// What to do after a "Save as" that waits for the media question.
+    save_then: Option<Reply>,
+    /// Window title last sent (the show name).
+    window_title: String,
     /// Background jobs (show packages) the window waits for.
     jobs: Vec<std::sync::mpsc::Receiver<JobDone>>,
     /// Cues copied in this window (also put on the system clipboard).
@@ -148,6 +154,8 @@ impl App {
             panic_tap: None,
             allow_close: false,
             jobs: Vec::new(),
+            save_then: None,
+            window_title: String::new(),
             clip: None,
             to_clipboard: None,
             kiosk_unlocked: false,
@@ -486,11 +494,38 @@ impl App {
             d = d.set_directory(dir);
         }
         let Some(path) = d.save_file() else { return };
+        let mut has_media = false;
+        self.client.state.show.for_each_cue(|_, c| {
+            has_media |= matches!(&c.kind, sm_core::model::CueKind::Audio(a) if !a.file.is_empty());
+        });
+        if has_media {
+            self.save_then = then;
+            self.modal = Some(Modal::SaveMedia(path));
+        } else {
+            self.save_into_folder(path, None, then);
+        }
+    }
+
+    /// Save the show into its own folder at `path`; `media` "copy" / "move"
+    /// brings the audio files into it.
+    fn save_into_folder(&mut self, path: PathBuf, media: Option<&str>, then: Option<Reply>) {
         self.cmd_then(
-            json!({ "cmd": "save_show", "path": path }),
+            json!({ "cmd": "save_show", "path": path, "folder": true, "media": media }),
             move |app, r| match r {
                 Ok(v) => {
-                    app.toast("Show saved");
+                    let problems = v["media"]["errors"].as_array().map_or(0, Vec::len);
+                    if problems > 0 {
+                        app.toast_error(format!(
+                            "Show saved, but {problems} media file(s) could not be {} (see the event log)",
+                            if media_moved(&v) { "moved" } else { "copied" }
+                        ));
+                    } else {
+                        let at = v["path"].as_str().map(Path::new).and_then(Path::parent);
+                        app.toast(match at {
+                            Some(dir) => format!("Show saved in {}", dir.display()),
+                            None => "Show saved".into(),
+                        });
+                    }
                     if let Some(f) = then {
                         f(app, Ok(v));
                     }
@@ -1048,6 +1083,16 @@ impl App {
         let changed = self.client.refresh();
         self.handle_replies();
         if changed {
+            let s = &self.client.state;
+            let title = format!(
+                "{}{} - Show Master",
+                s.show.name.trim(),
+                if s.dirty { " *" } else { "" }
+            );
+            if title != self.window_title {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+                self.window_title = title;
+            }
             let path = self.client.state.show_path.clone();
             if path != self.last_show_path {
                 if let Some(p) = &path {
@@ -1690,7 +1735,7 @@ impl App {
             format!("CPU {:.0}% · audio {:.1}%", t.process_cpu * 100.0, t.cpu * 100.0),
             (t.cpu > 0.7).then_some(theme::WARN),
             1,
-            Some("CPU: the whole program (100% = one core). Audio: time the audio callback needs per buffer - above 70% dropouts get likely."),
+            Some("CPU: the whole program (share of all processor cores). Audio: time the audio callback needs per buffer - above 70% dropouts get likely."),
         ));
         items.push((
             format!("Underruns {}", t.underruns),
@@ -2124,6 +2169,37 @@ impl App {
                         }
                     });
                 }
+                Modal::SaveMedia(path) => {
+                    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Show");
+                    let parent = path.parent().unwrap_or(Path::new(""));
+                    let dir = if parent.file_name().and_then(|n| n.to_str()) == Some(stem) {
+                        parent.to_path_buf()
+                    } else {
+                        parent.join(stem)
+                    };
+                    ui.heading("Save show in its own folder");
+                    ui.label(format!("The show is saved in the folder {} together with its audio files (in media/).", dir.display()));
+                    ui.add_space(4.0);
+                    ui.label("Should the audio files be copied or moved there?");
+                    ui.label(RichText::new("Copy keeps the originals where they are. Move removes them from their old place.").small().color(theme::MUTED));
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            keep = false;
+                            self.save_then = None;
+                        }
+                        if ui.button("Move files").clicked() {
+                            keep = false;
+                            let then = self.save_then.take();
+                            self.save_into_folder(path.clone(), Some("move"), then);
+                        }
+                        if ui.add(egui::Button::new(RichText::new("Copy files").strong()).fill(theme::EDIT)).clicked() {
+                            keep = false;
+                            let then = self.save_then.take();
+                            self.save_into_folder(path.clone(), Some("copy"), then);
+                        }
+                    });
+                }
                 Modal::Message { title, text } => {
                     ui.heading(title);
                     ui.label(text);
@@ -2142,4 +2218,9 @@ impl App {
             self.modal = Some(modal);
         }
     }
+}
+
+/// Whether a save reply reports moved (not copied) media.
+fn media_moved(v: &Value) -> bool {
+    v["media"]["moved"].as_bool().unwrap_or(false)
 }

@@ -36,15 +36,18 @@ export function NextPanel({ following = 3, compact = false }: { following?: numb
         </div>
       )}
       {after.length > 0 ? (
-        <ol className="next-after" aria-label="Following cues">
-          {after.map((c) => (
-            <li key={c.id} className={c.armed ? "" : "is-disarmed"}>
-              <span className="num">{c.number}</span>
-              <TypeIcon type={c.kind.type} size={14} />
-              <span className="ellipsis">{c.name || TYPE_LABELS[c.kind.type]}</span>
-            </li>
-          ))}
-        </ol>
+        <div className="next-then">
+          <span className="next-then-label">Then</span>
+          <ol className="next-after" aria-label="Following cues">
+            {after.map((c) => (
+              <li key={c.id} className={c.armed ? "" : "is-disarmed"}>
+                <span className="num">{c.number}</span>
+                <span className="ellipsis">{c.name || TYPE_LABELS[c.kind.type]}</span>
+                <span className="next-after-type">{TYPE_LABELS[c.kind.type]}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
       ) : null}
     </section>
   );

@@ -33,6 +33,27 @@ fn io_err(path: &Path) -> impl FnOnce(std::io::Error) -> ShowfileError + '_ {
     }
 }
 
+/// v4 added the "smooth" fade curve and made it the default: audio cues
+/// still on the old default (equal power) get the softer curve.
+fn migrate_v3_to_v4(doc: &mut Value) {
+    fn walk(cue: &mut Value) {
+        let kind = &mut cue["kind"];
+        if kind["type"] == "audio" && kind["fade_curve"] == "equal_power" {
+            kind["fade_curve"] = Value::from("smooth");
+        }
+        if let Some(kids) = kind.get_mut("children").and_then(Value::as_array_mut) {
+            kids.iter_mut().for_each(walk);
+        }
+    }
+    if let Some(lists) = doc.get_mut("cue_lists").and_then(Value::as_array_mut) {
+        for list in lists {
+            if let Some(cues) = list.get_mut("cues").and_then(Value::as_array_mut) {
+                cues.iter_mut().for_each(walk);
+            }
+        }
+    }
+}
+
 /// Upgrade a raw showfile document to the current schema, step by step.
 pub fn migrate(mut doc: Value) -> Result<Value, ShowfileError> {
     let mut version = doc
@@ -56,6 +77,7 @@ pub fn migrate(mut doc: Value) -> Result<Value, ShowfileError> {
             // v3 added OSC cues and `settings.panic_send`; nothing to convert.
             // The bump makes older versions refuse such files cleanly.
             2 => {}
+            3 => migrate_v3_to_v4(&mut doc),
             other => {
                 return Err(ShowfileError::Malformed(format!(
                     "no migration from schema {other}"
@@ -261,12 +283,21 @@ pub fn hash_file(path: &Path) -> Result<String, ShowfileError> {
 /// to be relative and record content hashes. Returns the number of files
 /// copied; files that cannot be read are reported in the error list.
 pub fn collect_media(show: &mut Show, show_dir: &Path) -> (usize, Vec<String>) {
+    gather_media(show, show_dir, false)
+}
+
+/// Like [`collect_media`], but `move_files` moves the media into the show
+/// folder instead of copying (the originals are gone afterwards; a file
+/// used by several cues is moved once).
+pub fn gather_media(show: &mut Show, show_dir: &Path, move_files: bool) -> (usize, Vec<String>) {
     let media_dir = show_dir.join("media");
-    let mut copied = 0;
+    let mut done = 0;
     let mut errors = Vec::new();
     if let Err(e) = fs::create_dir_all(&media_dir) {
         return (0, vec![format!("{}: {e}", media_dir.display())]);
     }
+    // Source -> (destination, hash), so a file shared by cues is handled once.
+    let mut seen: std::collections::HashMap<PathBuf, (PathBuf, String)> = Default::default();
     show.for_each_cue_mut(|cue| {
         let CueKind::Audio(a) = &mut cue.kind else {
             return;
@@ -275,6 +306,11 @@ pub fn collect_media(show: &mut Show, show_dir: &Path) -> (usize, Vec<String>) {
             return;
         }
         let src = resolve_media(Some(show_dir), &a.file);
+        if let Some((dest, hash)) = seen.get(&src) {
+            a.file = relativize_media(Some(show_dir), dest);
+            a.hash = Some(hash.clone());
+            return;
+        }
         let hash = match hash_file(&src) {
             Ok(h) => h,
             Err(e) => {
@@ -293,18 +329,37 @@ pub fn collect_media(show: &mut Show, show_dir: &Path) -> (usize, Vec<String>) {
             if dest.exists() && hash_file(&dest).ok().as_deref() != Some(hash.as_str()) {
                 dest = media_dir.join(format!("{}-{name}", &hash[..8]));
             }
-            if !dest.exists() {
-                if let Err(e) = fs::copy(&src, &dest) {
-                    errors.push(format!("{}: {e}", src.display()));
-                    return;
+            let result = if dest.exists() {
+                // Already there (same content).
+                if move_files {
+                    fs::remove_file(&src).map(|_| false)
+                } else {
+                    Ok(false)
                 }
-                copied += 1;
+            } else if move_files {
+                // rename fails across disks: copy, then remove.
+                fs::rename(&src, &dest)
+                    .or_else(|_| fs::copy(&src, &dest).and_then(|_| fs::remove_file(&src)))
+                    .map(|_| true)
+            } else {
+                fs::copy(&src, &dest).map(|_| true)
+            };
+            match result {
+                Ok(true) => done += 1,
+                Ok(false) => {}
+                Err(e) => {
+                    errors.push(format!("{}: {e}", src.display()));
+                    if !dest.exists() {
+                        return;
+                    }
+                }
             }
         }
+        seen.insert(src, (dest.clone(), hash.clone()));
         a.file = relativize_media(Some(show_dir), &dest);
         a.hash = Some(hash);
     });
-    (copied, errors)
+    (done, errors)
 }
 
 #[cfg(test)]
@@ -445,5 +500,66 @@ mod tests {
         assert_eq!(a.file, "media/song.wav");
         assert_eq!(a.hash.as_deref().unwrap().len(), 64);
         assert!(dir.path().join("media/song.wav").exists());
+    }
+
+    #[test]
+    fn gather_moves_shared_file_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let media = outside.path().join("song.wav");
+        fs::write(&media, b"RIFFdata").unwrap();
+        let mut show = Show::default();
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let id = show.alloc_id();
+            ids.push(id);
+            show.cue_lists[0].cues.push(Cue {
+                id,
+                kind: CueKind::Audio(AudioCue {
+                    file: media.to_string_lossy().into(),
+                    ..AudioCue::default()
+                }),
+                ..Cue::default()
+            });
+        }
+        let (moved, errors) = gather_media(&mut show, dir.path(), true);
+        assert_eq!((moved, errors.len()), (1, 0), "{errors:?}");
+        assert!(!media.exists(), "moved, not copied");
+        for id in ids {
+            let CueKind::Audio(a) = &show.cue(id).unwrap().kind else {
+                panic!()
+            };
+            assert_eq!(a.file, "media/song.wav");
+        }
+        assert_eq!(
+            fs::read(dir.path().join("media/song.wav")).unwrap(),
+            b"RIFFdata"
+        );
+    }
+
+    #[test]
+    fn v3_audio_fades_become_smooth() {
+        let show = parse(
+            r#"{
+          "schema_version": 3, "name": "Fades", "next_id": 4,
+          "cue_lists": [{ "id": 1, "name": "Main", "cues": [
+            { "id": 2, "kind": { "type": "audio", "file": "a.wav", "fade_curve": "equal_power" } },
+            { "id": 3, "kind": { "type": "group", "children": [
+              { "id": 4, "kind": { "type": "audio", "file": "b.wav", "fade_curve": "linear" } }
+            ] } }
+          ] }]
+        }"#,
+        )
+        .unwrap();
+        let curve = |id| match &show.cue(id).unwrap().kind {
+            CueKind::Audio(a) => a.fade_curve,
+            _ => panic!(),
+        };
+        assert_eq!(curve(2), crate::model::Curve::Smooth);
+        assert_eq!(
+            curve(4),
+            crate::model::Curve::Linear,
+            "a deliberate choice stays"
+        );
     }
 }

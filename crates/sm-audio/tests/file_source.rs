@@ -171,6 +171,42 @@ fn loops_are_seamless_and_counted() {
 }
 
 #[test]
+fn vamp_plays_the_intro_then_loops_the_vamp_region() {
+    let dir = TempDir::new("vamp");
+    let s = noise_i16(8000, 5);
+    let f = i16_to_f32(&s);
+    let p = dir.path("a.wav");
+    write_wav_i16(&p, 48_000, 1, &s);
+    let mut o = opts();
+    o.start_frame = Some(100);
+    o.end_frame = Some(1500);
+    o.loop_start_frame = Some(1000);
+    o.loop_count = 0;
+    let mut src = FileSource::open(&p, o.clone()).unwrap();
+    assert_eq!(src.total_frames(), None);
+    let mut buf = vec![0.0f32; 1400 + 5 * 500];
+    let mut filled = 0;
+    while filled < buf.len() {
+        let to = (filled + 333).min(buf.len());
+        let n = src.read(&mut buf[filled..to]);
+        assert!(n > 0);
+        filled += n;
+    }
+    assert_eq!(&buf[..1400], &f[100..1500], "intro");
+    for pass in 0..5 {
+        let at = 1400 + pass * 500;
+        assert_eq!(&buf[at..at + 500], &f[1000..1500], "loop pass {pass}");
+    }
+    // An offset past the intro lands inside the loop.
+    o.offset_seconds = (1400.0 + 2.0 * 500.0 + 120.0) / 48_000.0;
+    let mut src = FileSource::open(&p, o).unwrap();
+    let mut buf = vec![0.0f32; 380];
+    let n = src.read(&mut buf);
+    assert_eq!(n, 380);
+    assert_eq!(&buf[..], &f[1120..1500]);
+}
+
+#[test]
 fn resamples_44k1_to_48k_with_correct_length_and_pitch() {
     let dir = TempDir::new("resample");
     let rate_in = 44_100u32;

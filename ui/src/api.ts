@@ -9,8 +9,8 @@ export type Mode = "edit" | "live";
 export type CueColor = "" | "red" | "orange" | "yellow" | "green" | "blue" | "purple";
 export const CUE_COLORS: CueColor[] = ["", "red", "orange", "yellow", "green", "blue", "purple"];
 export type ContinueMode = "do_not_continue" | "auto_continue" | "auto_follow";
-export type FadeCurve = "linear" | "equal_power" | "s_curve";
-export const FADE_CURVES: FadeCurve[] = ["linear", "equal_power", "s_curve"];
+export type FadeCurve = "smooth" | "linear" | "equal_power" | "s_curve";
+export const FADE_CURVES: FadeCurve[] = ["smooth", "linear", "equal_power", "s_curve"];
 
 export interface RoutePoint {
   src: number;
@@ -34,6 +34,10 @@ export interface AudioKind {
   loop_count: number;
   /** empty = default routing */
   routing: RoutePoint[];
+  /** native sample rate of the file (cached) */
+  file_rate?: number | null;
+  /** vamp: this part loops until it is released */
+  vamp?: { start: number; end: number } | null;
 }
 
 export interface FadeKind {
@@ -106,9 +110,9 @@ export interface TimecodeKind {
 }
 
 export type ControlAction =
-  | "start" | "stop" | "pause" | "resume" | "load_to_time" | "arm" | "disarm" | "go_to" | "reset";
+  | "start" | "stop" | "pause" | "resume" | "load_to_time" | "arm" | "disarm" | "go_to" | "release_loop" | "reset";
 export const CONTROL_ACTIONS: ControlAction[] = [
-  "start", "stop", "pause", "resume", "load_to_time", "arm", "disarm", "go_to", "reset",
+  "start", "stop", "pause", "resume", "load_to_time", "arm", "disarm", "go_to", "release_loop", "reset",
 ];
 
 export interface ControlKind {
@@ -363,6 +367,8 @@ export interface ActiveCue {
   elapsed: number;
   duration: number | null;
   from_tc: boolean;
+  /** audio cue playing its vamp (loop), not released yet */
+  vamping?: boolean;
 }
 
 export interface TcStatus {
@@ -441,7 +447,7 @@ export type Command =
   | { cmd: "next" | "previous"; list?: number }
   | { cmd: "set_playhead"; cue: number | null; list?: number }
   | { cmd: "goto_number"; number: string }
-  | { cmd: "start_cue" | "stop_cue" | "pause_cue" | "resume_cue" | "reset_cue"; cue: number }
+  | { cmd: "start_cue" | "stop_cue" | "pause_cue" | "resume_cue" | "reset_cue" | "release_loop"; cue: number }
   | { cmd: "load_cue"; cue: number; time: number }
   | { cmd: "arm_cue"; cue: number; armed: boolean }
   | { cmd: "reset" | "reset_show_clock" | "midi_panic" | "reset_clip" }
@@ -469,7 +475,7 @@ export type Command =
   | { cmd: "quit"; force?: boolean }
   | { cmd: "new_show"; force?: boolean }
   | { cmd: "open_show"; path: string; force?: boolean }
-  | { cmd: "save_show"; path?: string }
+  | { cmd: "save_show"; path?: string; folder?: boolean; media?: "copy" | "move" }
   | { cmd: "recover"; accept: boolean }
   | { cmd: "kick_client"; id: number }
   | { cmd: "rtp_connect"; addr: string };

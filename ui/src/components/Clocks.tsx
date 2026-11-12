@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { run } from "../commands";
 import { useApp } from "../store";
 import { formatClock, formatCountdown, formatWallClock } from "../time";
-import { IconReset } from "./icons";
 
 /** Wall clock that keeps ticking locally (offset to the server clock) even while disconnected. */
 function useWallClock(): number {
@@ -27,15 +26,15 @@ export function Clocks({ canControl, compact = false }: { canControl: boolean; c
   return (
     <section className={`clocks${compact ? " compact" : ""}${stale ? " stale" : ""}`} aria-label="Clocks" data-testid="clocks">
       <div className="clock">
-        <span className="clock-label">Time</span>
+        <span className="clock-label">Time of day</span>
         <span className="clock-value num">{formatWallClock(now)}</span>
       </div>
       <div className="clock">
         <span className="clock-label">
-          Show
+          Show time
           {canControl ? (
-            <button className="btn ghost tiny" title="Reset show clock" aria-label="Reset show clock" onClick={() => void run({ cmd: "reset_show_clock" })}>
-              <IconReset size={12} />
+            <button className="btn tiny clock-reset" title="Reset show clock" aria-label="Reset show clock" onClick={() => void run({ cmd: "reset_show_clock" })}>
+              Reset
             </button>
           ) : null}
         </span>

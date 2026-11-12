@@ -2,6 +2,7 @@
 import { memo, useEffect, useMemo, useRef } from "react";
 import type { ActiveCue, Cue, Show } from "../api";
 import { activeMap, CONTINUE_GLYPH, cueDuration, cueTarget, findList, flattenCues, TYPE_LABELS } from "../cues";
+import { run } from "../commands";
 import { currentListId, setApp, useApp } from "../store";
 import { formatCountdown, formatDuration } from "../time";
 import { IconDisarmed, IconError, IconLoaded, IconPause, IconPlay, TypeIcon } from "./icons";
@@ -55,6 +56,8 @@ interface RowProps {
   isPlayhead: boolean;
   selected: boolean;
   interactive: boolean;
+  /** shows "Release loop" on a vamping cue */
+  canRelease: boolean;
   gutterSetsPlayhead: boolean;
   onSelect: (id: number) => void;
   onPlayhead: (id: number) => void;
@@ -110,6 +113,24 @@ const LiveRow = memo(function LiveRow(p: RowProps) {
       <span className="lrow-tags">
         {!cue.armed ? <span className="tag tag-disarmed">DISARMED</span> : null}
         {st === "paused" ? <span className="tag tag-paused">PAUSED</span> : null}
+        {active?.vamping ? (
+          p.canRelease ? (
+            <button
+              type="button"
+              className="tag tag-release"
+              data-testid="release-loop"
+              aria-label={`Release loop of cue ${cue.number}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                void run({ cmd: "release_loop", cue: cue.id });
+              }}
+            >
+              RELEASE LOOP
+            </button>
+          ) : (
+            <span className="tag tag-paused">LOOP</span>
+          )
+        ) : null}
         {st === "loaded" ? <span className="tag tag-loaded">LOADED {formatDuration(p.loaded ?? 0, false)}</span> : null}
         {cue.tc_trigger ? <span className="tag tag-tc num">TC {cue.tc_trigger}</span> : null}
         {st === "pre_wait" ? <span className="tag tag-wait">PRE-WAIT</span> : null}
@@ -210,6 +231,7 @@ export function CueList(p: {
           isPlayhead={playhead === r.cue.id}
           selected={p.selectable && selection.includes(r.cue.id)}
           interactive={p.selectable}
+          canRelease={p.variant !== "view"}
           gutterSetsPlayhead={!!p.gutterSetsPlayhead}
           onSelect={onSelect}
           onPlayhead={onPlayhead}

@@ -21,7 +21,7 @@ const CONTINUE_OPTIONS: { value: ContinueMode; label: string }[] = [
   { value: "auto_continue", label: "Auto-continue (start next together)" },
   { value: "auto_follow", label: "Auto-follow (start next when finished)" },
 ];
-const CURVE_LABELS = { linear: "Linear", equal_power: "Equal power", s_curve: "S-curve" } as const;
+const CURVE_LABELS = { smooth: "Smooth", linear: "Linear", equal_power: "Equal power", s_curve: "S-curve" } as const;
 export const CURVE_OPTIONS = FADE_CURVES.map((c) => ({ value: c, label: CURVE_LABELS[c] }));
 
 function patchCue(cue: Cue, patch: CuePatch): void {

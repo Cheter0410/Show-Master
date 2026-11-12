@@ -290,6 +290,8 @@ pub struct Active {
     /// Length of the current phase; `None` = open-ended.
     pub duration: Option<f64>,
     pub from_tc: bool,
+    /// Audio cue playing its vamp (loop), not released yet.
+    pub vamping: bool,
 }
 
 impl Active {

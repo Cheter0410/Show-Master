@@ -234,7 +234,7 @@ fn grid(id: impl std::hash::Hash + std::fmt::Debug) -> egui::Grid {
         .min_col_width(84.0)
 }
 
-fn label(ui: &mut Ui, text: &str) {
+pub(super) fn label(ui: &mut Ui, text: &str) {
     ui.label(RichText::new(text).color(theme::MUTED));
 }
 
@@ -551,7 +551,8 @@ fn int_field(
     );
 }
 
-pub(crate) const CURVES: [(Curve, &str); 3] = [
+pub(crate) const CURVES: [(Curve, &str); 4] = [
+    (Curve::Smooth, "Smooth"),
     (Curve::Linear, "Linear"),
     (Curve::EqualPower, "Equal power"),
     (Curve::SCurve, "S-curve"),
@@ -1514,7 +1515,7 @@ pub(crate) fn osc_rows(
     ui.end_row();
 }
 
-const CONTROL_ACTIONS: [(ControlAction, &str); 9] = [
+const CONTROL_ACTIONS: [(ControlAction, &str); 10] = [
     (ControlAction::Start, "Start"),
     (ControlAction::Stop, "Stop"),
     (ControlAction::Pause, "Pause"),
@@ -1523,6 +1524,7 @@ const CONTROL_ACTIONS: [(ControlAction, &str); 9] = [
     (ControlAction::Arm, "Arm"),
     (ControlAction::Disarm, "Disarm"),
     (ControlAction::GoTo, "Go to (set playhead)"),
+    (ControlAction::ReleaseLoop, "Release loop (vamp)"),
     (ControlAction::Reset, "Reset show"),
 ];
 

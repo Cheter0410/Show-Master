@@ -82,6 +82,7 @@ pub fn short_command(
             match *action {
                 "start" | "go" => json!({ "cmd": "start_cue", "cue": cue }),
                 "stop" => json!({ "cmd": "stop_cue", "cue": cue }),
+                "release" | "devamp" => json!({ "cmd": "release_loop", "cue": cue }),
                 "pause" => json!({ "cmd": "pause_cue", "cue": cue }),
                 "resume" => json!({ "cmd": "resume_cue", "cue": cue }),
                 "load" => json!({
@@ -132,7 +133,7 @@ pub fn to_command(addr: &str, args: &[Value]) -> Option<Value> {
     let field = match name {
         "goto_number" => Some("number"),
         "start_cue" | "stop_cue" | "pause_cue" | "resume_cue" | "reset_cue" | "load_cue"
-        | "arm_cue" | "set_playhead" => Some("cue"),
+        | "arm_cue" | "set_playhead" | "release_loop" => Some("cue"),
         "set_master" => Some("db"),
         "tc_relocate" => Some("to"),
         "tc_start" => Some("from"),

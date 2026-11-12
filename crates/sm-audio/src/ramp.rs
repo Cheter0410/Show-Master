@@ -85,8 +85,7 @@ impl Ramp {
                 self.cur = self.to;
             } else {
                 let t = (self.pos as f64 / self.len as f64) as f32;
-                let k = self.curve.shape(t, self.to >= self.from);
-                self.cur = self.from + (self.to - self.from) * k;
+                self.cur = self.curve.gain(self.from, self.to, t);
             }
         }
         (start, self.cur)
@@ -121,6 +120,30 @@ mod tests {
         down.set(0.0, 1000, FadeCurve::EqualPower);
         let (_, m) = down.step(500);
         assert!((m - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-4);
+    }
+
+    #[test]
+    fn smooth_fade_out_glides_to_silence() {
+        let mut r = Ramp::constant(1.0);
+        r.set(0.0, 1000, FadeCurve::Smooth);
+        let mut prev = 1.0;
+        let mut steps = Vec::new();
+        for _ in 0..100 {
+            let (_, g) = r.step(10);
+            assert!(g <= prev);
+            steps.push(prev - g);
+            prev = g;
+        }
+        assert_eq!(prev, 0.0);
+        // Soft start and soft end: the first and last steps are tiny
+        // compared with the largest one.
+        let max = steps.iter().copied().fold(0.0, f32::max);
+        assert!(steps[0] < max * 0.01 && steps[99] < max * 0.001);
+        // Midpoint at -12 dB (0.25): loudness falls evenly.
+        let mut m = Ramp::constant(1.0);
+        m.set(0.0, 1000, FadeCurve::Smooth);
+        let (_, mid) = m.step(500);
+        assert!((mid - 0.25).abs() < 1e-4);
     }
 
     #[test]

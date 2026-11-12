@@ -34,6 +34,8 @@ pub struct CueWindowState {
 pub enum CueAction {
     SetPlayhead(u64),
     Select(u64),
+    /// "Release loop" on a vamping audio cue.
+    ReleaseLoop(u64),
 }
 
 /// Visible state of a row, in order of importance.
@@ -155,6 +157,7 @@ pub fn cue_target(cue: &Cue, show: &Show) -> String {
                 ControlAction::Arm => "arm",
                 ControlAction::Disarm => "disarm",
                 ControlAction::GoTo => "go to",
+                ControlAction::ReleaseLoop => "release loop",
                 ControlAction::Reset => return "reset show".into(),
             };
             format!("{action} -> {}", target(c.target))
@@ -429,6 +432,10 @@ fn draw_row(
         None => stripe,
     };
     p.rect_filled(rect, 4.0, bg);
+    // Cue colour: a see-through tint over the whole row.
+    if let Some(c) = theme::cue_color(&cue.color) {
+        p.rect_filled(rect, 4.0, theme::cue_tint(dim(c), false));
+    }
     if resp.hovered() {
         p.rect_filled(rect, 4.0, Color32::from_white_alpha(8));
     }
@@ -452,7 +459,7 @@ fn draw_row(
         p.rect_filled(
             Rect::from_min_size(
                 rect.min + Vec2::new(2.0, 4.0),
-                Vec2::new(5.0, rect.height() - 8.0),
+                Vec2::new(7.0, rect.height() - 8.0),
             ),
             2.0,
             dim(c),
@@ -557,6 +564,33 @@ fn draw_row(
         dim(muted),
     );
     let mut tags_r = type_r - type_w - 6.0;
+    // A vamping cue: a button that releases the loop.
+    let mut release = false;
+    if active.is_some_and(|a| a.vamping) {
+        let g = p.layout_no_wrap(
+            "RELEASE LOOP".to_string(),
+            FontId::proportional(13.0),
+            Color32::BLACK,
+        );
+        let size = g.size() + Vec2::new(18.0, 12.0);
+        let r = Rect::from_min_size(Pos2::new(tags_r - size.x, cy - size.y / 2.0), size);
+        let b = ui
+            .interact(
+                r,
+                egui::Id::unique(("release_loop", cue.id)),
+                egui::Sense::click(),
+            )
+            .accessible_name(format!("Release loop of cue {}", cue_label(cue)));
+        let fill = if b.hovered() {
+            Color32::from_rgb(252, 191, 73)
+        } else {
+            theme::PAUSED
+        };
+        p.rect_filled(r, 5.0, fill);
+        p.galley(r.min + Vec2::new(9.0, 6.0), g, Color32::BLACK);
+        tags_r -= size.x + 6.0;
+        release = b.clicked();
+    }
     let mut tag_at = |text: &str, fg: Color32, bg: Color32| {
         let w = tag(&p, tags_r, cy, text, fg, bg);
         tags_r -= w + 6.0;
@@ -663,7 +697,9 @@ fn draw_row(
     let label = format!("Cue {}", cue_label(cue));
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Row, true, &label));
     // No tooltip: a mouse resting on the list during a show must not cover rows.
-    if resp.double_clicked() && depth == 0 {
+    if release {
+        Some(CueAction::ReleaseLoop(cue.id))
+    } else if resp.double_clicked() && depth == 0 {
         Some(CueAction::SetPlayhead(cue.id))
     } else if resp.clicked() {
         Some(CueAction::Select(cue.id))

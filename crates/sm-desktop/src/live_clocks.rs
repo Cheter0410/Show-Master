@@ -240,7 +240,7 @@ pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> StripAction {
         p.text(
             btn.center(),
             Align2::CENTER_CENTER,
-            "reset",
+            "Reset",
             FontId::proportional(11.0),
             if hovered { text } else { theme::MUTED },
         );

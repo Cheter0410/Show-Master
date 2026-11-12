@@ -61,6 +61,11 @@ pub enum Command {
     StopCue {
         cue: CueId,
     },
+    /// Release a vamping audio cue: it leaves its loop at the end of the
+    /// pass and plays on to the end.
+    ReleaseLoop {
+        cue: CueId,
+    },
     PauseCue {
         cue: CueId,
     },
@@ -106,6 +111,10 @@ pub struct VoiceSpec {
     pub loop_count: u32,
     /// Playback offset in frames (engine rate) from the start of the first pass.
     pub offset_frames: u64,
+    /// Vamp: passes after the first start here (seconds of file time).
+    pub loop_from: Option<f64>,
+    /// Start in source frames (overrides `start`; sample-exact splices).
+    pub start_frame: Option<u64>,
     pub gain: f32,
     /// (source channel, device channel, linear gain)
     pub matrix: Vec<(u16, u16, f32)>,
@@ -186,26 +195,66 @@ pub enum Action {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum EventKind {
-    Go { cue: CueId },
-    GoIgnored { reason: String },
-    CueTriggered { cue: CueId },
-    CueStarted { cue: CueId },
-    CueEnded { cue: CueId },
-    CueStopped { cue: CueId },
-    CuePaused { cue: CueId },
-    CueResumed { cue: CueId },
-    CueLoaded { cue: CueId, time: f64 },
-    CueError { cue: CueId, message: String },
-    CueArmed { cue: CueId, armed: bool },
-    Playhead { list: ListId, cue: Option<CueId> },
+    Go {
+        cue: CueId,
+    },
+    GoIgnored {
+        reason: String,
+    },
+    CueTriggered {
+        cue: CueId,
+    },
+    CueStarted {
+        cue: CueId,
+    },
+    CueEnded {
+        cue: CueId,
+    },
+    CueStopped {
+        cue: CueId,
+    },
+    CuePaused {
+        cue: CueId,
+    },
+    CueResumed {
+        cue: CueId,
+    },
+    CueLoaded {
+        cue: CueId,
+        time: f64,
+    },
+    CueError {
+        cue: CueId,
+        message: String,
+    },
+    CueArmed {
+        cue: CueId,
+        armed: bool,
+    },
+    /// A vamp was released; it leaves the loop `in_secs` from now.
+    LoopReleased {
+        cue: CueId,
+        in_secs: f64,
+    },
+    Playhead {
+        list: ListId,
+        cue: Option<CueId>,
+    },
     StopAll,
     Panic,
     PausedAll,
     ResumedAll,
     Reset,
-    Timecode { action: String, position: String },
-    Master { db: f32 },
-    Info { message: String },
+    Timecode {
+        action: String,
+        position: String,
+    },
+    Master {
+        db: f32,
+    },
+    Info {
+        message: String,
+    },
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -235,6 +284,9 @@ pub struct ActiveCue {
     /// Length of the current phase in seconds; `None` = open-ended.
     pub duration: Option<f64>,
     pub from_tc: bool,
+    /// Audio cue playing its vamp (loop) and not released yet.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub vamping: bool,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -271,6 +323,7 @@ pub struct Snapshot {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Ev {
     Action,
+    VampSwitch,
     FadeOut,
     Continue,
     End,
@@ -310,9 +363,62 @@ struct Inst {
     disarmed: bool,
     group: Option<GroupRt>,
     stop_target_on_end: Option<CueId>,
+    vamp: VampState,
+    /// The vamp voice fading out after the switch, until this global time.
+    old_voice: Option<(VoiceId, u64)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+enum VampState {
+    /// No vamp, or released and done.
+    #[default]
+    None,
+    /// Looping, not released.
+    Looping,
+    /// Released before the audio started: play straight through.
+    ReleasedEarly,
+    /// Released: at local frame `at` the voice `next` (the rest of the file)
+    /// takes over; `len` = its length in frames (if known).
+    Switching {
+        at: u64,
+        next: VoiceId,
+        len: Option<u64>,
+        /// Crossfade length (frames), centred on the loop end.
+        xfade: u64,
+    },
+}
+
+/// Least half crossfade at a vamp release, in frames (both voices play the
+/// same audio for at least this long before the loop end).
+const VAMP_XFADE_HALF: u64 = 128;
+
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 {
+        a.max(1)
+    } else {
+        gcd(b, a % b)
+    }
 }
 
 impl Inst {
+    /// Every voice of this instance that may still sound at `t`: the main
+    /// one and a vamp voice still fading out after its switch.
+    fn voices(&self, t: u64) -> impl Iterator<Item = VoiceId> + '_ {
+        self.voice.into_iter().chain(
+            self.old_voice
+                .filter(|(_, until)| t < *until)
+                .map(|(v, _)| v),
+        )
+    }
+
+    /// A prepared (not started) voice for a released vamp.
+    fn pending_voice(&self) -> Option<VoiceId> {
+        match self.vamp {
+            VampState::Switching { next, .. } => Some(next),
+            _ => None,
+        }
+    }
+
     fn local_at(&self, t: u64) -> u64 {
         if self.paused {
             self.local
@@ -340,6 +446,9 @@ impl Inst {
         };
         if let Some(f) = self.fade_at {
             consider(self.global(f), Ev::FadeOut);
+        }
+        if let VampState::Switching { at, .. } = self.vamp {
+            consider(self.global(at), Ev::VampSwitch);
         }
         if let Some(c) = self.cont_at {
             consider(self.global(c), Ev::Continue);
@@ -713,6 +822,8 @@ impl Engine {
             disarmed: !armed,
             group: None,
             stop_target_on_end: None,
+            vamp: VampState::None,
+            old_voice: None,
         });
         self.emit(t, EventKind::CueTriggered { cue: cue_id });
         Some(id)
@@ -746,6 +857,7 @@ impl Engine {
                     });
                 }
             }
+            Ev::VampSwitch => self.vamp_switch(ix, t),
             Ev::Continue => {
                 self.insts[ix].cont_at = None;
                 if let Some(next) = self.insts[ix].next {
@@ -830,7 +942,7 @@ impl Engine {
     fn cue_error(&mut self, id: u64, t: u64, message: String) {
         if let Some(ix) = self.idx(id) {
             let inst = self.insts.remove(ix);
-            if let Some(voice) = inst.voice {
+            for voice in inst.voices(t) {
                 self.actions.push(Action::StopVoice {
                     voice,
                     at: t,
@@ -838,6 +950,9 @@ impl Engine {
                     curve: Curve::Linear,
                     hard: false,
                 });
+            }
+            if let Some(voice) = inst.pending_voice() {
+                self.actions.push(Action::DiscardVoice { voice });
             }
             self.errors.insert(inst.cue, message.clone());
             self.emit(
@@ -888,15 +1003,177 @@ impl Engine {
         let CueKind::Audio(a) = &cue.kind else {
             return None;
         };
+        let vamp = a.active_vamp();
         Some(VoiceSpec {
             file: a.file.clone(),
             start: a.start.max(0.0),
-            end: a.end,
-            loop_count: a.loop_count,
+            end: vamp.map_or(a.end, |v| Some(v.end)),
+            loop_count: if vamp.is_some() { 0 } else { a.loop_count },
             offset_frames,
+            loop_from: vamp.map(|v| v.start),
+            start_frame: None,
             gain: db_to_lin(a.gain_db),
             matrix: self.matrix(&a.effective_routing(self.show.patch.outputs.len())),
         })
+    }
+
+    /// The plain (no vamp) spec: an audio cue whose vamp was released
+    /// before it started plays straight through.
+    fn plain_voice_spec(&self, cue: &Cue, offset_frames: u64) -> Option<VoiceSpec> {
+        let CueKind::Audio(a) = &cue.kind else {
+            return None;
+        };
+        Some(VoiceSpec {
+            loop_count: 1,
+            end: a.end,
+            loop_from: None,
+            ..self.voice_spec(cue, offset_frames)?
+        })
+    }
+
+    /// Release the vamp of `cue`: find the first loop end far enough ahead
+    /// to open the rest of the file, and schedule the switch there.
+    fn release_loop(&mut self, cue: CueId, t: u64) -> Result<(), String> {
+        let Some(ix) = self.insts.iter().position(|i| i.cue == cue) else {
+            return Err("the cue is not running".into());
+        };
+        let Some(c) = self.show.cue(cue).cloned() else {
+            return Err("no such cue".into());
+        };
+        let CueKind::Audio(a) = &c.kind else {
+            return Err("only audio cues have a loop".into());
+        };
+        let Some(v) = a.active_vamp() else {
+            return Err("this cue has no loop".into());
+        };
+        let i = &self.insts[ix];
+        match i.vamp {
+            VampState::Looping => {}
+            VampState::None if !i.started || i.voice.is_none() => {
+                // Still in its pre-wait: it will play straight through.
+                self.insts[ix].vamp = VampState::ReleasedEarly;
+                self.emit(t, EventKind::LoopReleased { cue, in_secs: 0.0 });
+                return Ok(());
+            }
+            _ => return Err("the loop is already released".into()),
+        }
+        if i.voice.is_none() {
+            return Err("the cue is not playing".into());
+        }
+        // Frames at the file's own rate, rounded as the file source does.
+        let rate_u = u64::from(a.file_rate.unwrap_or(self.sr).max(1));
+        let sr_u = u64::from(self.sr.max(1));
+        let (rate, sr) = (rate_u as f64, sr_u as f64);
+        let src = |secs: f64| (secs.max(0.0) * rate).round() as u64;
+        let s0 = src(a.start);
+        let le = src(v.end);
+        let ls = src(v.start).max(s0);
+        if le <= ls {
+            return Err("the loop is empty".into());
+        }
+        let (intro, len) = (le - s0, le - ls);
+        let pos = i.local_at(t).saturating_sub(i.pre);
+        let pre = i.pre;
+        // The new voice starts `h_src` source frames before the loop end, at
+        // an engine frame that maps exactly onto a source frame: both rates
+        // meet every `q` source = `p` engine frames (147 / 160 for 44.1 /
+        // 48 kHz), so the splice has no sub-sample offset.
+        let g = gcd(rate_u, sr_u);
+        let (q, p) = (rate_u / g, sr_u / g);
+        let min_h = (VAMP_XFADE_HALF as f64 * rate / sr).ceil() as u64;
+        let ready = pos + self.fr(0.5);
+        let to_engine = |n: u64| -> u64 {
+            if q <= 8192 {
+                n / q * p
+            } else {
+                (n as f64 * sr / rate).round() as u64
+            }
+        };
+        let mut k = 0u64;
+        let (start_src, h_src) = loop {
+            let n = intro + k * len;
+            let mut h = if q <= 8192 { n % q } else { min_h };
+            while h < min_h {
+                h += q;
+            }
+            if h <= n && to_engine(n - h) >= ready {
+                break (n - h, h);
+            }
+            k += 1;
+        };
+        let start = to_engine(start_src);
+        let h_eng = (h_src as f64 * sr / rate).round() as u64;
+        let next = self.alloc_voice();
+        let mut spec = self
+            .plain_voice_spec(&c, 0)
+            .ok_or("only audio cues have a loop")?;
+        spec.start = v.end;
+        spec.start_frame = Some(le - h_src);
+        self.actions.push(Action::PrepareVoice {
+            voice: next,
+            cue,
+            spec,
+        });
+        let rest = a
+            .end
+            .or(a.file_duration)
+            .map(|end| self.fr(end - v.end) + h_eng);
+        let at = pre + start;
+        let i = &mut self.insts[ix];
+        i.vamp = VampState::Switching {
+            at,
+            next,
+            len: rest,
+            xfade: 2 * h_eng,
+        };
+        let in_secs = (i.global(at + h_eng) - t) as f64 / sr;
+        self.emit(t, EventKind::LoopReleased { cue, in_secs });
+        Ok(())
+    }
+
+    /// The switch point of a released vamp: cross over to the rest of the file.
+    fn vamp_switch(&mut self, ix: usize, t: u64) {
+        let VampState::Switching {
+            at,
+            next,
+            len,
+            xfade,
+        } = self.insts[ix].vamp
+        else {
+            return;
+        };
+        let i = &mut self.insts[ix];
+        i.vamp = VampState::None;
+        let old = i.voice.replace(next);
+        i.old_voice = old.map(|v| (v, t + xfade + 1));
+        let pre = i.pre;
+        i.dur = len.map(|l| at - pre + l);
+        let cue = i.cue;
+        self.actions.push(Action::StartVoice {
+            voice: next,
+            at: t,
+            fade_in_frames: xfade,
+            curve: Curve::Linear,
+        });
+        if let Some(v) = old {
+            self.actions.push(Action::StopVoice {
+                voice: v,
+                at: t,
+                fade_frames: xfade,
+                curve: Curve::Linear,
+                hard: false,
+            });
+        }
+        let fade = match self.show.cue(cue).map(|c| &c.kind) {
+            Some(CueKind::Audio(a)) => (self.fr(a.fade_out), a.fade_curve),
+            _ => (0, Curve::Linear),
+        };
+        let i = &mut self.insts[ix];
+        if let (Some(d), true) = (i.dur, fade.0 > 0) {
+            i.fade_frames = fade.0.min(d.saturating_sub(at - pre));
+            i.fade_curve = fade.1;
+            i.fade_at = Some(pre + d - i.fade_frames);
+        }
     }
 
     fn alloc_voice(&mut self) -> VoiceId {
@@ -918,19 +1195,32 @@ impl Engine {
                     self.cue_error(id, t, "no audio file assigned".into());
                     return;
                 }
-                let dur = a.duration().map(|d| self.fr(d));
+                let early = self.insts[ix].vamp == VampState::ReleasedEarly;
+                let vamping = !early && a.active_vamp().is_some();
+                let dur = if early {
+                    a.play_through_duration()
+                } else {
+                    a.duration()
+                }
+                .map(|d| self.fr(d));
                 if dur.is_some_and(|d| offset >= d) {
                     self.insts[ix].action_done = true;
                     return;
                 }
-                let voice = match self.standby.remove(&cue.id) {
-                    Some((v, off)) if off == offset => v,
+                let standby = self.standby.remove(&cue.id);
+                let voice = match standby {
+                    Some((v, off)) if off == offset && !early => v,
                     other => {
                         if let Some((v, _)) = other {
                             self.actions.push(Action::DiscardVoice { voice: v });
                         }
                         let v = self.alloc_voice();
-                        if let Some(spec) = self.voice_spec(cue, offset) {
+                        let spec = if early {
+                            self.plain_voice_spec(cue, offset)
+                        } else {
+                            self.voice_spec(cue, offset)
+                        };
+                        if let Some(spec) = spec {
                             self.actions.push(Action::PrepareVoice {
                                 voice: v,
                                 cue: cue.id,
@@ -951,6 +1241,11 @@ impl Engine {
                 let fade = self.fr(a.fade_out);
                 let i = &mut self.insts[ix];
                 i.voice = Some(voice);
+                i.vamp = if vamping {
+                    VampState::Looping
+                } else {
+                    VampState::None
+                };
                 i.dur = dur;
                 if let (Some(d), true) = (dur, fade > 0) {
                     i.fade_frames = fade.min(d - offset);
@@ -1053,6 +1348,16 @@ impl Engine {
                         }
                     }
                     ControlAction::Reset => self.reset_cue(target, t),
+                    ControlAction::ReleaseLoop => {
+                        if let Err(e) = self.release_loop(target, t) {
+                            self.emit(
+                                t,
+                                EventKind::Info {
+                                    message: format!("Release loop: {e}"),
+                                },
+                            );
+                        }
+                    }
                 }
             }
             CueKind::Group(g) => {
@@ -1132,7 +1437,7 @@ impl Engine {
         self.insts
             .iter()
             .filter(|i| fam.contains(&i.id))
-            .filter_map(|i| i.voice)
+            .flat_map(|i| i.voices(self.now))
             .collect()
     }
 
@@ -1144,14 +1449,14 @@ impl Engine {
         let mut removed = Vec::new();
         self.insts.retain(|i| {
             if fam.contains(&i.id) {
-                removed.push((i.cue, i.voice));
+                removed.push((i.cue, i.voices(t).collect::<Vec<_>>(), i.pending_voice()));
                 false
             } else {
                 true
             }
         });
-        for (cue, voice) in removed {
-            if let Some(voice) = voice {
+        for (cue, voices, pending) in removed {
+            for voice in voices {
                 self.actions.push(Action::StopVoice {
                     voice,
                     at: t,
@@ -1159,6 +1464,9 @@ impl Engine {
                     curve: Curve::EqualPower,
                     hard,
                 });
+            }
+            if let Some(voice) = pending {
+                self.actions.push(Action::DiscardVoice { voice });
             }
             self.emit(t, EventKind::CueStopped { cue });
         }
@@ -1191,14 +1499,20 @@ impl Engine {
         if pause {
             i.local = i.local_at(t);
             i.paused = true;
-            if let Some(voice) = i.voice {
+            let voices: Vec<VoiceId> = i.voices(t).collect();
+            for voice in voices {
                 self.actions.push(Action::PauseVoice { voice, at: t });
             }
             self.emit(t, EventKind::CuePaused { cue });
         } else {
             i.since = t;
             i.paused = false;
-            if let Some(voice) = i.voice {
+            // A vamp voice paused during its fade-out is resumed to finish it.
+            if let Some((_, until)) = &mut i.old_voice {
+                *until = t + 4 * VAMP_XFADE_HALF + 1;
+            }
+            let voices: Vec<VoiceId> = i.voices(t).collect();
+            for voice in voices {
                 self.actions.push(Action::ResumeVoice { voice, at: t });
             }
             self.emit(t, EventKind::CueResumed { cue });
@@ -1359,6 +1673,21 @@ impl Engine {
     /// The I/O layer reports that a voice could not be opened or failed.
     pub fn voice_error(&mut self, voice: VoiceId, message: String) {
         let t = self.now;
+        // The rest of a released vamp could not be opened: keep looping.
+        if let Some(i) = self
+            .insts
+            .iter_mut()
+            .find(|i| i.pending_voice() == Some(voice))
+        {
+            i.vamp = VampState::Looping;
+            self.emit(
+                t,
+                EventKind::Info {
+                    message: format!("Release loop failed, the cue keeps looping: {message}"),
+                },
+            );
+            return;
+        }
         if let Some(id) = self
             .insts
             .iter()
@@ -1992,6 +2321,10 @@ impl Engine {
                 self.stop_cue(cue, t, fade);
                 Ok(())
             }
+            Command::ReleaseLoop { cue } => {
+                self.need_cue(cue)?;
+                self.release_loop(cue, t)
+            }
             Command::PauseCue { cue } => {
                 self.need_cue(cue)?;
                 self.pause_cue(cue, t, true);
@@ -2151,6 +2484,10 @@ impl Engine {
 
     fn stop_everything(&mut self, t: u64, fade_frames: u64, hard: bool) {
         let cues: Vec<CueId> = self.insts.iter().map(|i| i.cue).collect();
+        let pending: Vec<VoiceId> = self.insts.iter().filter_map(Inst::pending_voice).collect();
+        for voice in pending {
+            self.actions.push(Action::DiscardVoice { voice });
+        }
         self.insts.clear();
         for cue in cues {
             self.emit(t, EventKind::CueStopped { cue });
@@ -2173,7 +2510,9 @@ impl Engine {
             self.pause_inst(id, t, pause);
         }
         self.paused_all = pause;
-        if self.transport_coupled() {
+        let follows_pause = self.transport_coupled()
+            || (self.chase.is_none() && self.show.timecode.pause_with_transport);
+        if follows_pause {
             if pause && self.tc.running {
                 self.tc_action(&TcAction::Pause, t);
                 self.tc_paused_by_transport = true;
@@ -2222,6 +2561,7 @@ impl Engine {
                     elapsed: self.secs(elapsed),
                     duration: duration.map(|d| self.secs(d)),
                     from_tc: i.from_tc,
+                    vamping: i.vamp == VampState::Looping,
                 }
             })
             .collect();

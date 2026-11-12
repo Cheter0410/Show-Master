@@ -658,6 +658,10 @@ fn draw_row(
     if let Some(bg) = bg {
         painter.rect_filled(rect, 0.0, bg);
     }
+    // Cue colour: a see-through tint over the whole row.
+    if let Some(c) = theme::cue_color(&cue.color) {
+        painter.rect_filled(rect, 0.0, theme::cue_tint(c, selected));
+    }
     if selected && hovered {
         painter.rect_filled(rect, 0.0, Color32::from_white_alpha(8));
     }
@@ -716,7 +720,7 @@ fn draw_row(
     if let Some(c) = theme::cue_color(&cue.color) {
         painter.rect_filled(
             Rect::from_x_y_ranges(
-                Rangef::new(status.left() + 1.0, status.left() + 5.0),
+                Rangef::new(status.left() + 1.0, status.left() + 7.0),
                 rect.y_range().shrink(3.0),
             ),
             2.0,
@@ -891,6 +895,11 @@ fn draw_row(
                 field: InlineField::Name,
                 opened: false,
             });
+        } else if row.depth == 0 {
+            // Anywhere else on the row: make it the next cue, as in Live.
+            out.push(Out::Cmd(
+                json!({ "cmd": "set_playhead", "cue": id, "list": ctx.list_id }),
+            ));
         }
     }
     // Touch: grip (drag to reorder) and "More" (the context menu, for

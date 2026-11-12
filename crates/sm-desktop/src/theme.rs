@@ -112,3 +112,9 @@ pub fn apply(ctx: &egui::Context, high_contrast: bool, touch: bool) {
 pub fn clock_font(size: f32) -> FontId {
     FontId::new(size, FontFamily::Monospace)
 }
+
+/// The see-through row tint for a cue colour (lighter on a selected row so
+/// the selection still shows).
+pub fn cue_tint(c: Color32, selected: bool) -> Color32 {
+    c.gamma_multiply(if selected { 0.16 } else { 0.30 })
+}

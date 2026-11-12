@@ -21,6 +21,10 @@ pub enum FadeCurve {
     EqualPower,
     /// Raised-cosine S shape (slow start, slow end).
     SCurve,
+    /// Even change in loudness with a soft start and a soft end: an S curve
+    /// (zero slope and curvature at both ends) on the square root of the
+    /// gain. A fade to silence glides out instead of dropping off.
+    Smooth,
 }
 
 impl FadeCurve {
@@ -38,8 +42,28 @@ impl FadeCurve {
                 }
             }
             FadeCurve::SCurve => 0.5 - 0.5 * (t * std::f32::consts::PI).cos(),
+            FadeCurve::Smooth => smootherstep(t),
         }
     }
+
+    /// Gain at progress `t` of a ramp from `from` to `to`.
+    #[inline]
+    pub(crate) fn gain(self, from: f32, to: f32, t: f32) -> f32 {
+        match self {
+            FadeCurve::Smooth if from >= 0.0 && to >= 0.0 => {
+                let (a, b) = (from.sqrt(), to.sqrt());
+                let x = a + (b - a) * smootherstep(t);
+                x * x
+            }
+            _ => from + (to - from) * self.shape(t, to >= from),
+        }
+    }
+}
+
+/// 6t⁵ − 15t⁴ + 10t³: 0 → 1 with flat ends.
+#[inline]
+fn smootherstep(t: f32) -> f32 {
+    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
 }
 
 /// Engine construction parameters.

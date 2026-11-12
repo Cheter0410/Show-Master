@@ -1,7 +1,9 @@
 //! Setup tabs "Audio" (device, rate, buffer, channels) and "Outputs / Patch"
 //! (named outputs, groups, layout templates).
 
-use super::{banner, form, heading, hint, row, small_button, text_field, unit, SetupState};
+use super::{
+    banner, form, heading, hint, num_field, row, small_button, text_field, unit, SetupState,
+};
 use crate::model::{DeviceEntry, UiState};
 use crate::theme;
 use egui::RichText;
@@ -188,6 +190,17 @@ pub(super) fn audio_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
                     .speed(0.1),
             );
             unit(ui, &format!("device offers up to {max_ch}"));
+        });
+    });
+
+    heading(ui, "Master");
+    form(ui, "audio_master", |ui| {
+        row(ui, "Master level", |ui| {
+            let cur = (s.master_db * 10.0).round() / 10.0;
+            if let Some(v) = num_field(ui, &mut st.drafts, "master_db", cur, -60.0, 12.0, 70.0) {
+                st.send(json!({ "cmd": "set_master", "db": v }));
+            }
+            unit(ui, "dB (all outputs; the Live view shows the meters only)");
         });
     });
 

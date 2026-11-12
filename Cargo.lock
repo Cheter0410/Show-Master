@@ -4181,7 +4181,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "showmaster"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde_json",
  "sm-audio",
@@ -4260,7 +4260,7 @@ dependencies = [
 
 [[package]]
 name = "sm-audio"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cpal",
  "hound",
@@ -4278,7 +4278,7 @@ dependencies = [
 
 [[package]]
 name = "sm-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "blake3",
  "serde",
@@ -4291,7 +4291,7 @@ dependencies = [
 
 [[package]]
 name = "sm-desktop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "eframe",
@@ -4320,7 +4320,7 @@ dependencies = [
 
 [[package]]
 name = "sm-io"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "midir",
  "rtrb",
@@ -4335,7 +4335,7 @@ dependencies = [
 
 [[package]]
 name = "sm-mdns"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gethostname",
  "mdns-sd",
@@ -4346,7 +4346,7 @@ dependencies = [
 
 [[package]]
 name = "sm-rtpmidi"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "thiserror 2.0.21",
  "tracing",
@@ -4354,7 +4354,7 @@ dependencies = [
 
 [[package]]
 name = "sm-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "chrono",
@@ -4382,7 +4382,7 @@ dependencies = [
 
 [[package]]
 name = "sm-timecode"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",

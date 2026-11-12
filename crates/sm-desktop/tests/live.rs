@@ -163,18 +163,16 @@ fn notes_reach_the_server() {
 }
 
 #[test]
-fn master_fader_sets_the_master_level() {
+fn live_view_has_meters_but_no_master_fader() {
     let env = Env::demo();
     let mut h = env.harness();
     go_live(&env, &mut h);
-    h.get_by_label("Master level").set_value_accesskit(-10.0);
+    // Nothing to knock during a show: the master level is set in Setup > Audio.
+    assert!(h.query_by_label("Master level").is_none());
+    h.state_mut()
+        .cmd(serde_json::json!({ "cmd": "set_master", "db": -10.0 }));
     env.wait(&mut h, "master at -10 dB", |s| {
         (s["master_db"].as_f64().unwrap() + 10.0).abs() < 0.01
-    });
-    // Bottom of the fader = silence.
-    h.get_by_label("Master level").set_value_accesskit(-60.0);
-    env.wait(&mut h, "master silent", |s| {
-        s["master_db"].as_f64().unwrap() < -100.0
     });
 }
 
@@ -239,4 +237,33 @@ fn panic_holds_the_timecode_and_the_clock_menu_resumes_it() {
     settle(&mut h);
     h.get_by_label("Resume timecode").click();
     env.wait(&mut h, "timecode running again", tc_running);
+}
+
+#[test]
+fn release_loop_button_on_a_vamping_cue() {
+    let env = Env::demo();
+    let mut h = env.harness();
+    let first = cue_id(&env, "1");
+    // Intro (2 s): loop 0.5 s .. 1.5 s.
+    h.state_mut().cmd(serde_json::json!({
+        "cmd": "update_cue", "cue": first,
+        "patch": { "kind": { "vamp": { "start": 0.5, "end": 1.5 } } }
+    }));
+    env.wait(&mut h, "vamp set", |s| {
+        s["show"]["cue_lists"][0]["cues"][0]["kind"]["vamp"]["end"] == 1.5
+    });
+    go_live(&env, &mut h);
+    h.get_by_label("GO").click();
+    env.wait(&mut h, "vamping", |_| {
+        active(&env)
+            .iter()
+            .any(|a| a["cue"] == first && a["vamping"] == true)
+    });
+    h.get_by_label("Release loop of cue 1 Intro").click();
+    env.wait(&mut h, "released", |_| {
+        active(&env)
+            .iter()
+            .any(|a| a["cue"] == first && a["vamping"] != true)
+    });
+    assert!(h.query_by_label("Release loop of cue 1 Intro").is_none());
 }

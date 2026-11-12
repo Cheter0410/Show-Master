@@ -39,6 +39,8 @@ fn spec(file: &str) -> VoiceSpec {
         end: None,
         loop_count: 1,
         offset_frames: 0,
+        loop_from: None,
+        start_frame: None,
         gain: 1.0,
         matrix: vec![(0, 0, 1.0)],
     }

@@ -168,7 +168,7 @@ export function Toolbar(p: { onSetup: () => void; fileDialog: FileMode | null; s
             const mode = p.fileDialog;
             p.setFileDialog(null);
             if (mode === "open-show") void doOpen(paths[0], false);
-            else if (mode === "save-show") void run({ cmd: "save_show", path: paths[0] }).then((ok) => ok && toast("Show saved", "info", 1500));
+            else if (mode === "save-show") void run({ cmd: "save_show", path: paths[0], folder: true, media: "copy" }).then((ok) => ok && toast("Show saved", "info", 1500));
             else
               void (async () => {
                 for (const f of paths) await addCue("audio", f);

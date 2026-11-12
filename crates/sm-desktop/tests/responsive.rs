@@ -162,11 +162,11 @@ fn narrow_live_view_shows_tools_as_tabs() {
     let size = egui::vec2(800.0, 600.0);
     let mut h = env.harness_sized(size);
     go_live(&env, &mut h);
-    // Folded by default: the master fader appears when the Meters tab opens.
-    assert!(h.query_by_label("Master level").is_none());
+    // Folded by default: the meters appear when the Meters tab opens.
+    assert!(h.query_by_label("Clip 1").is_none());
     tap(&mut h, size, "Meters");
     settle(&mut h);
-    on_screen(&h, size, "Master level");
+    on_screen(&h, size, "Clip 1");
     tap(&mut h, size, "Notes");
     settle(&mut h);
     on_screen(&h, size, "Show notes");

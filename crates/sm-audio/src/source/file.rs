@@ -129,6 +129,12 @@ pub struct FileSourceOpts {
     /// Initial position inside the (looped) region in seconds of file time,
     /// for "load to time". Offsets beyond one pass consume whole loops.
     pub offset_seconds: f64,
+    /// Vamp: after the first pass, later passes start here (source frames)
+    /// instead of at the region start - an intro, then a loop of
+    /// `loop_start..end`. Used with `loop_count` 0.
+    pub loop_start_frame: Option<u64>,
+    /// Same as `loop_start_frame` in seconds of file time.
+    pub loop_start_seconds: Option<f64>,
 }
 
 impl FileSourceOpts {
@@ -142,6 +148,8 @@ impl FileSourceOpts {
             end_frame: None,
             loop_count: 1,
             offset_seconds: 0.0,
+            loop_start_frame: None,
+            loop_start_seconds: None,
         }
     }
 }
@@ -168,6 +176,8 @@ struct Region {
     pos: u64,
     /// Passes left including the current one; `None` = infinite.
     loops_left: Option<u32>,
+    /// Where passes after the first start (vamp); `start` when `None`.
+    loop_start: Option<u64>,
     done: bool,
 }
 
@@ -205,8 +215,12 @@ impl Region {
                 Some(0) | Some(1) => self.done = true,
                 more => {
                     self.loops_left = more.map(|k| k - 1);
-                    self.dec.seek(self.start)?;
-                    self.pos = self.start;
+                    let to = self
+                        .loop_start
+                        .filter(|l| *l < self.pos)
+                        .unwrap_or(self.start);
+                    self.dec.seek(to)?;
+                    self.pos = to;
                 }
             }
         }
@@ -396,7 +410,19 @@ impl FileSource {
         };
         let mut offset = seconds_to_frames(opts.offset_seconds, rate);
         let mut done = false;
-        if let Some(len) = end.map(|e| e - start) {
+        let loop_start = opts
+            .loop_start_frame
+            .or_else(|| opts.loop_start_seconds.map(|s| seconds_to_frames(s, rate)))
+            .map(|l| l.max(start))
+            .filter(|l| end.is_none_or(|e| *l < e));
+        if let (Some(ls), Some(e)) = (loop_start, end) {
+            // Intro, then the loop: an offset past the intro lands in the loop.
+            let intro = e - start;
+            if offset >= intro {
+                offset = (ls - start) + (offset - intro) % (e - ls);
+            }
+            loops_left = None;
+        } else if let Some(len) = end.map(|e| e - start) {
             match offset.checked_div(len) {
                 // empty region
                 None => {
@@ -432,6 +458,7 @@ impl FileSource {
             end,
             pos,
             loops_left,
+            loop_start,
             done,
         };
         let resampler = if rate != opts.engine_sample_rate {

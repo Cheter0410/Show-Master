@@ -20,6 +20,7 @@ fn curve(c: Curve) -> FadeCurve {
         Curve::Linear => FadeCurve::Linear,
         Curve::EqualPower => FadeCurve::EqualPower,
         Curve::SCurve => FadeCurve::SCurve,
+        Curve::Smooth => FadeCurve::Smooth,
     }
 }
 
@@ -607,9 +608,14 @@ fn open_source(job: &OpenJob) -> Opened {
     let sr = job.sample_rate;
     let mut opts = FileSourceOpts::new(sr);
     opts.start_seconds = spec.start;
+    opts.start_frame = spec.start_frame;
     opts.end_seconds = spec.end;
     opts.loop_count = spec.loop_count;
-    if spec.offset_frames > 0 {
+    opts.loop_start_seconds = spec.loop_from;
+    if spec.loop_from.is_some() {
+        // Vamp: the source maps an offset past the intro into the loop.
+        opts.offset_seconds = spec.offset_frames as f64 / f64::from(sr.max(1));
+    } else if spec.offset_frames > 0 {
         let mut offset = spec.offset_frames as f64 / f64::from(sr.max(1));
         if spec.loop_count != 1 {
             // The offset counts from the first pass: skip whole passes.

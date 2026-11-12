@@ -140,6 +140,7 @@ impl EditCommand {
 pub struct MediaInfo {
     pub duration: Option<f64>,
     pub channels: u16,
+    pub sample_rate: u32,
 }
 
 pub trait MediaProbe {
@@ -373,6 +374,7 @@ impl Document {
             if let Some(info) = probe.probe(&path) {
                 a.file_duration = info.duration;
                 a.channels = info.channels.max(1);
+                a.file_rate = Some(info.sample_rate).filter(|r| *r > 0);
             }
         }
     }
@@ -443,6 +445,20 @@ impl Document {
         if let CueKind::Audio(a) = &new.kind {
             if old_file.as_deref() != Some(a.file.as_str()) {
                 self.probe_audio(&mut new, probe);
+            }
+        }
+        if let CueKind::Audio(a) = &mut new.kind {
+            if let Some(v) = &mut a.vamp {
+                if !(v.start.is_finite() && v.end.is_finite()) || v.end - v.start < 0.01 {
+                    return Err("the loop must be at least 10 ms long".into());
+                }
+                v.start = v.start.max(0.0);
+                // Releasing a loop exactly needs the file's own sample rate.
+                if a.file_rate.is_none() && !a.file.is_empty() {
+                    let dir = self.show_dir().map(Path::to_path_buf);
+                    let path = sm_core::showfile::resolve_media(dir.as_deref(), &a.file);
+                    a.file_rate = probe.probe(&path).map(|i| i.sample_rate).filter(|r| *r > 0);
+                }
             }
         }
         if let CueKind::Group(g) = &mut new.kind {
