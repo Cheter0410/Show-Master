@@ -11,6 +11,7 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 sm-core.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 sm-io.workspace = true
 sm-audio.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "signal"] }

@@ -98,6 +98,7 @@ Eine neue Version veröffentlichen: siehe [`docs/release-anleitung.md`](docs/rel
   gegen Doppelauslösung entprellt. Alles, was ein GO gemeinsam startet, beginnt auf demselben Sample.
 - **Cue-Typen:** Audio, Fade, MIDI (inkl. SysEx und MSC), OSC (an Pult, QLab, Resolume, Companion …), HTTP (Beamer, Steckdosen, Web-APIs), Timecode, Control (Start/Stop/Pause/Resume/
   Load-to-Time/Arm/Disarm/GoTo/Reset), Group (parallel, Playlist, Random), Memo.
+- **Cue-Sheet:** *File → Export cue sheet* als PDF (zum Ausdrucken) oder CSV (Tabelle), mit Notizen.
 - **Edit-Modus:** Cues anlegen, verschieben, gruppieren, Inspector, Wellenform, Routing-Matrix,
   unbegrenztes Undo/Redo, Vorschau einzelner Cues ohne den Playhead zu bewegen.
 - **Live-Modus:** schreibgeschützt (serverseitig durchgesetzt), reduziertes Dashboard mit großen

@@ -489,6 +489,36 @@ impl App {
         }
     }
 
+    /// Save the cue sheet (`pdf` or `csv`) through the system dialog.
+    pub fn export_cue_sheet(&mut self, pdf: bool) {
+        let show = &self.client.state.show;
+        let stem: String = show
+            .name
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' })
+            .collect();
+        let stem = if stem.trim().is_empty() { "show".to_string() } else { stem.trim().to_string() };
+        let (ext, label) = if pdf { ("pdf", "PDF") } else { ("csv", "CSV (spreadsheet)") };
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Export cue sheet")
+            .add_filter(label, &[ext])
+            .set_file_name(format!("{stem} - cue sheet.{ext}"))
+            .save_file()
+        else {
+            return;
+        };
+        let bytes = if pdf {
+            let date = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+            sm_core::cuesheet::to_pdf(show, &date)
+        } else {
+            sm_core::cuesheet::to_csv(show).into_bytes()
+        };
+        match std::fs::write(&path, bytes) {
+            Ok(()) => self.toast(format!("Cue sheet saved to {}", path.display())),
+            Err(e) => self.toast_error(format!("Could not save the cue sheet: {e}")),
+        }
+    }
+
     /// Show the folder with the log file in the system file manager.
     pub fn open_log_folder(&mut self) {
         let Some(dir) = self
@@ -1002,6 +1032,21 @@ impl App {
         }
         if ui.button("Save as…").clicked() {
             self.save_as(None);
+        }
+        ui.separator();
+        if ui
+            .button("Export cue sheet (PDF)…")
+            .on_hover_text("Printable list of all cues with notes, for stage management and crew")
+            .clicked()
+        {
+            self.export_cue_sheet(true);
+        }
+        if ui
+            .button("Export cue sheet (CSV)…")
+            .on_hover_text("All cues as a spreadsheet (Excel, Numbers, LibreOffice)")
+            .clicked()
+        {
+            self.export_cue_sheet(false);
         }
         ui.separator();
         if ui

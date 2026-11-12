@@ -4,6 +4,7 @@
 //! which makes it fully testable with simulated time.
 
 pub mod chase;
+pub mod cuesheet;
 pub mod engine;
 pub mod http_cue;
 pub mod midi;

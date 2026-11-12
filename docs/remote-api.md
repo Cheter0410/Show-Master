@@ -29,6 +29,7 @@ Roles are enforced on the server for every command, never only in the UI.
 | `GET /api/fs?token=T&path=/dir` | admin | `{ "path": "/dir", "parent": "/"|null, "entries": [{ "name", "path", "dir": bool, "size": n }] }` (audio files, showfiles and folders only; empty path = home dir) |
 | `GET /api/waveform?token=T&file=PATH&buckets=800` | admin | `{ "duration": s, "channels": n, "sample_rate": n, "peaks": [[min,max], …] }` |
 | `GET /api/qr.svg?role=control|view` | admin | QR code (SVG) of the remote URL |
+| `GET /api/cuesheet.pdf`, `GET /api/cuesheet.csv` | view | cue sheet (A4 landscape PDF / semicolon CSV with BOM) |
 | `GET /api/diagnostics?token=T` | admin | plain-text diagnostics bundle (log, state, system info) |
 
 A pre-shared token may also be passed as `Authorization: Bearer T`.

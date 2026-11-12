@@ -87,6 +87,8 @@ pub fn router(handle: Handle) -> Router {
         .route("/api/fs", get(api_fs))
         .route("/api/waveform", get(api_waveform))
         .route("/api/qr.svg", get(api_qr))
+        .route("/api/cuesheet.pdf", get(api_cuesheet_pdf))
+        .route("/api/cuesheet.csv", get(api_cuesheet_csv))
         .route("/api/diagnostics", get(api_diagnostics))
         .fallback(static_asset)
         .with_state(state)
@@ -441,6 +443,51 @@ async fn api_waveform(
         )
             .into_response(),
     }
+}
+
+/// The cue sheet, for any role that may see the cue list (`view` and up).
+fn cuesheet(app: &AppState, addr: &SocketAddr, q: &HashMap<String, String>, headers: &HeaderMap, pdf: bool) -> Response {
+    if role_for(app, addr, token_of(q, headers)).is_none() {
+        return deny();
+    }
+    let state = app.handle.state();
+    let Ok(show) = serde_json::from_value::<sm_core::model::Show>(state["show"].clone()) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "no show").into_response();
+    };
+    let (ctype, body) = if pdf {
+        let date = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+        ("application/pdf", sm_core::cuesheet::to_pdf(&show, &date))
+    } else {
+        ("text/csv; charset=utf-8", sm_core::cuesheet::to_csv(&show).into_bytes())
+    };
+    let name = if pdf { "cue-sheet.pdf" } else { "cue-sheet.csv" };
+    (
+        [
+            (header::CONTENT_TYPE, ctype.to_string()),
+            (header::CONTENT_DISPOSITION, format!("inline; filename=\"{name}\"")),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+async fn api_cuesheet_pdf(
+    State(app): State<App>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Query(q): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
+    cuesheet(&app, &addr, &q, &headers, true)
+}
+
+async fn api_cuesheet_csv(
+    State(app): State<App>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Query(q): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
+    cuesheet(&app, &addr, &q, &headers, false)
 }
 
 async fn api_qr(
