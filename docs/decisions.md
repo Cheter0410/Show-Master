@@ -212,10 +212,12 @@ revidieren lassen.
 - **Dateien öffnen im Hintergrund.** Audiodateien werden von zwei eigenen Threads geöffnet, nie von der
   Engine. Durch Standby passiert das vor dem GO; ein Cue ohne Standby (Vorschau, Chase, Control-Cue)
   beginnt, sobald die Datei offen ist – eine Verspätung über 10 ms steht im Log.
-- **rtp-midi:** Senden mit Journal (Kapitel P/C/N) standardmäßig aus, bis es gegen echte Gegenstellen
-  geprüft ist. Empfangsseitiges Recovery stellt nur Programm, Controller und Noten wieder her (kein Pitch
-  Bend, Aftertouch, SysEx, System-Journal); das Journal des ersten Pakets einer Verbindung wird nicht
-  ausgewertet. Gegen Apple/rtpMIDI noch nicht geprüft.
+- **rtp-midi:** Senden mit Journal (Kapitel P/C/W/N/T/A und System-Kapitel X für SysEx) standardmäßig
+  aus, bis es gegen echte Gegenstellen geprüft ist. Empfangsseitiges Recovery stellt Programm,
+  Controller, Noten, Pitch Bend, Channel- und Poly-Aftertouch wieder her; SysEx (z. B. MSC GO) nur, wenn
+  sicher ist, dass es im verlorenen Paket stand – lieber ein verpasstes als ein doppeltes GO. Nicht
+  ausgewertet: Kapitel M (RPN/NRPN), E und die System-Kapitel D/V/Q/F; das Journal des ersten Pakets
+  einer Verbindung wird nicht ausgewertet. Gegen Apple/rtpMIDI noch nicht geprüft.
 - **MIDI-Timing** ist nicht samplegenau, sondern über die Audio-Clock terminiert (siehe Architektur).
 - **Timecode-Eingang:** keine automatische Erkennung der Framerate (die Show-Rate muss zur Quelle
   passen; abweichende MTC-Rate oder LTC-Drop-Frame-Flag wird einmal im Log gemeldet), keine

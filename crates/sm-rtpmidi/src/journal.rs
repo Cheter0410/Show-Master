@@ -11,9 +11,20 @@
 //! Channel header (3 octets):   |S| CHAN  |H|   LENGTH (10)   |P|C|M|W|N|E|T|A|
 //! Chapter P (3 octets):        |S| PROGRAM |B| BANK-MSB |X| BANK-LSB |
 //! Chapter C:                   |S|   LEN   | then LEN+1 logs: |S| NUMBER |A| VALUE |
+//! Chapter W (2 octets):        |S| FIRST |R| SECOND |   (last pitch wheel, LSB / MSB)
 //! Chapter N:                   |B|   LEN   | LOW | HIGH | LEN logs: |S| NOTENUM |Y| VELOCITY |
 //!                              followed by HIGH-LOW+1 OFFBITS octets (if LOW <= HIGH)
+//! Chapter T (1 octet):         |S| PRESSURE |              (last channel aftertouch)
+//! Chapter A:                   |S|   LEN   | then LEN+1 logs: |S| NOTENUM |X| PRESSURE |
 //! ```
+//!
+//! System journal (only chapter X, SysEx, list tool), after the header:
+//! ```text
+//! System header (2 octets):    |S|D|V|Q|F|X|   LENGTH (10)   |   (only X set)
+//! Chapter X logs:              |S|T|C|F|D|L| STA | DATA... (F0/F7 omitted, last octet MSB=1)
+//! ```
+//! Logs are in sending order; the first log's S bit is the chapter's S bit
+//! (RFC 6295 B.5). At most ~1000 octets of the most recent commands are kept.
 //!
 //! S bits are 0 for structures that describe a command of packet `N - 1` (so a
 //! receiver that lost exactly one packet can skip everything with S=1) and 1
@@ -26,7 +37,10 @@ use std::collections::BTreeMap;
 
 const FLAG_P: u8 = 0x80;
 const FLAG_C: u8 = 0x40;
+const FLAG_W: u8 = 0x10;
 const FLAG_N: u8 = 0x08;
+const FLAG_T: u8 = 0x02;
+const FLAG_A: u8 = 0x01;
 
 #[derive(Debug, Clone, Copy)]
 struct Program {
@@ -52,6 +66,12 @@ struct Channel {
     controllers: BTreeMap<u8, Logged>,
     /// value = velocity; 0 means the most recent event was a NoteOff.
     notes: BTreeMap<u8, Logged>,
+    /// Last pitch wheel: (seq, LSB, MSB).
+    pitch: Option<(u64, u8, u8)>,
+    /// Last channel aftertouch.
+    pressure: Option<Logged>,
+    /// Last poly aftertouch per note.
+    poly: BTreeMap<u8, Logged>,
 }
 
 /// History of journalled commands, keyed by the (extended, non-wrapping)
@@ -59,6 +79,8 @@ struct Channel {
 #[derive(Debug, Default, Clone)]
 pub struct JournalHistory {
     channels: [Channel; 16],
+    /// SysEx commands: (seq, data octets without F0 / F7).
+    sysex: Vec<(u64, Vec<u8>)>,
 }
 
 impl JournalHistory {
@@ -70,6 +92,19 @@ impl JournalHistory {
     /// Records one complete MIDI message sent in packet `seq`.
     /// Messages not covered by chapters P, C and N are ignored.
     pub fn record(&mut self, seq: u64, message: &[u8]) {
+        if message.first() == Some(&0xF0) {
+            let data: Vec<u8> = message[1..]
+                .iter()
+                .copied()
+                .take_while(|b| *b != 0xF7)
+                .map(|b| b & 0x7F)
+                .collect();
+            self.sysex.push((seq, data));
+            if self.sysex.len() > 64 {
+                self.sysex.remove(0);
+            }
+            return;
+        }
         let (Some(&status), Some(&d1)) = (message.first(), message.get(1)) else {
             return;
         };
@@ -93,6 +128,11 @@ impl JournalHistory {
                 }
                 ch.controllers.insert(d1, Logged { seq, value: d2 });
             }
+            0xE0 => ch.pitch = Some((seq, d1, d2)),
+            0xD0 => ch.pressure = Some(Logged { seq, value: d1 }),
+            0xA0 => {
+                ch.poly.insert(d1, Logged { seq, value: d2 });
+            }
             0xC0 => {
                 let bank = (ch.bank_msb.is_some() || ch.bank_lsb.is_some())
                     .then(|| (ch.bank_msb.unwrap_or(0), ch.bank_lsb.unwrap_or(0)));
@@ -108,12 +148,20 @@ impl JournalHistory {
 
     /// Forgets everything sent in packets before `seq` (acknowledged by all receivers).
     pub fn trim(&mut self, seq: u64) {
+        self.sysex.retain(|(s, _)| *s >= seq);
         for ch in &mut self.channels {
             if ch.program.is_some_and(|p| p.seq < seq) {
                 ch.program = None;
             }
             ch.controllers.retain(|_, l| l.seq >= seq);
             ch.notes.retain(|_, l| l.seq >= seq);
+            if ch.pitch.is_some_and(|p| p.0 < seq) {
+                ch.pitch = None;
+            }
+            if ch.pressure.is_some_and(|p| p.seq < seq) {
+                ch.pressure = None;
+            }
+            ch.poly.retain(|_, l| l.seq >= seq);
         }
     }
 
@@ -131,11 +179,66 @@ impl JournalHistory {
                 s_all &= s;
             }
         }
+        let system = self.encode_system(checkpoint, current);
+        if let Some((_, s)) = &system {
+            s_all &= *s;
+        }
         let a = count > 0;
-        out.push((u8::from(s_all) << 7) | (u8::from(a) << 5) | (count.saturating_sub(1) & 0x0F));
+        let y = system.is_some();
+        out.push(
+            (u8::from(s_all) << 7)
+                | (u8::from(y) << 6)
+                | (u8::from(a) << 5)
+                | (count.saturating_sub(1) & 0x0F),
+        );
         // Truncation to 16 bits is the wire format of the sequence number.
         out.extend_from_slice(&(checkpoint.min(prev) as u16).to_be_bytes());
+        if let Some((sys, _)) = system {
+            out.extend_from_slice(&sys);
+        }
         out.extend_from_slice(&body);
+    }
+
+    /// The system journal with chapter X, and its S bit; `None` without SysEx
+    /// in the checkpoint history.
+    fn encode_system(&self, checkpoint: u64, current: u64) -> Option<(Vec<u8>, bool)> {
+        let prev = current.wrapping_sub(1);
+        let covered: Vec<&(u64, Vec<u8>)> = self
+            .sysex
+            .iter()
+            .filter(|(s, _)| *s >= checkpoint && *s < current)
+            .collect();
+        // Newest first until the 10-bit LENGTH is full, then N-1 logs first.
+        let mut picked: Vec<&(u64, Vec<u8>)> = Vec::new();
+        let mut size = 2;
+        for log in covered.iter().rev() {
+            let n = 1 + log.1.len();
+            if size + n > 1023 {
+                break;
+            }
+            size += n;
+            picked.push(log);
+        }
+        if picked.is_empty() {
+            return None;
+        }
+        picked.reverse();
+        let s_all = picked.iter().all(|(s, _)| *s != prev);
+        let mut out = vec![0u8, 0u8];
+        for (i, (seq, data)) in picked.iter().enumerate() {
+            let d = !data.is_empty();
+            let s = if i == 0 { s_all } else { *seq != prev };
+            // T=0 C=0 F=0, D, L=1 (list tool), STA=3 (finished).
+            out.push((u8::from(s) << 7) | (u8::from(d) << 3) | 0x04 | 0x03);
+            if let Some((last, rest)) = data.split_last() {
+                out.extend(rest.iter().map(|b| b & 0x7F));
+                out.push(0x80 | (last & 0x7F));
+            }
+        }
+        let length = out.len();
+        out[0] = (u8::from(s_all) << 7) | 0x04 | ((length >> 8) & 0x03) as u8;
+        out[1] = (length & 0xFF) as u8;
+        Some((out, s_all))
     }
 }
 
@@ -177,6 +280,13 @@ impl Channel {
             }
         }
 
+        if let Some((seq, first, second)) = self.pitch.filter(|p| covered(p.0)) {
+            flags |= FLAG_W;
+            s_all &= seq != prev;
+            body.push(s_bit(seq) | (first & 0x7F));
+            body.push(second & 0x7F); // R = 0
+        }
+
         let (ons, offs): (Logs, Logs) = self
             .notes
             .iter()
@@ -211,10 +321,34 @@ impl Channel {
             }
         }
 
+        if let Some(p) = self.pressure.filter(|p| covered(p.seq)) {
+            flags |= FLAG_T;
+            s_all &= p.seq != prev;
+            body.push(s_bit(p.seq) | (p.value & 0x7F));
+        }
+
+        let poly: Logs = self
+            .poly
+            .iter()
+            .filter(|(_, l)| covered(l.seq))
+            .map(|(n, l)| (*n, *l))
+            .collect();
+        if !poly.is_empty() {
+            flags |= FLAG_A;
+            let chapter_s = poly.iter().all(|(_, l)| l.seq != prev);
+            s_all &= chapter_s;
+            body.push((u8::from(chapter_s) << 7) | ((poly.len() - 1) & 0x7F) as u8);
+            for (note, log) in &poly {
+                body.push(s_bit(log.seq) | note);
+                body.push(log.value & 0x7F); // X = 0
+            }
+        }
+
         if flags == 0 {
             return None;
         }
-        let length = body.len() + 3; // < 1024 by construction (max 540)
+        // < 1024 by construction: P 3 + C 257 + W 2 + N 272 + T 1 + A 257 + 3.
+        let length = body.len() + 3;
         out.push((u8::from(s_all) << 7) | (number << 3) | ((length >> 8) & 0x03) as u8);
         out.push((length & 0xFF) as u8);
         out.push(flags);
@@ -450,7 +584,6 @@ mod tests {
         h.record(103, &[0x90, 64, 81]);
         h.record(103, &[0x80, 60, 0]);
         h.record(103, &[0xB9, 64, 127]);
-        h.record(103, &[0xE0, 0, 64]); // not journalled
         h.record(103, &[0xF1, 0x12]); // not journalled
         h.record(104, &[0x9F, 127, 1]);
         let bytes = encode(&h, 101, 105);

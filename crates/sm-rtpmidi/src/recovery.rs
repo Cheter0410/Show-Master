@@ -7,11 +7,11 @@
 //! differences are turned into corrective MIDI messages that are delivered
 //! *before* the commands of the packet itself.
 //!
-//! Evaluated: the recovery journal header, the system journal (skipped by its
-//! LENGTH), channel journals with chapters P (program change, incl. bank
-//! select), C (control change, value tool) and N (note logs and OFFBITS).
-//! Chapters M and W are skipped by their size; E, T and A (which follow N) are
-//! ignored because the channel journal LENGTH bounds them.
+//! Evaluated: the recovery journal header, chapter X (SysEx) of the system
+//! journal (chapters D, V, Q, F are skipped), and channel journals with
+//! chapters P (program change, incl. bank select), C (control change, value
+//! tool), W (pitch wheel), N (note logs and OFFBITS), T (channel aftertouch)
+//! and A (poly aftertouch). Chapters M and E are skipped by their size.
 //!
 //! Rules (following RFC 6295 A.1–A.6 and RFC 4696 §4.2):
 //!
@@ -32,6 +32,16 @@
 //!   NoteOn (it was re-struck): then NoteOff + NoteOn. Y=0 logs are never
 //!   played - a stale trigger fired late is worse than a missed one in show
 //!   control.
+//!
+//! * **Pitch wheel / channel aftertouch:** sent when the journal's last value
+//!   differs from the receiver's.
+//! * **Poly aftertouch:** only for notes sounding at the receiver, not when
+//!   X=1 (the note was silenced after it).
+//! * **SysEx (MSC, ...):** a complete, finished command is replayed only when
+//!   its log is known to describe the lost packet `N - 1` (S=0; for the first
+//!   log, whose bit is the chapter's, only if it is the only log). A command
+//!   that may have arrived is never sent twice - a doubled MSC GO would fire
+//!   the next cue.
 //!
 //! Recovery is not applied to the first packet of a link: the receiver has no
 //! history to compare with and replaying the sender's past would fire stale
@@ -86,6 +96,17 @@ pub struct NoteChapter {
     pub offs: Vec<u8>,
 }
 
+/// One poly aftertouch log of chapter A.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PolyLog {
+    /// S bit.
+    pub s: bool,
+    pub note: u8,
+    /// X bit: the note was turned off after this pressure (do not replay).
+    pub x: bool,
+    pub pressure: u8,
+}
+
 /// One channel journal.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ChannelLog {
@@ -99,6 +120,25 @@ pub struct ChannelLog {
     pub controllers: Vec<ControllerLog>,
     /// Chapter N.
     pub notes: Option<NoteChapter>,
+    /// Chapter W: (S, first data octet = LSB, second = MSB).
+    pub pitch: Option<(bool, u8, u8)>,
+    /// Chapter T: (S, pressure).
+    pub pressure: Option<(bool, u8)>,
+    /// Chapter A logs.
+    pub poly: Vec<PolyLog>,
+}
+
+/// One logged SysEx command of chapter X (system journal).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SysexLog {
+    /// S bit as sent. For the first log it doubles as the chapter's S bit
+    /// (RFC 6295 B.5), so on its own it does not say which packet the first
+    /// log describes.
+    pub s: bool,
+    /// Finished (STA 2 or 3) and complete (F=0, D=1): `data` is the whole command.
+    pub complete: bool,
+    /// Data octets without F0 / F7.
+    pub data: Vec<u8>,
 }
 
 /// A parsed recovery journal (the parts this receiver evaluates).
@@ -108,8 +148,10 @@ pub struct Journal {
     pub s: bool,
     /// Sequence number of the checkpoint packet.
     pub checkpoint: u16,
-    /// `true` if a system journal was present (it is skipped).
+    /// `true` if a system journal was present.
     pub has_system: bool,
+    /// Chapter X logs of the system journal (other system chapters are skipped).
+    pub sysex: Vec<SysexLog>,
     /// Channel journals.
     pub channels: Vec<ChannelLog>,
 }
@@ -142,6 +184,9 @@ const TOC_C: u8 = 0x40;
 const TOC_M: u8 = 0x20;
 const TOC_W: u8 = 0x10;
 const TOC_N: u8 = 0x08;
+const TOC_E: u8 = 0x04;
+const TOC_T: u8 = 0x02;
+const TOC_A: u8 = 0x01;
 
 /// Parses a recovery journal (the bytes after the MIDI list of a J=1 packet).
 pub fn parse_journal(bytes: &[u8]) -> Result<Journal, CodecError> {
@@ -152,6 +197,7 @@ pub fn parse_journal(bytes: &[u8]) -> Result<Journal, CodecError> {
         s: b0 & 0x80 != 0,
         checkpoint,
         has_system: b0 & 0x40 != 0,
+        sysex: Vec::new(),
         channels: Vec::new(),
     };
     if journal.has_system {
@@ -160,7 +206,10 @@ pub fn parse_journal(bytes: &[u8]) -> Result<Journal, CodecError> {
         if length < 2 {
             return Err(CodecError::Truncated);
         }
-        c.take(length)?;
+        let system = c.take(length)?;
+        // Best effort: a system journal this parser does not understand only
+        // costs the SysEx recovery, never the channel journals.
+        journal.sysex = parse_system(system).unwrap_or_default();
     }
     if b0 & 0x20 != 0 {
         let count = usize::from(b0 & 0x0F) + 1;
@@ -175,6 +224,95 @@ pub fn parse_journal(bytes: &[u8]) -> Result<Journal, CodecError> {
         }
     }
     Ok(journal)
+}
+
+/// Skips chapters D, V, Q and F of a system journal and returns the
+/// chapter X logs (RFC 6295 appendix B).
+fn parse_system(bytes: &[u8]) -> Result<Vec<SysexLog>, CodecError> {
+    let mut c = Cursor(bytes);
+    let h0 = c.u8()?;
+    c.u8()?; // rest of LENGTH
+    let (d, v, q, f, x) = (
+        h0 & 0x40 != 0,
+        h0 & 0x20 != 0,
+        h0 & 0x10 != 0,
+        h0 & 0x08 != 0,
+        h0 & 0x04 != 0,
+    );
+    if d {
+        let toc = c.u8()?;
+        // B, G, H: one octet each.
+        for bit in [0x40u8, 0x20, 0x10] {
+            if toc & bit != 0 {
+                c.u8()?;
+            }
+        }
+        // J, K: |S|C|V|L|DSZ| LENGTH (10) |, LENGTH includes the header.
+        for bit in [0x08u8, 0x04] {
+            if toc & bit != 0 {
+                let len = (usize::from(c.peek(0)? & 0x03) << 8) | usize::from(c.peek(1)?);
+                c.take(len.max(2))?;
+            }
+        }
+        // Y, Z: |S|C|L| LENGTH (5) |, LENGTH includes the header.
+        for bit in [0x02u8, 0x01] {
+            if toc & bit != 0 {
+                let len = usize::from(c.peek(0)? & 0x1F);
+                c.take(len.max(1))?;
+            }
+        }
+    }
+    if v {
+        c.u8()?;
+    }
+    if q {
+        let h = c.u8()?;
+        c.take(2 * usize::from(h & 0x10 != 0) + 3 * usize::from(h & 0x08 != 0))?;
+    }
+    if f {
+        let h = c.u8()?;
+        c.take(4 * usize::from(h & 0x40 != 0) + 4 * usize::from(h & 0x20 != 0))?;
+    }
+    let mut logs = Vec::new();
+    if !x {
+        return Ok(logs);
+    }
+    // Chapter X: logs without a chapter header, up to the end of the journal.
+    while !c.0.is_empty() {
+        let h = c.u8()?;
+        let (t, cnt, first, dat, sta) = (
+            h & 0x40 != 0,
+            h & 0x20 != 0,
+            h & 0x10 != 0,
+            h & 0x08 != 0,
+            h & 0x03,
+        );
+        if t {
+            c.u8()?;
+        }
+        if cnt {
+            c.u8()?;
+        }
+        if first {
+            while c.u8()? & 0x80 != 0 {}
+        }
+        let mut data = Vec::new();
+        if dat {
+            loop {
+                let b = c.u8()?;
+                data.push(b & 0x7F);
+                if b & 0x80 != 0 {
+                    break;
+                }
+            }
+        }
+        logs.push(SysexLog {
+            s: h & 0x80 != 0,
+            complete: dat && !first && sta >= 2,
+            data,
+        });
+    }
+    Ok(logs)
 }
 
 fn parse_channel(bytes: &[u8]) -> Result<ChannelLog, CodecError> {
@@ -215,7 +353,8 @@ fn parse_channel(bytes: &[u8]) -> Result<ChannelLog, CodecError> {
         c.take(length)?;
     }
     if toc & TOC_W != 0 {
-        c.take(2)?;
+        let (first, second) = (c.u8()?, c.u8()?);
+        ch.pitch = Some((first & 0x80 != 0, first & 0x7F, second & 0x7F));
     }
     if toc & TOC_N != 0 {
         let head = c.u8()?;
@@ -250,7 +389,27 @@ fn parse_channel(bytes: &[u8]) -> Result<ChannelLog, CodecError> {
         }
         ch.notes = Some(notes);
     }
-    // Chapters E, T and A are not evaluated; LENGTH already bounded them.
+    if toc & TOC_E != 0 {
+        // |S| LEN | then LEN+1 two-octet logs (note extras: not evaluated).
+        let len = usize::from(c.u8()? & 0x7F) + 1;
+        c.take(len * 2)?;
+    }
+    if toc & TOC_T != 0 {
+        let t = c.u8()?;
+        ch.pressure = Some((t & 0x80 != 0, t & 0x7F));
+    }
+    if toc & TOC_A != 0 {
+        let head = c.u8()?;
+        for _ in 0..=(head & 0x7F) {
+            let (n, v) = (c.u8()?, c.u8()?);
+            ch.poly.push(PolyLog {
+                s: n & 0x80 != 0,
+                note: n & 0x7F,
+                x: v & 0x80 != 0,
+                pressure: v & 0x7F,
+            });
+        }
+    }
     Ok(ch)
 }
 
@@ -262,6 +421,12 @@ struct ChannelState {
     controllers: [Option<u8>; 128],
     /// Velocity of the sounding NoteOn, `None` = off / unknown.
     notes: [Option<u8>; 128],
+    /// Last pitch wheel (LSB, MSB).
+    pitch: Option<(u8, u8)>,
+    /// Last channel aftertouch.
+    pressure: Option<u8>,
+    /// Last poly aftertouch per note.
+    poly: [Option<u8>; 128],
 }
 
 impl Default for ChannelState {
@@ -272,6 +437,9 @@ impl Default for ChannelState {
             bank_lsb: None,
             controllers: [None; 128],
             notes: [None; 128],
+            pitch: None,
+            pressure: None,
+            poly: [None; 128],
         }
     }
 }
@@ -338,6 +506,13 @@ impl ReceiverState {
                 }
             }
             0xC0 => ch.program = Some(d1),
+            0xD0 => ch.pressure = Some(d1),
+            0xE0 => ch.pitch = Some((d1, d2)),
+            0xA0 => {
+                if let Some(slot) = ch.poly.get_mut(n) {
+                    *slot = Some(d2);
+                }
+            }
             _ => {}
         }
     }
@@ -357,6 +532,21 @@ impl ReceiverState {
             return 0;
         }
         let skip = |s: bool| single_loss && s;
+        // SysEx (show control: MSC GO, ...) is only replayed when the log is
+        // known to describe the lost packet N-1 (S=0): replaying a command
+        // that did arrive would fire a cue twice.
+        // The first log's bit is the chapter's: trust it only when it is the
+        // only log (then both mean the same).
+        let n = journal.sysex.len();
+        for (i, x) in journal.sysex.iter().enumerate() {
+            if !x.s && x.complete && (i > 0 || n == 1) {
+                let mut m = Vec::with_capacity(x.data.len() + 2);
+                m.push(0xF0);
+                m.extend_from_slice(&x.data);
+                m.push(0xF7);
+                out.push(m);
+            }
+        }
         for log in &journal.channels {
             if skip(log.s) {
                 continue;
@@ -398,6 +588,14 @@ impl ReceiverState {
                 }
             }
 
+            if let Some((s, first, second)) = log.pitch.filter(|p| !skip(p.0)) {
+                let known = self.channels.get(usize::from(ch)).and_then(|s| s.pitch);
+                if known != Some((first, second)) {
+                    emit(self, vec![0xE0 | ch, first, second]);
+                }
+                let _ = s;
+            }
+
             if let Some(notes) = &log.notes {
                 if !skip(notes.b) {
                     for &note in &notes.offs {
@@ -427,6 +625,28 @@ impl ReceiverState {
                         }
                         _ => {}
                     }
+                }
+            }
+
+            if let Some((_, pressure)) = log.pressure.filter(|p| !skip(p.0)) {
+                let known = self.channels.get(usize::from(ch)).and_then(|s| s.pressure);
+                if known != Some(pressure) {
+                    emit(self, vec![0xD0 | ch, pressure]);
+                }
+            }
+
+            for a in &log.poly {
+                // Only for notes that sound now: pressure on a silent note is meaningless.
+                if skip(a.s) || a.x || self.sounding(ch, a.note).is_none() {
+                    continue;
+                }
+                let known = self
+                    .channels
+                    .get(usize::from(ch))
+                    .and_then(|s| s.poly.get(usize::from(a.note)).copied())
+                    .flatten();
+                if known != Some(a.pressure) {
+                    emit(self, vec![0xA0 | ch, a.note, a.pressure]);
                 }
             }
         }
@@ -545,6 +765,88 @@ mod tests {
         assert_eq!(j.channels[0].controllers.len(), 1);
         let mut st = ReceiverState::new();
         assert_eq!(recover(&mut st, &bytes, false), vec![vec![0xB0, 7, 16]]);
+    }
+
+    #[test]
+    fn pitch_wheel_and_aftertouch_are_recovered() {
+        let mut h = JournalHistory::new();
+        let mut rx = ReceiverState::new();
+        for m in [
+            [0x90u8, 60, 100].as_slice(),
+            &[0xE0, 0, 64],
+            &[0xD0, 10],
+            &[0xA0, 60, 20],
+        ] {
+            h.record(10, m);
+            rx.record(m);
+        }
+        // Lost packets 11 and 12.
+        h.record(11, &[0xE0, 5, 70]);
+        h.record(11, &[0xD0, 50]);
+        h.record(12, &[0xA0, 60, 90]);
+        h.record(12, &[0xA0, 61, 33]); // note 61 does not sound: not replayed
+        let out = recover(&mut rx, &encode(&h, 10, 13), false);
+        assert_eq!(
+            out,
+            vec![vec![0xE0, 5, 70], vec![0xD0, 50], vec![0xA0, 60, 90]]
+        );
+        assert!(recover(&mut rx, &encode(&h, 10, 14), false).is_empty());
+        // The parser sees the chapters as encoded.
+        let j = parse_journal(&encode(&h, 10, 13)).unwrap();
+        assert_eq!(j.channels[0].pitch, Some((true, 5, 70)));
+        assert_eq!(j.channels[0].pressure, Some((true, 50)));
+        assert_eq!(j.channels[0].poly.len(), 2);
+    }
+
+    #[test]
+    fn lost_sysex_is_replayed_only_when_it_was_in_the_lost_packet() {
+        let msc_go = |q: u8| vec![0xF0, 0x7F, 0x01, 0x02, 0x01, 0x01, q, 0xF7];
+        // Packet 12 (N-1, certainly lost) carried GO 3; 11 carried GO 2.
+        let mut h = JournalHistory::new();
+        h.record(11, &msc_go(0x32));
+        h.record(12, &msc_go(0x33));
+        let mut rx = ReceiverState::new();
+        let out = recover(&mut rx, &encode(&h, 11, 13), false);
+        // GO 2 may have arrived (packet 11 is not known to be lost): only GO 3.
+        assert_eq!(out, vec![msc_go(0x33)]);
+        // Single SysEx in the lost packet.
+        let mut h = JournalHistory::new();
+        h.record(20, &msc_go(0x35));
+        assert_eq!(recover(&mut rx, &encode(&h, 20, 21), true), vec![msc_go(0x35)]);
+        // ... and not when it was in an older packet.
+        assert!(recover(&mut rx, &encode(&h, 20, 22), false).is_empty());
+        let j = parse_journal(&encode(&h, 20, 21)).unwrap();
+        assert!(j.has_system);
+        assert_eq!(j.sysex[0].data, msc_go(0x35)[1..7].to_vec());
+    }
+
+    #[test]
+    fn system_chapters_before_x_are_skipped() {
+        // System journal: D (B log) + V + Q (C) + F (C) + X (one finished log).
+        let sys = [
+            0x00, 0x00, // header, LENGTH filled below; D V Q F X
+            0x40, 0x81, // D: TOC B, B log
+            0x82, // V
+            0x10, 0x00, 0x05, // Q: C=1, CLOCK
+            0x40, 0x01, 0x02, 0x03, 0x04, // F: C=1, COMPLETE
+            0x0B, 0x41, 0xC2, // X: S=0 D=1 L=0 STA=3, DATA 41 42
+        ];
+        let mut bytes = vec![0x40, 0x00, 0x07];
+        let mut s = sys.to_vec();
+        s[0] = 0x7C; // S=0 D V Q F X, LENGTH high 0
+        s[1] = sys.len() as u8;
+        bytes.extend_from_slice(&s);
+        let j = parse_journal(&bytes).unwrap();
+        assert_eq!(
+            j.sysex,
+            vec![SysexLog {
+                s: false,
+                complete: true,
+                data: vec![0x41, 0x42]
+            }]
+        );
+        let mut rx = ReceiverState::new();
+        assert_eq!(recover(&mut rx, &bytes, false), vec![vec![0xF0, 0x41, 0x42, 0xF7]]);
     }
 
     #[test]
