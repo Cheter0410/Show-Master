@@ -14,10 +14,8 @@ use std::time::{Duration, Instant};
 fn wav(path: &std::path::Path, frames: u32) {
     let mut out = Vec::new();
     let data_len = frames * 2;
-    for (tag, v) in [(b"RIFF", 36 + data_len)] {
-        out.extend_from_slice(tag);
-        out.extend_from_slice(&v.to_le_bytes());
-    }
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len).to_le_bytes());
     out.extend_from_slice(b"WAVEfmt ");
     out.extend_from_slice(&16u32.to_le_bytes());
     out.extend_from_slice(&1u16.to_le_bytes());
