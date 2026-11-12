@@ -270,6 +270,21 @@ try {
       await pp.waitForSelector('[data-testid="view-app"]');
       await pp.screenshot({ path: join(SHOTS, "real-phone-view.png") });
     });
+    await step("stage manager view: big NEXT, cue sheet PDF downloadable", async () => {
+      await pp.tap('[data-testid="to-stage"]');
+      await pp.waitForSelector('[data-testid="stage-next"]', { timeout: 8000 }).catch(async (e) => {
+        await pp.screenshot({ path: join(SHOTS, "real-stage-fail.png") });
+        throw new Error(`${e.message.split("\n")[0]} at ${pp.url()}`);
+      });
+      const href = await pp.getAttribute('[data-testid="stage-sheet"]', "href");
+      const res = await pp.evaluate(async (h) => {
+        const r = await fetch(h);
+        const b = new Uint8Array(await r.arrayBuffer());
+        return { status: r.status, type: r.headers.get("content-type"), head: String.fromCharCode(...b.slice(0, 8)) };
+      }, href);
+      if (res.status !== 200 || res.head !== "%PDF-1.4") throw new Error(JSON.stringify(res));
+      await pp.screenshot({ path: join(SHOTS, "real-stage.png") });
+    });
   }
 
   await step("no request left the machine / local network", async () => {

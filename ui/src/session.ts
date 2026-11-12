@@ -3,18 +3,19 @@ import { fetchSession, HttpError, login, type Role } from "./api";
 import { connect, disconnect, setBeforeReconnect } from "./connection";
 import { getApp, setApp } from "./store";
 
-export type Route = "desktop" | "remote" | "view";
+export type Route = "desktop" | "remote" | "view" | "stage";
 
 export function routeFromPath(pathname: string): Route {
   const p = pathname.replace(/\/+$/, "");
   if (p === "/remote" || p.startsWith("/remote/")) return "remote";
   if (p === "/view" || p.startsWith("/view/")) return "view";
+  if (p === "/stage" || p.startsWith("/stage/")) return "stage";
   return "desktop";
 }
 
 export const route: Route = typeof location === "undefined" ? "desktop" : routeFromPath(location.pathname);
 /** Role the PIN pad asks for on this route. `/` from a non-loopback machine can only ever be `control`. */
-const wantedRole: "control" | "view" = route === "view" ? "view" : "control";
+const wantedRole: "control" | "view" = route === "view" || route === "stage" ? "view" : "control";
 
 // One stored login per page: going from /view to /remote must ask for the
 // control PIN instead of reusing the view token (and must not log /view out).

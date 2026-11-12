@@ -1038,3 +1038,24 @@ button.lrow-gutter:hover { box-shadow: inset 6px 0 0 var(--green-deep); }
   .r-clocks.folded .clocks.compact { grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
   .r-clocks:not(.folded) .clocks.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ---------- /stage: stage manager monitor ---------- */
+.stage { height: 100%; display: flex; flex-direction: column; gap: 12px; padding: 10px; padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); overflow: auto; }
+.stage-clocks { display: flex; gap: 12px; flex-wrap: wrap; }
+.stage-clocks > div { flex: 1 1 150px; background: var(--panel); border: var(--bw) solid var(--border); border-radius: 10px; padding: 8px 12px; font-size: clamp(26px, 4.5vw, 46px); font-weight: 800; }
+.stage-clocks > div.on { color: var(--green); }
+.stage-clocks span { display: block; font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+.stage-alarm { background: var(--red-deep); color: #fff; font-weight: 800; font-size: 22px; padding: 10px 14px; border-radius: 10px; }
+.stage-next { background: var(--panel); border: 2px solid var(--green); border-radius: 12px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+.stage-next-title { font-size: clamp(34px, 7vw, 84px); font-weight: 800; line-height: 1.05; overflow-wrap: anywhere; }
+.stage-next-title .num { color: var(--green); }
+.stage-next-notes { font-size: clamp(18px, 2.6vw, 28px); white-space: pre-wrap; }
+.stage-countdown { font-size: clamp(20px, 3vw, 32px); color: var(--muted); }
+.stage-countdown b { color: var(--text, #fff); font-size: 1.4em; }
+.stage-after { font-size: clamp(16px, 2.2vw, 24px); color: var(--muted); }
+.stage-running h3 { margin: 0 0 6px; font-size: 14px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+.stage-running ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.stage-running li { display: flex; justify-content: space-between; gap: 12px; font-size: clamp(18px, 2.6vw, 28px); background: var(--panel); border-radius: 8px; padding: 6px 12px; }
+.stage-running li.is-paused { opacity: 0.6; }
+.stage-notes { white-space: pre-wrap; font-size: clamp(16px, 2.2vw, 24px); background: var(--panel); border-radius: 10px; padding: 10px 14px; }
+.stage-next .tag { align-self: flex-start; }

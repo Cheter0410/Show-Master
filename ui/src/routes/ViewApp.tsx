@@ -21,6 +21,9 @@ export function ViewApp() {
         {paused ? <span className="tag tag-paused">PAUSED</span> : null}
         <span className={`mode-badge ${mode}`}>{mode === "live" ? "LIVE" : "EDIT"}</span>
         <span className="mode-badge view">VIEW ONLY</span>
+        <a className="btn ghost r-switch" href="/stage" data-testid="to-stage" title="Big stage manager view">
+          Stage
+        </a>
         <a className="btn r-switch" href="/remote" data-testid="to-remote" title="Control the show (asks for the control PIN)">
           Control
         </a>

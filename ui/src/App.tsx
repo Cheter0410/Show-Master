@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { ConnectionBanner, PinPad, Splash, Toasts } from "./components/Panels";
 import { DesktopApp } from "./desktop/DesktopApp";
 import { RemoteApp } from "./routes/RemoteApp";
+import { StageApp } from "./routes/StageApp";
 import { ViewApp } from "./routes/ViewApp";
 import { route } from "./session";
 import { useApp } from "./store";
@@ -24,6 +25,7 @@ export function App() {
   else if (auth === "unreachable") screen = <Splash text="Server not reachable – retrying…" />;
   else if (auth === "boot" || !hasDoc) screen = <Splash text="Connecting…" />;
   // What is rendered follows the role the server granted, never just the URL.
+  else if (route === "stage") screen = <StageApp />;
   else if (role === "view" || route === "view") screen = <ViewApp />;
   else if (role === "control" || route === "remote") screen = <RemoteApp />;
   else screen = <DesktopApp />;

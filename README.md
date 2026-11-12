@@ -24,7 +24,8 @@ Parallel läuft ein lokaler Webserver
 nur für Fernsteuerung: Auf Handy oder iPad im selben lokalen Netz reicht im Browser
 **`showmaster.local`** – das öffnet die reine Anzeige (ohne PIN, falls keine View-PIN gesetzt ist).
 Oben rechts führt der Knopf **Control** zur Fernsteuerung (GO, Pause, Stop, PANIC, Pegel, Notizen und ein Timecode-Tab mit Start/Pause/Resume/Stop/Locate; Control-PIN, Standard `1234`), **View** wieder
-zurück; direkt geht es auch über `showmaster.local/remote`. Dafür meldet sich Show Master per mDNS/Bonjour unter diesem Namen
+zurück; direkt geht es auch über `showmaster.local/remote`. **Stage** zeigt eine große Ansicht für die
+Inspizienz (NEXT mit Notizen, Countdown, laufende Cues, Uhren, Cue-Sheet als PDF). Dafür meldet sich Show Master per mDNS/Bonjour unter diesem Namen
 an und lauscht zusätzlich auf dem Standard-Webport 80. Geht Port 80 nicht (belegt, oder unter Linux ohne
 Berechtigung – die Pakete setzen sie per `setcap`), lautet die Adresse `showmaster.local:7400`.
 Die IP-Adresse (`http://<IP>`, bzw. `http://<IP>:7400/remote`) und der QR-Code in *Setup → Remote*
