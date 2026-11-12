@@ -72,6 +72,18 @@ pub enum SysCommand {
         id: u64,
     },
     RevokeAllPairings,
+    /// Main / backup computer settings of this machine.
+    SetLink {
+        role: crate::link::LinkRole,
+        #[serde(default)]
+        peer: String,
+        #[serde(default)]
+        key: String,
+    },
+    /// A message from the main computer (only via `/api/link` with the key).
+    LinkApply {
+        msg: Value,
+    },
     KickClient {
         id: u64,
     },
@@ -212,6 +224,8 @@ pub struct Handle {
     pub web_port: Arc<std::sync::atomic::AtomicU16>,
     /// Devices paired by QR code (per machine, see `pairing.rs`).
     pub pairings: Arc<Mutex<crate::pairing::Pairings>>,
+    /// Main / backup computer link (per machine, see `link.rs`).
+    pub link: Arc<Mutex<crate::link::Link>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -488,6 +502,9 @@ pub fn spawn(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         pairings: Arc::new(Mutex::new(crate::pairing::Pairings::load(
             config.data_dir.as_ref().map(|d| d.join("pairings.json")),
         ))),
+        link: Arc::new(Mutex::new(crate::link::Link::load(
+            config.data_dir.as_ref().map(|d| d.join("link.json")),
+        ))),
         stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
     let h = handle.clone();
@@ -670,6 +687,7 @@ impl Runtime {
                 }
                 self.process_inputs();
                 self.pump();
+                self.link_sync();
             }));
             if step.is_err() {
                 self.note(
@@ -949,6 +967,10 @@ impl Runtime {
         }
         match command {
             AnyCommand::Engine(cmd) => {
+                // Main computer: mirror every transport command to the backup.
+                let mirror = (origin != "link")
+                    .then(|| serde_json::to_value(&cmd).ok())
+                    .flatten();
                 if !matches!(
                     cmd,
                     Command::SetMaster { .. }
@@ -960,6 +982,13 @@ impl Runtime {
                 }
                 let r = self.engine.command(cmd).map(|_| Value::Null);
                 self.pump();
+                if let (Ok(_), Some(m)) = (&r, mirror) {
+                    if let Ok(link) = self.handle.link.lock() {
+                        if link.role() == crate::link::LinkRole::Main {
+                            link.forward(m);
+                        }
+                    }
+                }
                 r
             }
             AnyCommand::Edit(cmd) => {
@@ -971,6 +1000,84 @@ impl Runtime {
                 Ok(result)
             }
             AnyCommand::Sys(cmd) => self.sys(cmd),
+        }
+    }
+
+    /// Main computer: send the show / mode when they changed.
+    fn link_sync(&mut self) {
+        let Ok(mut link) = self.handle.link.lock() else {
+            return;
+        };
+        if link.role() != crate::link::LinkRole::Main || !link.sync_due() {
+            return;
+        }
+        let show = serde_json::to_value(&self.doc.show).unwrap_or(Value::Null);
+        let mode = if self.mode == Mode::Live {
+            "live"
+        } else {
+            "edit"
+        };
+        let snap = self.engine.snapshot();
+        let heads: serde_json::Map<String, Value> = snap
+            .lists
+            .iter()
+            .map(|l| (l.id.to_string(), json!(l.playhead)))
+            .collect();
+        link.maybe_sync(&show, mode, &Value::Object(heads));
+    }
+
+    /// Backup computer: apply what the main sent.
+    fn link_apply(&mut self, msg: &Value) -> Result<Value, String> {
+        {
+            let link = self
+                .handle
+                .link
+                .lock()
+                .map_err(|_| "link unavailable".to_string())?;
+            if link.role() != crate::link::LinkRole::Backup {
+                return Err("not a backup computer".into());
+            }
+            link.seen();
+        }
+        match msg["kind"].as_str() {
+            Some("ping") => Ok(Value::Null),
+            Some("cmd") => match parse_command(msg["cmd"].clone())? {
+                c @ AnyCommand::Engine(_) => self.handle_request(c, Role::Admin, "link"),
+                _ => Err("only transport commands are mirrored".into()),
+            },
+            Some("sync") => {
+                let show: Show =
+                    serde_json::from_value(msg["show"].clone()).map_err(|e| e.to_string())?;
+                if show != self.doc.show {
+                    self.doc.show = show;
+                    self.doc.dirty = true;
+                    self.show_changed();
+                }
+                let mode = if msg["mode"] == "live" {
+                    Mode::Live
+                } else {
+                    Mode::Edit
+                };
+                if mode != self.mode {
+                    self.sys(SysCommand::SetMode { mode, force: true })?;
+                }
+                if msg["initial"] == true {
+                    if let Some(heads) = msg["playheads"].as_object() {
+                        for (list, cue) in heads {
+                            if let Ok(list) = list.parse() {
+                                let _ = self.engine.command(Command::SetPlayhead {
+                                    list: Some(list),
+                                    cue: cue.as_u64(),
+                                });
+                            }
+                        }
+                        self.pump();
+                    }
+                    self.note("info", "backup: in sync with the main computer".into());
+                }
+                Ok(Value::Null)
+            }
+            _ => Err("unknown link message".into()),
         }
     }
 
@@ -1123,6 +1230,24 @@ impl Runtime {
                 self.kick_token(&token);
                 Ok(Value::Null)
             }
+            SysCommand::SetLink { role, peer, key } => {
+                let mut link = self
+                    .handle
+                    .link
+                    .lock()
+                    .map_err(|_| "link unavailable".to_string())?;
+                // An empty key keeps the stored one (the UI never sees it).
+                let key = if key.is_empty() {
+                    link.config().key.clone()
+                } else {
+                    key
+                };
+                link.set(crate::link::LinkConfig { role, peer, key })?;
+                drop(link);
+                self.note("info", format!("backup link: {role:?}"));
+                Ok(Value::Null)
+            }
+            SysCommand::LinkApply { msg } => self.link_apply(&msg),
             SysCommand::RevokeAllPairings => {
                 let tokens = self
                     .handle
@@ -1275,7 +1400,8 @@ impl Runtime {
                 "rtp": { "enabled": rtp.enabled, "name": rtp.session_name, "port": self.io.midi.rtp_local_port().unwrap_or(rtp.port), "peers": peers, "discovered": net.get("discovered").cloned().unwrap_or_else(|| json!([])) },
             },
             "remote": { "urls": self.urls.1, "port": port, "clients": clients,
-                        "pairings": self.handle.pairings.lock().map(|p| p.public()).unwrap_or(Value::Null), "mdns": net.get("mdns").cloned().unwrap_or(Value::Null) },
+                        "pairings": self.handle.pairings.lock().map(|p| p.public()).unwrap_or(Value::Null),
+                        "link": self.handle.link.lock().map(|l| l.status_json()).unwrap_or(Value::Null), "mdns": net.get("mdns").cloned().unwrap_or(Value::Null) },
             "inputs": self.inputs.json(self.io.input_status(), snap.tc_status, snap.tc_speed),
             "preflight": self.preflight,
             "layouts": LAYOUTS,

@@ -348,6 +348,8 @@ pub(super) fn remote_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
         }
     }
 
+    backup_section(ui, st, s);
+
     heading(ui, "Connected clients");
     let clients = &s.remote.clients;
     if clients.is_empty() {
@@ -390,6 +392,119 @@ pub(super) fn remote_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
                 ui.end_row();
             }
         });
+}
+
+/// Main / backup computer link.
+fn backup_section(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
+    heading(ui, "Backup computer");
+    hint(
+        ui,
+        "Run the same show on a second computer as a hot standby: the main sends every GO, \
+         Stop, PANIC and every change of the show to the backup, which plays in parallel. If \
+         the main fails, switch your audio over to the backup. Copy the show folder (or a show \
+         package) to the backup and open it there once. Stored per computer.",
+    );
+    let link = s.remote.link.clone().unwrap_or_default();
+    let role = if link.role.is_empty() {
+        "off".to_string()
+    } else {
+        link.role.clone()
+    };
+    let set = |st: &mut SetupState, role: &str, peer: &str, key: &str| {
+        st.send_toast(
+            json!({ "cmd": "set_link", "role": role, "peer": peer, "key": key }),
+            match role {
+                "main" => "This computer is now the main",
+                "backup" => "This computer is now the backup",
+                _ => "Backup link switched off",
+            },
+        );
+    };
+    form(ui, "backup_form", |ui| {
+        row(ui, "This computer is", |ui| {
+            for (r, label) in [("off", "Alone"), ("main", "Main"), ("backup", "Backup")] {
+                if ui.selectable_label(role == r, label).clicked() && role != r {
+                    let key = st.drafts.get("link_key").cloned().unwrap_or_default();
+                    if r != "off" && key.trim().len() < 4 && !link.has_key {
+                        st.error("Enter a link key first (at least 4 characters, the same on both computers).");
+                    } else if r == "main"
+                        && link.peer.is_empty()
+                        && st
+                            .drafts
+                            .get("link_peer")
+                            .is_none_or(|p| p.trim().is_empty())
+                    {
+                        st.error("Enter the backup computer's address first.");
+                    } else {
+                        let peer = st
+                            .drafts
+                            .get("link_peer")
+                            .cloned()
+                            .unwrap_or_else(|| link.peer.clone());
+                        set(st, r, peer.trim(), key.trim());
+                    }
+                }
+            }
+        });
+        row(ui, "Link key", |ui| {
+            let mut key = st.drafts.get("link_key").cloned().unwrap_or_default();
+            let resp = ui.add(
+                egui::TextEdit::singleline(&mut key)
+                    .password(true)
+                    .hint_text(if link.has_key {
+                        "(set - type to change)"
+                    } else {
+                        "same on both"
+                    })
+                    .desired_width(180.0),
+            );
+            if resp.changed() {
+                st.drafts.insert("link_key".into(), key.clone());
+            }
+            if resp.lost_focus() && !key.trim().is_empty() && role != "off" {
+                let peer = link.peer.clone();
+                set(st, &role, &peer, key.trim());
+            }
+        });
+        row(ui, "Backup address", |ui| {
+            let mut peer = st
+                .drafts
+                .get("link_peer")
+                .cloned()
+                .unwrap_or_else(|| link.peer.clone());
+            let resp = ui.add(
+                egui::TextEdit::singleline(&mut peer)
+                    .hint_text("192.168.1.21 (main only)")
+                    .desired_width(180.0),
+            );
+            if resp.changed() {
+                st.drafts.insert("link_peer".into(), peer.clone());
+            }
+            if resp.lost_focus() && role == "main" && peer.trim() != link.peer {
+                set(st, "main", peer.trim(), "");
+            }
+            unit(ui, "IP or name of the backup (its web port, default 7400)");
+        });
+        row(ui, "Status", |ui| {
+            let (text, color) = match (role.as_str(), link.connected) {
+                ("main", true) => ("Backup reachable, in sync".to_string(), theme::NEXT),
+                ("main", false) => (
+                    format!(
+                        "Backup not reachable{}",
+                        link.error
+                            .as_deref()
+                            .map(|e| format!(": {e}"))
+                            .unwrap_or_default()
+                    ),
+                    theme::ERROR,
+                ),
+                ("backup", true) => ("Following the main computer".to_string(), theme::NEXT),
+                ("backup", false) => ("Waiting for the main computer".to_string(), theme::WARN),
+                _ => ("Not linked".to_string(), theme::MUTED),
+            };
+            ui.label(RichText::new(text).color(color));
+        });
+    });
 }
 
 #[cfg(test)]

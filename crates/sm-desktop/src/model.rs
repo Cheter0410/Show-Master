@@ -193,6 +193,19 @@ pub struct Client {
     pub device: String,
 }
 
+/// Main / backup computer link of this machine.
+#[derive(Deserialize, Clone, Debug, Default)]
+#[serde(default)]
+pub struct LinkInfo {
+    /// "off" | "main" | "backup"
+    pub role: String,
+    pub peer: String,
+    pub has_key: bool,
+    pub connected: bool,
+    pub last_seen_ms: Option<u64>,
+    pub error: Option<String>,
+}
+
 /// A device paired by QR code (no token: that is only shown once).
 #[derive(Deserialize, Clone, Debug, Default)]
 #[serde(default)]
@@ -210,6 +223,8 @@ pub struct RemoteInfo {
     pub port: u16,
     pub clients: Vec<Client>,
     pub pairings: Vec<PairingInfo>,
+    /// Main / backup computer link (`None` in tests without it).
+    pub link: Option<LinkInfo>,
     /// `None` when the binary runs without mDNS (tests).
     pub mdns: Option<MdnsInfo>,
 }

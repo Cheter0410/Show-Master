@@ -211,6 +211,22 @@ revidieren lassen.
 - **Kein Schema-Sprung.** Alle neuen Felder (`midi_input`, `timecode.source`, `timecode.input`) haben
   Standardwerte; Version-2-Shows ohne sie laden unverändert (Test in `showfile.rs`).
 
+## Backup-Rechner (nachträglich)
+
+- **Spiegeln statt Synchronisieren der Audio-Ausgabe:** Der Hauptrechner schickt jeden Transport-Befehl
+  direkt nach der eigenen Ausführung an den Backup (HTTP `POST /api/link`, gemeinsamer Schlüssel), dazu
+  Show-Dokument und Modus bei Änderung (alle 0,5 s geprüft) und nach jedem (Wieder-)Verbinden alles
+  inklusive Playheads. Der Backup führt dieselben Befehle aus und läuft damit parallel; Zeit-Trigger
+  (Auto-Continue, Timecode) laufen auf beiden deterministisch. Versatz: Netzwerk-Latenz (LAN ~1–5 ms).
+- **Nichts wird nachgeholt:** Befehle, die nicht zugestellt werden konnten, werden verworfen (ein GO
+  Sekunden später wäre falsch); nach dem Wiederverbinden wird der Zustand (Show, Modus, Playheads)
+  abgeglichen, laufende Cues aber nicht.
+- **Kein automatisches Umschalten:** Der Backup zeigt nur an, dass der Main nicht mehr antwortet (3 s);
+  umgeschaltet wird extern (Audio-Umschalter, zweite Zuspielung). Tablets verbinden sich dann mit dem
+  Backup (eigene IP bzw. `showmaster-2.local`).
+- **Rolle pro Rechner** (`link.json`), nicht in der Show: beide Rechner öffnen dieselbe Showdatei. Medien
+  müssen auf dem Backup relativ zur Show am selben Ort liegen (Show-Ordner oder Show-Paket kopieren).
+
 ## Bekannte Grenzen
 
 - **Dateien öffnen im Hintergrund.** Audiodateien werden von zwei eigenen Threads geöffnet, nie von der

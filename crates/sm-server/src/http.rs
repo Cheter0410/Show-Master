@@ -88,6 +88,10 @@ pub fn router(handle: Handle) -> Router {
         .route("/api/waveform", get(api_waveform))
         .route("/api/qr.svg", get(api_qr))
         .route("/api/cuesheet.pdf", get(api_cuesheet_pdf))
+        .route(
+            "/api/link",
+            post(api_link).layer(axum::extract::DefaultBodyLimit::max(64 << 20)),
+        )
         .route("/api/cuesheet.csv", get(api_cuesheet_csv))
         .route("/api/diagnostics", get(api_diagnostics))
         .fallback(static_asset)
@@ -454,6 +458,32 @@ async fn api_waveform(
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Messages from the main computer (backup role, shared key).
+async fn api_link(State(app): State<App>, headers: HeaderMap, Json(msg): Json<Value>) -> Response {
+    let key = headers
+        .get(crate::link::HEADER)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    let ok = app
+        .handle
+        .link
+        .lock()
+        .map(|l| l.accepts(key))
+        .unwrap_or(false);
+    if !ok {
+        return deny();
+    }
+    let cmd = crate::runtime::AnyCommand::Sys(crate::runtime::SysCommand::LinkApply { msg });
+    match app.handle.command(cmd, Role::Admin, "link").await {
+        Ok(_) => Json(json!({ "ok": true })).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "ok": false, "error": e })),
         )
             .into_response(),
     }

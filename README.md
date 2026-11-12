@@ -105,6 +105,9 @@ Eine neue Version veröffentlichen: siehe [`docs/release-anleitung.md`](docs/rel
   Show (auch in einem zweiten Show-Master-Fenster) mit Strg/Cmd+V einfügen; Audiopfade und Fade-/Control-
   Ziele werden mitgenommen. Rechtsklick → *Save as template* speichert Cues als Vorlage, *Insert template*
   fügt sie in jede Show ein.
+- **Backup-Rechner:** *Setup → Remote → Backup computer*: ein zweiter Rechner mit derselben Show läuft
+  parallel mit (jedes GO/Stop/PANIC und jede Änderung wird gespiegelt). Fällt der Hauptrechner aus, wird
+  einfach der Ton umgeschaltet – der Backup spielt bereits.
 - **Feste Installationen:** *Setup → General → This computer*: mit dem Rechner starten, letzte Show öffnen,
   **Kiosk-Modus** (startet im Live-Modus; Bearbeiten, Setup und Beenden sind gesperrt, *Unlock* mit
   Kiosk-PIN).

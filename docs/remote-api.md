@@ -30,6 +30,7 @@ Roles are enforced on the server for every command, never only in the UI.
 | `GET /api/waveform?token=T&file=PATH&buckets=800` | admin | `{ "duration": s, "channels": n, "sample_rate": n, "peaks": [[min,max], …] }` |
 | `GET /api/qr.svg?role=control|view` | admin | QR code (SVG) of the remote URL |
 | `GET /api/cuesheet.pdf`, `GET /api/cuesheet.csv` | view | cue sheet (A4 landscape PDF / semicolon CSV with BOM) |
+| `POST /api/link` | link key (`X-ShowMaster-Link` header), backup role only | messages from the main computer: `{"kind":"ping"}`, `{"kind":"cmd","cmd":{…}}` (transport commands), `{"kind":"sync","show":{…},"mode":"live","playheads":{…},"initial":bool}` |
 | `GET /api/diagnostics?token=T` | admin | plain-text diagnostics bundle (log, state, system info) |
 
 A pre-shared token may also be passed as `Authorization: Bearer T`.
@@ -309,6 +310,7 @@ Every command is `{ "cmd": "<name>", …fields }`.
 | `create_pairing` | `role` (`control`/`view`), `name?` | pair a device; result `{ id, token, role, name }`. Open `/<page>?pair=<token>` on the device (QR code): it stores the token and is logged in without a PIN. Never `admin`. Kept per machine in `pairings.json`. |
 | `revoke_pairing` | `id` | revoke one pairing (its clients are disconnected) |
 | `revoke_all_pairings` | – | revoke every pairing |
+| `set_link` | `role` (`off`/`main`/`backup`), `peer` (main: backup address `host[:port]`), `key` (shared, ≥ 4 chars; empty = keep) | main / backup computer link of this machine (`link.json`) |
 | `rtp_connect` | `addr` | invite an RTP-MIDI peer now (`ip:port`, e.g. from `midi.rtp.discovered`) |
 | `clear_log` | | |
 

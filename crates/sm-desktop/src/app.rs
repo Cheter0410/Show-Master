@@ -1610,6 +1610,23 @@ impl App {
             3,
             None,
         ));
+        if let Some(l) = s.remote.link.as_ref().filter(|l| l.role != "off") {
+            let (text, color) = match (l.role.as_str(), l.connected) {
+                ("main", true) => ("Backup: in sync".to_string(), theme::NEXT),
+                ("main", false) => ("Backup: NOT REACHABLE".to_string(), theme::ERROR),
+                (_, true) => ("BACKUP - following the main".to_string(), theme::NEXT),
+                (_, false) => (
+                    "BACKUP - main not heard - running on its own".to_string(),
+                    theme::ERROR,
+                ),
+            };
+            items.push((
+                text,
+                Some(color),
+                0,
+                Some("Main / backup computer link: Setup > Remote > Backup computer"),
+            ));
+        }
         items.push((format!("{} Hz", s.audio.sample_rate), None, 4, None));
         if let Some(b) = s.audio.buffer_frames {
             items.push((format!("{b} frames"), None, 5, None));
