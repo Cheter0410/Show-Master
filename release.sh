@@ -114,6 +114,19 @@ show_status() {
   return $missing
 }
 
+# Alle Pflichtteile, die dieser Rechner baut, sind im Release.
+mine_complete() {
+  local assets name file who
+  assets=$(release_assets "$1")
+  for p in "${PARTS[@]}"; do
+    IFS='|' read -r name file who <<<"$p"
+    [ "$who" = "$WHO" ] || continue
+    file=${file//\{V\}/$1}
+    printf '%s\n' "$assets" | grep -q "^$file " || return 1
+  done
+  return 0
+}
+
 cmd_status() {
   ui_header "$APP" "Release-Status"
   need_gh
@@ -250,6 +263,22 @@ cmd_release() {
       ;;
   esac
 
+  # Sind die Teile dieses Rechners schon im Entwurf, gibt es nichts zu tun
+  # (FORCE=1 baut und lädt sie trotzdem neu).
+  if [ "$state" = draft ] && [ -z "${FORCE:-}" ] && mine_complete "$v"; then
+    ui_ok "Die Teile vom $WHO sind schon im Entwurf – nichts zu bauen"
+    if show_status "$v"; then
+      ui_run "Veröffentlichen" gh release edit "v$v" -R "$RELEASES" --draft=false --latest
+      ui_section "Fertig"
+      ui_ok "$APP $v ist veröffentlicht – installierte Programme bieten das Update beim nächsten Start an."
+    else
+      ui_section "Fertig"
+      ui_info "Es fehlen nur noch die mit ○ markierten Teile – die kommen vom anderen Rechner."
+    fi
+    ui_done
+    exit 0
+  fi
+
   # Genau den Stand dieser Version bauen (beide Rechner bauen denselben Code).
   BACK=$(git symbolic-ref -q --short HEAD || git rev-parse HEAD)
   trap 'back_to_branch; rm -f "$RELEASE_SH_COPY"' EXIT
@@ -306,7 +335,7 @@ cmd_release() {
     if [ ${#todo[@]} -gt 0 ]; then
       ui_info "Hochgeladen. Veröffentlicht wird automatisch, sobald die fehlenden Teile oben sind."
     else
-      ui_info "Alles von diesem Rechner ist schon oben. Es fehlen nur noch die Teile oben."
+      ui_info "Alles von diesem Rechner ist schon oben. Es fehlen nur noch die mit ○ markierten Teile."
     fi
   fi
   ui_done
