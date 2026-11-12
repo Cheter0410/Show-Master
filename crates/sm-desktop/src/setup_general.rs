@@ -311,18 +311,6 @@ pub(super) fn about_tab(ui: &mut egui::Ui, s: &UiState, out: &mut SetupState) {
     });
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn alarm_times() {
-        assert_eq!(fmt_alarm(3600.0), "1:00:00");
-        assert_eq!(fmt_alarm(83.0), "0:01:23");
-        assert_eq!(parse_time(&fmt_alarm(5025.0)), Some(5025.0));
-    }
-}
-
 /// "Also send on PANIC": extra MIDI / OSC messages after All Notes Off.
 fn panic_messages(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
     heading(ui, "Also send on PANIC");
@@ -501,4 +489,16 @@ fn panic_messages(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
             save(st, &next);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alarm_times() {
+        assert_eq!(fmt_alarm(3600.0), "1:00:00");
+        assert_eq!(fmt_alarm(83.0), "0:01:23");
+        assert_eq!(parse_time(&fmt_alarm(5025.0)), Some(5025.0));
+    }
 }
