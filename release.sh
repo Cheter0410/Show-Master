@@ -47,7 +47,7 @@ fi
 trap 'rm -f "$RELEASE_SH_COPY"' EXIT
 cd "$RELEASE_SH_DIR"
 # shellcheck source=scripts/ui.sh
-. scripts/ui.sh
+UI_NAME=release.sh . scripts/ui.sh
 [ "$(uname -s)" = "Darwin" ] && MAC=1 || MAC=
 WHO=$([ -n "$MAC" ] && echo Mac || echo Linux-PC)
 version() { sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1; }
