@@ -13,6 +13,15 @@
     <key>LSMinimumSystemVersion</key><string>11.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key><string>Show Master show</string>
+            <key>CFBundleTypeRole</key><string>Editor</string>
+            <key>CFBundleTypeExtensions</key><array><string>smshow</string></array>
+            <key>LSHandlerRank</key><string>Owner</string>
+        </dict>
+    </array>
     <key>NSLocalNetworkUsageDescription</key><string>Show Master serves its remote control to tablets and sends MIDI and timecode to devices on your network.</string>
 </dict>
 </plist>

@@ -755,6 +755,27 @@ impl App {
         if let Some(path) = self.open_at_start.take() {
             self.open_show(path);
         }
+        // Files the OS asked us to open (double-click, Open with, Dock).
+        let requested = crate::open_files::take();
+        if !requested.is_empty() {
+            let ext = |p: &Path| {
+                p.extension()
+                    .and_then(|e| e.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .unwrap_or_default()
+            };
+            if let Some(show) = requested.iter().find(|p| ext(p) == SHOW_EXTENSION) {
+                self.open_show(show.clone());
+            } else {
+                let audio: Vec<PathBuf> = requested
+                    .into_iter()
+                    .filter(|p| AUDIO_EXTENSIONS.contains(&ext(p).as_str()))
+                    .collect();
+                if !audio.is_empty() {
+                    self.add_audio_cues(audio);
+                }
+            }
+        }
         if self.client.state.recovery_available && !self.recovery_asked && self.modal.is_none() {
             self.recovery_asked = true;
             self.modal = Some(Modal::Recovery);

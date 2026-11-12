@@ -10,6 +10,7 @@ pub mod client;
 pub mod edit;
 pub mod live;
 pub mod model;
+pub mod open_files;
 pub mod recent;
 pub mod setup;
 pub mod theme;
@@ -47,6 +48,8 @@ pub fn run(
     if let Some(icon) = icon() {
         viewport = viewport.with_icon(icon);
     }
+    // Early, so a document that launched the app is caught (macOS).
+    open_files::install();
     let options = eframe::NativeOptions {
         viewport,
         renderer: eframe::Renderer::Wgpu,
@@ -57,6 +60,8 @@ pub fn run(
         options,
         Box::new(move |cc| {
             let client = client::Client::new(handle, rt);
+            open_files::install();
+            open_files::set_repaint_context(&cc.egui_ctx);
             let mut app = App::new(&cc.egui_ctx, client, open);
             app.recent = recent::Recent::load();
             Ok(Box::new(Window(app)))

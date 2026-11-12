@@ -22,6 +22,11 @@ sm-core.workspace = true
 sm-server.workspace = true
 sm-audio.workspace = true
 
+# Receiving "open documents" events (double-click on a .smshow file).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["objc2-core-services", "NSAppleEventManager", "NSAppleEventDescriptor", "NSString", "NSURL", "NSObject"] }
+
 [dev-dependencies]
 egui_kittest = { version = "0.37", features = ["eframe"] }
 tempfile = "3"
