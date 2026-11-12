@@ -721,3 +721,32 @@ fn commands_roundtrip_as_json() {
     let cmd: Command = serde_json::from_str(r#"{"cmd":"load_cue","cue":3,"time":1.5}"#).unwrap();
     assert_eq!(cmd, Command::LoadCue { cue: 3, time: 1.5 });
 }
+
+#[test]
+fn panic_holds_a_free_running_timecode_and_no_trigger_fires_afterwards() {
+    let (mut e, _, _, _) = tc_show(TcJumpPolicy::Skip);
+    e.command(Command::TcStart { from: None }).unwrap();
+    e.advance(SR as u64); // 01:00:01:00
+    e.command(Command::Panic).unwrap();
+    let snap = e.snapshot();
+    assert!(!snap.tc.running, "generator paused by PANIC");
+    assert_eq!(snap.tc_position, "01:00:01:00");
+    e.drain_actions();
+    // The triggers at :02 and :04 must not fire while the generator is held.
+    e.advance(10 * SR as u64);
+    let acts = e.drain_actions();
+    assert!(starts(&acts).is_empty() && midis(&acts).is_empty());
+    // Resume continues from the held position.
+    e.command(Command::TcResume).unwrap();
+    e.advance(11 * SR as u64);
+    assert_eq!(e.snapshot().tc_position, "01:00:02:00");
+}
+
+#[test]
+fn stop_all_leaves_a_free_running_timecode_alone() {
+    let (mut e, _, _, _) = tc_show(TcJumpPolicy::Skip);
+    e.command(Command::TcStart { from: None }).unwrap();
+    e.advance(SR as u64);
+    e.command(Command::StopAll).unwrap();
+    assert!(e.snapshot().tc.running);
+}

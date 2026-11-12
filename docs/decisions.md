@@ -40,6 +40,10 @@ revidieren lassen.
 - **Kinder einer Gruppe** ignorieren ihren eigenen Continue-Modus; die Gruppe bestimmt die Abfolge.
 - **Stop All** blendet mit `stop_fade_ms` aus, **Panic** hart (oder `panic_fade_ms`) und sendet
   All Notes Off / All Sound Off / Reset Controllers auf allen Kanälen aller benutzten Ports.
+  Ein laufender Timecode-Generator wird dabei **angehalten** (auch im Freerun-Modus), damit weder
+  LTC/MTC weiterlaufen noch Timecode-Trigger erneut Cues feuern; die Position bleibt stehen. Fortsetzen
+  im Live-Dashboard per Rechtsklick/langem Druck auf die Timecode-Uhr. *Stop All* lässt einen
+  Freerun-Timecode weiterlaufen.
 - **Timecode-Sprünge** je Cue-Liste: *fire* feuert übersprungene Cues (nur vorwärts, nur wenn der
   Generator lief), *skip* nichts, *chase* startet, was an der neuen Position laufen würde, am passenden
   Offset und stoppt Timecode-Cues, deren Trigger in der Zukunft liegt.

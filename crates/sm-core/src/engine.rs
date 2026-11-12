@@ -1525,6 +1525,12 @@ impl Engine {
             Command::Panic => {
                 let fade = self.fr(f64::from(self.show.settings.panic_fade_ms) / 1000.0);
                 self.stop_everything(t, fade, fade == 0);
+                // A free-running generator would keep sending LTC/MTC and fire
+                // timecode-triggered cues again: hold it where it is (resume
+                // continues from there).
+                if self.tc.running {
+                    self.tc_action(&TcAction::Pause, t);
+                }
                 self.actions.push(Action::MidiPanic);
                 self.emit(t, EventKind::Panic);
                 Ok(())

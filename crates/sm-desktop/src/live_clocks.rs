@@ -139,9 +139,16 @@ pub fn tc_text(tc: &TcInfo) -> &str {
     }
 }
 
-/// The four live clocks side by side in `rect`. Returns true when the user
-/// asked to reset the show clock.
-pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> bool {
+/// What the user asked for in the clock strip.
+#[derive(Default)]
+pub struct StripAction {
+    pub reset_show_clock: bool,
+    /// A timecode generator command (`tc_pause`, `tc_resume`, `tc_start`, `tc_stop`).
+    pub timecode: Option<&'static str>,
+}
+
+/// The four live clocks side by side in `rect`.
+pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> StripAction {
     let gap = 8.0;
     // Timecode needs the most room, the wall clock the least.
     let weights = [1.0, 1.0, 1.4, 0.85];
@@ -251,6 +258,36 @@ pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> bool {
         tc.running,
         theme::RUNNING,
     );
+    // Generator controls: right-click / long-press only, so a stray tap during
+    // the show never stops the timecode.
+    let mut timecode = None;
+    let resp = ui
+        .interact(cells[2], ui.scope_id().with("tc_menu"), Sense::click())
+        .on_hover_text("Right-click or long-press for timecode controls");
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Timecode controls"));
+    resp.context_menu(|ui| {
+        if tc.running {
+            if ui.button("Pause timecode").clicked() {
+                timecode = Some("tc_pause");
+            }
+        } else if ui
+            .button("Resume timecode")
+            .on_hover_text("Continue from the shown position")
+            .clicked()
+        {
+            timecode = Some("tc_resume");
+        }
+        if ui.button("Start from the beginning").clicked() {
+            timecode = Some("tc_start");
+        }
+        if ui
+            .button("Stop timecode")
+            .on_hover_text("Stop and go back to the start position")
+            .clicked()
+        {
+            timecode = Some("tc_stop");
+        }
+    });
 
     // Countdown to the next automatic cue.
     let auto = tick.next_auto.map(util::fmt_time);
@@ -265,5 +302,8 @@ pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> bool {
             size,
         },
     );
-    reset
+    StripAction {
+        reset_show_clock: reset,
+        timecode,
+    }
 }

@@ -219,3 +219,24 @@ fn small_window_and_many_cues_render() {
     settle(&mut h);
     assert!(h.query_by_label("Cue 500 Cue number 500").is_some());
 }
+
+#[test]
+fn panic_holds_the_timecode_and_the_clock_menu_resumes_it() {
+    let env = Env::demo();
+    let mut h = env.harness();
+    go_live(&env, &mut h);
+    let tc_running = |_: &Value| env.handle.tick()["tc"]["running"].as_bool() == Some(true);
+    let tc_held = |_: &Value| env.handle.tick()["tc"]["running"].as_bool() == Some(false);
+    // Start the generator through the clock menu (right-click / long-press).
+    h.get_by_label("Timecode controls").click_secondary();
+    settle(&mut h);
+    h.get_by_label("Start from the beginning").click();
+    env.wait(&mut h, "timecode running", tc_running);
+    // PANIC holds it.
+    h.get_by_label("PANIC").click();
+    env.wait(&mut h, "timecode held by panic", tc_held);
+    h.get_by_label("Timecode controls").click_secondary();
+    settle(&mut h);
+    h.get_by_label("Resume timecode").click();
+    env.wait(&mut h, "timecode running again", tc_running);
+}

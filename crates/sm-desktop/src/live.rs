@@ -180,8 +180,12 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         Pos2::new(left.right(), tools.top() - GAP),
     );
 
-    if clocks::clock_strip(ui, clocks, &app.client.tick) {
+    let clock_action = clocks::clock_strip(ui, clocks, &app.client.tick);
+    if clock_action.reset_show_clock {
         app.cmd(json!({ "cmd": "reset_show_clock" }));
+    }
+    if let Some(cmd) = clock_action.timecode {
+        app.cmd(json!({ "cmd": cmd }));
     }
     cue_zone(app, ui, cue_rect, hc);
     tools_zone(app, ui, tools, hc);
@@ -946,8 +950,12 @@ fn stacked(app: &mut App, ui: &mut egui::Ui, r: Rect, hc: bool) {
     );
     let tools = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - bottom_h), r.max);
 
-    if clocks::clock_strip(ui, clocks, &app.client.tick) {
+    let clock_action = clocks::clock_strip(ui, clocks, &app.client.tick);
+    if clock_action.reset_show_clock {
         app.cmd(json!({ "cmd": "reset_show_clock" }));
+    }
+    if let Some(cmd) = clock_action.timecode {
+        app.cmd(json!({ "cmd": cmd }));
     }
 
     // NEXT panel and a big GO (right: thumb side on a tablet held in landscape).
