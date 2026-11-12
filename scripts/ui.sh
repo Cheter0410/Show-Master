@@ -2,9 +2,11 @@
 #
 #   ui_header "Show Master" "Release 0.4.1"   title box (skipped in nested scripts)
 #   ui_section "Bauen"                        a group of steps
-#   ui_run "Tests" cargo test ...             spinner while it runs, then ✓ / ✗ with the
-#                                             time; output goes to the log, on failure
-#                                             the last lines are shown and the script ends
+#   ui_run "Tests" cargo test ...             one live line while it runs: progress bar and
+#                                             time left (estimated from the last run), and
+#                                             what it is doing right now; then ✓ / ✗ with
+#                                             the time. Output goes to the log; on failure
+#                                             the important lines are shown and the script ends
 #   ui_skip "Tests" "schon geprüft"           a step that was not needed
 #   ui_ok / ui_info / ui_warn / ui_fail       single lines (ui_fail ends the script)
 #   ui_sudo                                   ask for the sudo password up front (a
@@ -57,27 +59,93 @@ ui_sudo() {
   sudo -v || ui_fail "Ohne Administrator-Rechte geht es nicht weiter."
 }
 
+# How long steps took last time (lines of output, seconds): the progress bar.
+UI_HIST="${XDG_CACHE_HOME:-$HOME/.cache}/script-steps"
+
+ui_clock() { printf '%d:%02d' $(($1 / 60)) $(($1 % 60)); }
+
+# What a line of output says, in a few words.
+ui_activity() {
+  printf '%s' "$1" | sed -E $'s/\033\\[[0-9;?]*[A-Za-z]//g; s/.*\r//; s/^[[:space:]]+//; s/[[:space:]]+$//' | sed -E \
+    -e 's/^Compiling ([^ ]+).*/kompiliert \1/' \
+    -e 's/^(Downloaded|Downloading) ([^ ]+) v.*/lädt \2/' \
+    -e 's/^(Updating|Downloading) crates.*/lädt Bibliotheken/' \
+    -e 's/^Running (unittests )?([^ ]+).*/Tests: \2/' \
+    -e 's/^test ([^ ]+) \.\.\. .*/Test \1/' \
+    -e 's/^Finished .*/fertig, schreibt das Programm/' \
+    -e 's/^test result: .*/Tests ausgewertet/'
+}
+
+# Steps are told apart by label and folder (without numbers: versions and sizes change).
+ui_step_key() {
+  printf '%s-%s' "$(basename "$(pwd)")" "$1" | tr -d '0-9' | tr -c 'A-Za-z_.-' '_' | cut -c1-80
+}
+
+ui_bar() {
+  local fill=$(($1 * $2 / 100)) a='' b='' i
+  for ((i = 0; i < fill; i++)); do a+='━'; done
+  for ((i = fill; i < $2; i++)); do b+='─'; done
+  printf '%s%s%s%s%s' "$UI_C" "$a" "$UI_D" "$b" "$UI_0"
+}
+
 # ui_run "Label" command args...
 ui_run() {
-  local label="$1" start=$SECONDS rc=0 pid i=0 from
+  local label="$1" start=$SECONDS rc=0 pid from
   shift
   printf '\n=== %s\n' "$label" >>"$UI_LOG"
   from=$(($(wc -l <"$UI_LOG") + 1))
+  local hist prev_l=0 prev_s=0
+  hist="$UI_HIST/$(ui_step_key "$label")"
+  [ -f "$hist" ] && read -r prev_l prev_s <"$hist" 2>/dev/null
+  case "$prev_l$prev_s" in *[!0-9]*) prev_l=0 prev_s=0 ;; esac
   if [ -n "$UI_TTY" ]; then
-    local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    local cols el n pct eta left act line plain room barw=18
+    cols=$(tput cols 2>/dev/null || echo 80)
+    [ "${cols:-0}" -gt 30 ] 2>/dev/null || cols=80
     ("$@") >>"$UI_LOG" 2>&1 &
     pid=$!
     while kill -0 "$pid" 2>/dev/null; do
-      printf '\r  %s%s%s %s %s%s%s' "$UI_C" "${frames[i % 10]}" "$UI_0" "$label" "$UI_D" "$(ui_time $((SECONDS - start)))" "$UI_0"
-      i=$((i + 1))
-      sleep 0.1
+      el=$((SECONDS - start))
+      n=$(($(wc -l <"$UI_LOG") - from + 1))
+      # Estimate: by lines of output when the step talks a lot, else by time.
+      pct=
+      if [ "$prev_s" -ge 3 ] && [ "$el" -le $((prev_s * 3 / 2 + 5)) ]; then
+        if [ "$prev_l" -ge 10 ]; then
+          pct=$((n * 100 / prev_l))
+          [ "$pct" -le 120 ] || pct= # much more output than last time: no guess
+        else
+          pct=$((el * 100 / prev_s))
+        fi
+        [ -z "$pct" ] || [ "$pct" -le 99 ] || pct=99
+      fi
+      act=
+      [ "$n" -gt 0 ] && act=$(ui_activity "$(tail -n 1 "$UI_LOG")")
+      if [ -n "$pct" ]; then
+        if [ "$pct" -ge 5 ]; then eta=$((el * (100 - pct) / pct)); else eta=$((prev_s - el)); fi
+        if [ "$eta" -gt 0 ]; then left="noch ~$(ui_clock "$eta")"; else left="gleich fertig"; fi
+        plain="  ▸ $label  $(printf '%*s' $barw '') ${pct}%  $(ui_clock "$el")  $left"
+        line="  ${UI_C}▸${UI_0} $label  $(ui_bar "$pct" $barw) ${UI_B}${pct}%${UI_0}  ${UI_D}$(ui_clock "$el")  $left${UI_0}"
+      else
+        plain="  ▸ $label  $(ui_clock "$el")"
+        line="  ${UI_C}▸${UI_0} $label  ${UI_D}$(ui_clock "$el")${UI_0}"
+      fi
+      room=$((cols - ${#plain} - 4))
+      if [ -n "$act" ] && [ "$room" -gt 8 ]; then
+        [ ${#act} -le "$room" ] || act="${act:0:$((room - 1))}…"
+        line="$line  ${UI_D}·${UI_0} $act"
+      fi
+      printf '\r\033[K%s' "$line"
+      sleep 0.25
     done
     wait "$pid" || rc=$?
     printf '\r\033[K'
   else
+    printf '  … %s\n' "$label"
     ("$@") >>"$UI_LOG" 2>&1 || rc=$?
   fi
   if [ "$rc" -eq 0 ]; then
+    mkdir -p "$UI_HIST" 2>/dev/null &&
+      printf '%s %s\n' "$(($(wc -l <"$UI_LOG") - from + 1))" "$((SECONDS - start))" >"$hist" 2>/dev/null
     printf '  %s✓%s %s %s(%s)%s\n' "$UI_G" "$UI_0" "$label" "$UI_D" "$(ui_time $((SECONDS - start)))" "$UI_0"
   else
     printf '  %s✗ %s%s\n\n' "$UI_R" "$label" "$UI_0"
