@@ -79,21 +79,20 @@ revidieren lassen.
 
 - **mDNS ist eine optionale Komfortfunktion mit Rückfallebene.** Show Master meldet die Weboberfläche
   als `_http._tcp` („Show Master on <Rechner>“, TXT `path=/remote`) unter dem Namen
-  `show-master.local` an (bei Konflikt mit einem zweiten Show-Master-Rechner automatisch
-  `show-master-2.local`) und die RTP-MIDI-Session als `_apple-midi._udp` auf ihrem Control-Port; andere
+  `showmaster.local` an (bei Konflikt mit einem zweiten Show-Master-Rechner automatisch
+  `showmaster-2.local`) und die RTP-MIDI-Session als `_apple-midi._udp` auf ihrem Control-Port; andere
   RTP-MIDI-Sessions werden gesucht und in *Setup → MIDI* mit „Connect“ angeboten. Zugriff per IP und
   QR-Code bleibt der Hauptweg und funktioniert immer – auch wenn Multicast im Netz gesperrt ist,
   Port 5353 nicht geöffnet werden kann oder der Dienst nicht startet (dann nur Log-Eintrag und Hinweis
   in Setup, kein Fehler).
-- **Kurze Adresse `show-master.local`:** Damit auf dem Handy nur der Name getippt werden muss, lauscht
+- **Kurze Adresse `showmaster.local`:** Damit auf dem Handy nur der Name getippt werden muss, lauscht
   der Webserver im Netzwerkbetrieb zusätzlich auf Port 80 (Best Effort, neben dem eingestellten Port),
   und `/` leitet Geräte aus dem Netz per 302 auf `/remote` um (der eigene Rechner bekommt weiter die
   volle Oberfläche). Angekündigt und angezeigt (Setup → Remote, Statuszeile, QR-Codes) wird dann die
   Adresse ohne Port. macOS und Windows erlauben Port 80 ohne Rechte (Windows fragt ggf. die Firewall);
   unter Linux setzen Arch-Paket und .deb `cap_net_bind_service` per `setcap`. Fehlt die Berechtigung
   (z. B. tar.gz/AppImage, oder nach einem Programm-Update, das die Datei ersetzt), bleibt alles beim
-  eingestellten Port: `show-master.local:7400`. Der Name enthält einen Bindestrich, weil er so leichter
-  zu lesen und zu tippen ist.
+  eingestellten Port: `showmaster.local:7400`.
 - **Datenschutz/Offline:** mDNS sendet ausschließlich an die Link-lokalen Multicast-Gruppen
   224.0.0.251 / ff02::fb, UDP 5353 (TTL 255, Router leiten das nicht weiter). Angekündigt werden nur
   Rechnername, Instanzname, IP-Adressen und Ports – keine Show-Inhalte. `scripts/offline-test.sh`

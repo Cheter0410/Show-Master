@@ -208,8 +208,8 @@ mod tests {
             enabled: true,
             status: Status {
                 active: true,
-                host: "show-master.local".into(),
-                url: Some("http://show-master.local:7400".into()),
+                host: "showmaster.local".into(),
+                url: Some("http://showmaster.local:7400".into()),
                 discovered: vec![sm_mdns::Discovered {
                     name: "Mac".into(),
                     addr: "192.168.1.5:5004".into(),
@@ -219,7 +219,7 @@ mod tests {
             },
         };
         let v = status_json(&snap);
-        assert_eq!(v["mdns"]["url"], "http://show-master.local:7400");
+        assert_eq!(v["mdns"]["url"], "http://showmaster.local:7400");
         assert_eq!(v["mdns"]["enabled"], true);
         assert_eq!(v["discovered"][0]["addr"], "192.168.1.5:5004");
     }

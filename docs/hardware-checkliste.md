@@ -51,10 +51,10 @@ validiert werden.
 
 ## Bedienung
 - [ ] Oberfläche auf einem echten iPad (Safari, „Zum Home-Bildschirm“, Wake-Lock, Hoch-/Querformat)
-- [ ] iPad-Safari öffnet mit nur `show-master.local` die Fernsteuerung (Bonjour-Name + Port 80) im
+- [ ] iPad-Safari öffnet mit nur `showmaster.local` die Fernsteuerung (Bonjour-Name + Port 80) im
       Show-WLAN – auf Mac, Windows (Firewall-Abfrage) und Linux-Paket (setcap); mit
       „Client Isolation“/Multicast-Filter im Access Point schlägt das erwartungsgemäß fehl, IP/QR geht
-- [ ] Zwei Show-Master-Rechner im selben Netz: der zweite wird zu `show-master-2.local`, Setup → Remote
+- [ ] Zwei Show-Master-Rechner im selben Netz: der zweite wird zu `showmaster-2.local`, Setup → Remote
       zeigt den richtigen Namen
 - [ ] Windows: Bonjour-Dienst (iTunes/rtpMIDI) installiert und nicht installiert – Ankündigung klappt
       in beiden Fällen, Port 5353 wird geteilt

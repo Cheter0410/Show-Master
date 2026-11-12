@@ -89,7 +89,7 @@ that sees a `rev` gap must reconnect (the server then sends a fresh `state`).
                      "discovered": [ { "name": "Studio Mac", "addr": "192.168.1.30:5004", "host": "studio-mac.local" } ] } },
   "remote": { "urls": ["http://192.168.1.10"], "port": 7400,
               "clients": [ { "id": 3, "role": "control", "addr": "192.168.1.20", "since_ms": 1731312000000, "agent": "Safari…" } ],
-              "mdns": { "enabled": true, "active": true, "host": "show-master.local", "url": "http://show-master.local",
+              "mdns": { "enabled": true, "active": true, "host": "showmaster.local", "url": "http://showmaster.local",
                         "rtp_advertised": true, "rtp_instance": "Show Master", "error": null } },
   "preflight": [ { "severity": "error"|"warning"|"info", "cue": 17, "message": "…" } ],
   "layouts": ["mono","stereo","lcr","quad","5.1","7.1"]
@@ -106,7 +106,7 @@ mDNS/Bonjour fields (optional comfort, see `decisions.md`):
   `rtp_midi.advertise` is off.
 - `remote.mdns` – `null` when the process runs without mDNS (tests, embedding). `enabled` mirrors
   `settings.remote.mdns`; `active` = the mDNS responder runs; `host` = advertised host name
-  (`show-master.local`, `show-master-2.local` after a name conflict); `url` = base URL by name while the
+  (`showmaster.local`, `showmaster-2.local` after a name conflict); `url` = base URL by name while the
   web interface is advertised (`null` otherwise – e.g. with `--local-only`); `rtp_advertised` = the
   RTP-MIDI session is advertised, `rtp_instance` = under which name (`Name (2)` if the name was taken); `error` = last problem (e.g. no multicast on this network). The IP
   URLs in `remote.urls` always work and remain the primary way in.

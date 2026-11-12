@@ -379,7 +379,7 @@ fn main() -> std::process::ExitCode {
         };
         let local = listener.local_addr().map(|a| a.port()).unwrap_or(port);
         let mut listeners = vec![listener];
-        // Also the standard web port, so tablets only type `show-master.local`
+        // Also the standard web port, so tablets only type `showmaster.local`
         // (or the bare IP address). Best effort: it may be taken or need
         // privileges (Linux without CAP_NET_BIND_SERVICE).
         let mut public = local;

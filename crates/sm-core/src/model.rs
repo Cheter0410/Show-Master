@@ -157,7 +157,7 @@ pub struct RemoteSettings {
     pub view_pin: String,
     /// Optional OSC command listener (UDP), 0 = disabled.
     pub osc_port: u16,
-    /// Advertise the web interface via mDNS/Bonjour (`show-master.local`).
+    /// Advertise the web interface via mDNS/Bonjour (`showmaster.local`).
     /// Local-link multicast only; access by IP always works.
     pub mdns: bool,
 }

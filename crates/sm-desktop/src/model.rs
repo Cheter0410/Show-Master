@@ -161,7 +161,7 @@ pub struct MdnsInfo {
     pub enabled: bool,
     pub active: bool,
     pub host: String,
-    /// `http://show-master.local:7400` while the web interface is advertised.
+    /// `http://showmaster.local:7400` while the web interface is advertised.
     pub url: Option<String>,
     pub rtp_advertised: bool,
     /// Advertised RTP-MIDI instance name ("Name (2)" after a conflict).

@@ -1,6 +1,6 @@
 #!/bin/sh
-# Allow the standard web port 80, so tablets only type `show-master.local`.
-# Without it Show Master falls back to its own port (show-master.local:7400).
+# Allow the standard web port 80, so tablets only type `showmaster.local`.
+# Without it Show Master falls back to its own port (showmaster.local:7400).
 set -e
 if [ "$1" = "configure" ] && command -v setcap >/dev/null 2>&1; then
     setcap 'cap_net_bind_service=+ep' /usr/bin/showmaster || true

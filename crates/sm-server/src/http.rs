@@ -514,7 +514,7 @@ async fn static_asset(ConnectInfo(addr): ConnectInfo<SocketAddr>, uri: Uri) -> R
     if path.starts_with("api/") {
         return (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))).into_response();
     }
-    // Tablets and phones only type `show-master.local`: send them straight to
+    // Tablets and phones only type `showmaster.local`: send them straight to
     // the remote. This computer itself keeps the full interface.
     if path.is_empty() && !addr.ip().is_loopback() {
         return (

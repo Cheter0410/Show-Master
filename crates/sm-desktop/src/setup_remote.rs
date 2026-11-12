@@ -119,13 +119,13 @@ fn short_agent(agent: &str) -> &str {
     }
 }
 
-/// What to type on a tablet: `http://show-master.local` without the scheme
+/// What to type on a tablet: `http://showmaster.local` without the scheme
 /// (`/` opens the remote for network devices).
 pub(crate) fn short_address(url: &str) -> &str {
     url.trim_start_matches("http://").trim_end_matches('/')
 }
 
-/// The `show-master.local` address (mDNS), shown big above the IP URLs.
+/// The `showmaster.local` address (mDNS), shown big above the IP URLs.
 fn mdns_url(ui: &mut egui::Ui, s: &UiState) {
     let Some(m) = s.remote.mdns.as_ref().filter(|m| m.enabled) else {
         return;
@@ -334,13 +334,10 @@ mod tests {
 
     #[test]
     fn short_addresses() {
+        assert_eq!(short_address("http://showmaster.local"), "showmaster.local");
         assert_eq!(
-            short_address("http://show-master.local"),
-            "show-master.local"
-        );
-        assert_eq!(
-            short_address("http://show-master.local:7400"),
-            "show-master.local:7400"
+            short_address("http://showmaster.local:7400"),
+            "showmaster.local:7400"
         );
     }
 

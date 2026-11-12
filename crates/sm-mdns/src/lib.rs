@@ -4,9 +4,9 @@
 //!
 //! * advertises the web interface as `_http._tcp` (instance
 //!   "Show Master on <computer>", TXT `path=/remote`) under a friendly host
-//!   name (`show-master.local`, renamed to `show-master-2.local` etc. if another
+//!   name (`showmaster.local`, renamed to `showmaster-2.local` etc. if another
 //!   machine already uses it), so tablets can open
-//!   `http://show-master.local` (or `http://show-master.local:7400` when the
+//!   `http://showmaster.local` (or `http://showmaster.local:7400` when the
 //!   standard web port 80 cannot be opened);
 //! * advertises the RTP-MIDI session as `_apple-midi._udp` on its control port
 //!   (macOS Audio MIDI Setup, iOS, rtpMIDI on Windows list it);
@@ -36,8 +36,8 @@ pub const MDNS_PORT: u16 = 5353;
 pub const HTTP_SERVICE: &str = "_http._tcp.local.";
 /// DNS-SD type of RTP-MIDI (AppleMIDI) sessions.
 pub const APPLE_MIDI_SERVICE: &str = "_apple-midi._udp.local.";
-/// Default host label: `show-master.local`.
-pub const DEFAULT_HOST: &str = "show-master";
+/// Default host label: `showmaster.local`.
+pub const DEFAULT_HOST: &str = "showmaster";
 /// Path tablets should open, published in the TXT record.
 pub const REMOTE_PATH: &str = "/remote";
 /// Pause before starting the daemon again after it failed to start.
@@ -88,7 +88,7 @@ pub struct Discovered {
 pub struct Status {
     /// The mDNS daemon is running (it may still lack multicast; see `error`).
     pub active: bool,
-    /// Host name the web interface is advertised under (e.g. `show-master.local`).
+    /// Host name the web interface is advertised under (e.g. `showmaster.local`).
     pub host: String,
     /// `http://<host>:<port>` while the web interface is advertised.
     pub url: Option<String>,
@@ -292,7 +292,7 @@ impl Default for Mdns {
 }
 
 impl Mdns {
-    /// Standard port 5353, host `show-master.local`, this computer's name.
+    /// Standard port 5353, host `showmaster.local`, this computer's name.
     pub fn new() -> Self {
         Self::with_options(MDNS_PORT, DEFAULT_HOST, &computer_name())
     }
@@ -593,21 +593,21 @@ mod tests {
 
     #[test]
     fn host_labels() {
-        assert_eq!(host_label("show-master"), "show-master");
+        assert_eq!(host_label("showmaster"), "showmaster");
         assert_eq!(host_label("Studio PC (FOH)"), "studio-pc-foh");
         assert_eq!(host_label("--Ünïcode--"), "n-code");
-        assert_eq!(host_label(""), "show-master");
-        assert_eq!(host_label("!!!"), "show-master");
+        assert_eq!(host_label(""), "showmaster");
+        assert_eq!(host_label("!!!"), "showmaster");
         assert_eq!(host_label(&"a".repeat(100)).len(), 63);
         assert!(!host_label(&format!("{}-b", "a".repeat(62))).ends_with('-'));
     }
 
     #[test]
     fn web_urls() {
-        assert_eq!(web_url("show-master", 80), "http://show-master.local");
+        assert_eq!(web_url("showmaster", 80), "http://showmaster.local");
         assert_eq!(
-            web_url("show-master-2", 7400),
-            "http://show-master-2.local:7400"
+            web_url("showmaster-2", 7400),
+            "http://showmaster-2.local:7400"
         );
     }
 
@@ -628,9 +628,9 @@ mod tests {
 
     #[test]
     fn service_records() {
-        let http = http_service("Show Master on foh", "show-master", 7400).unwrap();
+        let http = http_service("Show Master on foh", "showmaster", 7400).unwrap();
         assert_eq!(http.get_fullname(), "Show Master on foh._http._tcp.local.");
-        assert_eq!(http.get_hostname(), "show-master.local.");
+        assert_eq!(http.get_hostname(), "showmaster.local.");
         assert_eq!(http.get_port(), 7400);
         assert_eq!(http.get_property_val_str("path"), Some("/remote"));
         assert!(http.is_addr_auto());
@@ -640,12 +640,12 @@ mod tests {
                 name: "Show Master".into(),
                 port: 5004,
             },
-            "show-master.local",
+            "showmaster.local",
         )
         .unwrap();
         assert_eq!(rtp.get_type(), APPLE_MIDI_SERVICE);
         assert_eq!(rtp.get_fullname(), "Show Master._apple-midi._udp.local.");
-        assert_eq!(rtp.get_hostname(), "show-master.local.");
+        assert_eq!(rtp.get_hostname(), "showmaster.local.");
         assert_eq!(rtp.get_port(), 5004);
     }
 

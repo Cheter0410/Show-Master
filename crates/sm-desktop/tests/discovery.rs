@@ -62,8 +62,8 @@ fn start(advertise: bool) -> Env {
         net_status: Some(Arc::new(move || {
             json!({
                 "mdns": {
-                    "enabled": true, "active": true, "host": "show-master.local",
-                    "url": "http://show-master.local:7400", "rtp_advertised": true, "error": null,
+                    "enabled": true, "active": true, "host": "showmaster.local",
+                    "url": "http://showmaster.local:7400", "rtp_advertised": true, "error": null,
                 },
                 "discovered": [
                     { "name": "Studio Mac", "addr": addr, "host": "studio-mac.local" },
@@ -189,9 +189,9 @@ fn remote_tab_shows_the_local_name() {
         .is_some_and(|u| !u.is_empty());
     if has_ip {
         // Shown big in the Remote tab and in the status bar.
-        assert_eq!(h.query_all_by_label("show-master.local:7400").count(), 2);
+        assert_eq!(h.query_all_by_label("showmaster.local:7400").count(), 2);
     }
-    assert!(h.query_by_label("show-master.local").is_some());
+    assert!(h.query_by_label("showmaster.local").is_some());
     click(&mut h, "Advertise by name (mDNS)");
     env.wait(&mut h, "mdns off", |s| {
         s["show"]["settings"]["remote"]["mdns"] == false

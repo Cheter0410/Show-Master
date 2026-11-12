@@ -281,7 +281,7 @@ export interface RemoteState {
   urls: string[];
   port: number;
   clients: RemoteClient[];
-  /** Bonjour name (`http://show-master.local`), null without mDNS. */
+  /** Bonjour name (`http://showmaster.local`), null without mDNS. */
   mdns?: { enabled: boolean; url: string | null } | null;
 }
 
