@@ -44,6 +44,13 @@ revidieren lassen.
   LTC/MTC weiterlaufen noch Timecode-Trigger erneut Cues feuern; die Position bleibt stehen. Fortsetzen
   im Live-Dashboard per Rechtsklick/langem Druck auf die Timecode-Uhr. *Stop All* lässt einen
   Freerun-Timecode weiterlaufen.
+- **Zusätzliche PANIC-Nachrichten** (*Setup → General → Also send on PANIC*): beliebig viele MIDI- oder
+  OSC-Nachrichten, gesendet direkt nach All Notes Off – z. B. Blackout ans Lichtpult. Show Master weiß
+  sonst nichts von DMX, Video oder anderen Geräten; nur was hier steht, wird mitgestoppt.
+- **OSC-Cues** senden eine OSC-1.0-Nachricht per UDP (keine Bundles, kein TCP), über denselben
+  Sender-Thread wie MIDI und damit genauso auf die Audio-Clock terminiert. Hostnamen werden einmal
+  aufgelöst und gemerkt; Zieladressen sind Sache des Nutzers (das ist bewusster Netzwerkverkehr, für das
+  Offline-Prinzip zählt: ohne OSC-Cue wird nichts gesendet).
 - **Timecode-Sprünge** je Cue-Liste: *fire* feuert übersprungene Cues (nur vorwärts, nur wenn der
   Generator lief), *skip* nichts, *chase* startet, was an der neuen Position laufen würde, am passenden
   Offset und stoppt Timecode-Cues, deren Trigger in der Zukunft liegt.

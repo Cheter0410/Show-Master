@@ -167,6 +167,11 @@ pub fn check(show: &Show, env: &Environment<'_>) -> Vec<Issue> {
                     push(Severity::Error, Some(cue.id), format!("{who}: {e}"));
                 }
             }
+            CueKind::Osc(m) => {
+                if let Err(e) = m.validate() {
+                    push(Severity::Error, Some(cue.id), format!("{who}: {e}"));
+                }
+            }
             CueKind::Group(g) => {
                 if g.children.is_empty() {
                     push(Severity::Warning, Some(cue.id), format!("{who}: group is empty"));
@@ -175,6 +180,28 @@ pub fn check(show: &Show, env: &Environment<'_>) -> Vec<Issue> {
             CueKind::Timecode(_) | CueKind::Memo => {}
         }
     });
+    for (n, m) in show.settings.panic_send.iter().enumerate() {
+        let who = format!("PANIC message {}", n + 1);
+        match m {
+            crate::model::PanicMessage::Midi { port, message } => {
+                if !port_ok(port) {
+                    push(
+                        Severity::Error,
+                        None,
+                        format!("{who}: MIDI port \"{port}\" not found"),
+                    );
+                }
+                if let Err(e) = message.to_bytes() {
+                    push(Severity::Error, None, format!("{who}: {e}"));
+                }
+            }
+            crate::model::PanicMessage::Osc(o) => {
+                if let Err(e) = o.validate() {
+                    push(Severity::Error, None, format!("{who}: {e}"));
+                }
+            }
+        }
+    }
     issues.sort_by_key(|i| match i.severity {
         Severity::Error => 0,
         Severity::Warning => 1,

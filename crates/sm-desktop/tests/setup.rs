@@ -190,3 +190,36 @@ fn every_tab_draws() {
     h.get_by_label("Check for updates now").click();
     settle(&mut h);
 }
+
+#[test]
+fn panic_messages_are_added_edited_and_removed() {
+    let env = Env::demo();
+    let mut h = env.harness();
+    h.get_by_label("Setup").click();
+    settle(&mut h);
+    h.get_by_label("General").click();
+    settle(&mut h);
+    h.get_by_label("Add OSC message").click();
+    env.wait(&mut h, "osc panic message", |s| {
+        s["show"]["settings"]["panic_send"][0]["address"] == "/blackout"
+    });
+    h.get_by_label("Add MIDI message").click();
+    env.wait(&mut h, "midi panic message", |s| {
+        s["show"]["settings"]["panic_send"][1]["kind"] == "midi"
+    });
+    settle(&mut h);
+    // Edit the MIDI message as text.
+    h.get_all_by_value("pc 1 0").next().unwrap().click();
+    settle(&mut h);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.get_all_by_value("pc 1 0").next().unwrap().type_text("cc 1 7 0");
+    h.key_press(Key::Enter);
+    settle(&mut h);
+    env.wait(&mut h, "midi message edited", |s| {
+        s["show"]["settings"]["panic_send"][1]["message"]["msg"] == "control_change"
+    });
+    h.get_all_by_label("Remove").next().unwrap().click();
+    env.wait(&mut h, "first removed", |s| {
+        s["show"]["settings"]["panic_send"].as_array().unwrap().len() == 1
+    });
+}

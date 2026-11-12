@@ -522,3 +522,50 @@ fn cues_can_be_deleted_with_the_toolbar_button_and_backspace() {
     h.get_by_label("Delete this cue").click();
     env.wait(&mut h, "cue 4 gone", |s| find_cue(s, four).is_none());
 }
+
+#[test]
+fn osc_cue_is_added_and_edited_in_the_inspector() {
+    let env = Env::demo();
+    let mut h = harness(&env);
+    let before = cues(&env).len();
+    h.get_by_label("Add osc cue").click();
+    env.wait(&mut h, "osc added", |s| {
+        s["show"]["cue_lists"][0]["cues"].as_array().unwrap().len() == before + 1
+    });
+    settle(&mut h);
+    let id = *h.state().view.selection.first().unwrap();
+    h.get_by_label("OSC tab").click();
+    settle(&mut h);
+    for (label, text) in [
+        ("OSC address, e.g. /cue/1/start", "/cue/5/start"),
+        ("Separated by spaces: 12 = int, 0.5 = float, true/false, text = string, \"in quotes\" for spaces", "5 0.5 \"two words\""),
+        ("UDP port the receiver listens on", "53000"),
+    ] {
+        h.get_by_label(label).click();
+        settle(&mut h);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.get_by_label(label).type_text(text);
+        h.key_press(egui::Key::Enter);
+        settle(&mut h);
+    }
+    env.wait(&mut h, "osc edited", |s| {
+        find_cue(s, id).is_some_and(|c| {
+            let k = &c["kind"];
+            k["address"] == "/cue/5/start"
+                && k["port"] == 53000
+                && k["args"] == serde_json::json!([5, 0.5, "two words"])
+        })
+    });
+    // An address without "/" is refused.
+    let label = "OSC address, e.g. /cue/1/start";
+    h.get_by_label(label).click();
+    settle(&mut h);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.get_by_label(label).type_text("oops");
+    h.key_press(egui::Key::Enter);
+    settle(&mut h);
+    assert_eq!(
+        find_cue(&env.state(), id).unwrap()["kind"]["address"],
+        "/cue/5/start"
+    );
+}

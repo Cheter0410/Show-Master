@@ -7,7 +7,9 @@ use crate::theme;
 use crate::util::parse_time;
 use egui::RichText;
 use serde_json::json;
-use sm_core::model::TimerAlarm;
+use sm_core::midi::MidiMessage;
+use sm_core::model::{PanicMessage, TimerAlarm};
+use sm_core::osc::{format_args, parse_args, OscMessage};
 
 /// `h:mm:ss` for an alarm time.
 pub(super) fn fmt_alarm(secs: f64) -> String {
@@ -111,6 +113,8 @@ pub(super) fn general_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
             }
         });
     });
+
+    panic_messages(ui, st, s);
 
     heading(ui, "This computer");
     hint(ui, "Stored on this machine only, not in the show file.");
@@ -317,4 +321,184 @@ mod tests {
         assert_eq!(fmt_alarm(83.0), "0:01:23");
         assert_eq!(parse_time(&fmt_alarm(5025.0)), Some(5025.0));
     }
+}
+
+/// "Also send on PANIC": extra MIDI / OSC messages after All Notes Off.
+fn panic_messages(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
+    heading(ui, "Also send on PANIC");
+    hint(
+        ui,
+        "Sent right after PANIC (after MIDI All Notes Off): e.g. a blackout to the lighting desk or \
+         stop to a video server.",
+    );
+    let list = s.show.settings.panic_send.clone();
+    let save = |st: &mut SetupState, list: &[PanicMessage]| {
+        st.update_settings(json!({ "panic_send": list }));
+    };
+    let mut remove = None;
+    for (i, m) in list.iter().enumerate() {
+        let mut changed: Option<PanicMessage> = None;
+        form(ui, &format!("panic_msg_{i}"), |ui| match m {
+            PanicMessage::Osc(o) => {
+                row(ui, &format!("{}. OSC to", i + 1), |ui| {
+                    if let Some(v) =
+                        text_field(ui, &mut st.drafts, &format!("pm{i}_host"), &o.host, 140.0)
+                    {
+                        let v = v.trim().to_string();
+                        if v.is_empty() {
+                            st.error("Enter the receiver's IP address.");
+                        } else {
+                            changed = Some(PanicMessage::Osc(OscMessage {
+                                host: v,
+                                ..o.clone()
+                            }));
+                        }
+                    }
+                    ui.label(":");
+                    if let Some(v) = num_field(
+                        ui,
+                        &mut st.drafts,
+                        &format!("pm{i}_port"),
+                        o.port,
+                        1,
+                        65535,
+                        60.0,
+                    ) {
+                        changed = Some(PanicMessage::Osc(OscMessage {
+                            port: v,
+                            ..o.clone()
+                        }));
+                    }
+                    if small_button(ui, "Remove").clicked() {
+                        remove = Some(i);
+                    }
+                });
+                row(ui, "Address", |ui| {
+                    if let Some(v) = text_field(
+                        ui,
+                        &mut st.drafts,
+                        &format!("pm{i}_addr"),
+                        &o.address,
+                        200.0,
+                    ) {
+                        let next = OscMessage {
+                            address: v.trim().to_string(),
+                            ..o.clone()
+                        };
+                        match next.validate() {
+                            Ok(()) => changed = Some(PanicMessage::Osc(next)),
+                            Err(e) => st.error(e),
+                        }
+                    }
+                    if let Some(v) = text_field(
+                        ui,
+                        &mut st.drafts,
+                        &format!("pm{i}_args"),
+                        &format_args(&o.args),
+                        140.0,
+                    ) {
+                        changed = Some(PanicMessage::Osc(OscMessage {
+                            args: parse_args(&v),
+                            ..o.clone()
+                        }));
+                    }
+                    unit(ui, "arguments");
+                });
+            }
+            PanicMessage::Midi { port, message } => {
+                row(ui, &format!("{}. MIDI to", i + 1), |ui| {
+                    let mut picked = None;
+                    egui::ComboBox::from_id_salt(("pm_port", i))
+                        .selected_text(if port.is_empty() {
+                            "— none —"
+                        } else {
+                            port.as_str()
+                        })
+                        .width(180.0)
+                        .show_ui(ui, |ui| {
+                            for p in s.show.midi_ports.iter().map(|p| p.name.clone()).chain(
+                                s.midi
+                                    .ports
+                                    .iter()
+                                    .filter(|d| !s.show.midi_ports.iter().any(|p| &p.name == *d))
+                                    .cloned(),
+                            ) {
+                                if ui.selectable_label(*port == p, &p).clicked() {
+                                    picked = Some(p);
+                                }
+                            }
+                        });
+                    if let Some(p) = picked.filter(|p| p != port) {
+                        changed = Some(PanicMessage::Midi {
+                            port: p,
+                            message: message.clone(),
+                        });
+                    }
+                    if small_button(ui, "Remove").clicked() {
+                        remove = Some(i);
+                    }
+                });
+                row(ui, "Message", |ui| {
+                    if let Some(v) = text_field(
+                        ui,
+                        &mut st.drafts,
+                        &format!("pm{i}_msg"),
+                        &message.to_text(),
+                        220.0,
+                    ) {
+                        match MidiMessage::parse_text(&v) {
+                            Ok(msg) => {
+                                changed = Some(PanicMessage::Midi {
+                                    port: port.clone(),
+                                    message: msg,
+                                })
+                            }
+                            Err(e) => st.error(e),
+                        }
+                    }
+                    unit(
+                        ui,
+                        "e.g. pc 1 99 · cc 1 7 0 · note_on 1 60 127 · msc all_off 127 127",
+                    );
+                });
+            }
+        });
+        if let Some(c) = changed {
+            let mut next = list.clone();
+            next[i] = c;
+            save(st, &next);
+        }
+        ui.add_space(4.0);
+    }
+    if let Some(i) = remove {
+        let mut next = list.clone();
+        next.remove(i);
+        save(st, &next);
+    }
+    ui.horizontal(|ui| {
+        if ui.button("Add OSC message").clicked() {
+            let mut next = list.clone();
+            next.push(PanicMessage::Osc(OscMessage {
+                address: "/blackout".into(),
+                ..OscMessage::default()
+            }));
+            save(st, &next);
+        }
+        if ui.button("Add MIDI message").clicked() {
+            let mut next = list.clone();
+            next.push(PanicMessage::Midi {
+                port: s
+                    .show
+                    .midi_ports
+                    .first()
+                    .map(|p| p.name.clone())
+                    .unwrap_or_default(),
+                message: MidiMessage::ProgramChange {
+                    channel: 1,
+                    program: 0,
+                },
+            });
+            save(st, &next);
+        }
+    });
 }

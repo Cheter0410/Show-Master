@@ -3,8 +3,9 @@ import { useState } from "react";
 import {
   CONTROL_ACTIONS, CUE_COLORS, FADE_CURVES, MIDI_MSG_TYPES, MSC_COMMANDS,
   type ContinueMode, type ControlKind, type Cue, type CuePatch, type FadeKind, type GroupKind, type GroupMode,
-  type MidiKind, type MidiMessage, type MidiMsgType, type RoutePoint, type Show, type TimecodeKind,
+  type MidiKind, type MidiMessage, type MidiMsgType, type OscKind, type RoutePoint, type Show, type TimecodeKind,
 } from "../api";
+import { formatOscArgs, parseOscArgs, validateOscAddress } from "../osc";
 import { run } from "../commands";
 import { Check, DbField, DraftField, NumField, Row, Select, TcField, TextField, TimeField } from "../components/fields";
 import { allCues, cueCount, cueLabel, findCue, TYPE_LABELS } from "../cues";
@@ -358,6 +359,37 @@ function ControlTab({ cue, kind, show }: { cue: Cue; kind: ControlKind; show: Sh
   );
 }
 
+function OscTab({ cue, kind }: { cue: Cue; kind: OscKind }) {
+  return (
+    <div className="insp-col">
+      <Row label="Receiver">
+        <TextField value={kind.host} ariaLabel="OSC receiver" testId="osc-host" width={200} onCommit={(v) => v.trim() && patchKind(cue, { host: v.trim() })} />
+      </Row>
+      <Row label="Port">
+        <NumField value={kind.port} integer min={1} max={65535} ariaLabel="OSC port" testId="osc-port" width={90} onCommit={(v) => patchKind(cue, { port: v })} />
+      </Row>
+      <Row label="Address">
+        <DraftField<string>
+          value={kind.address}
+          format={(v) => v}
+          parse={(t) => {
+            const err = validateOscAddress(t.trim());
+            return err ? { ok: false, error: err } : { ok: true, value: t.trim() };
+          }}
+          onCommit={(v) => patchKind(cue, { address: v })}
+          ariaLabel="OSC address"
+          testId="osc-address"
+          mono
+          width={260}
+        />
+      </Row>
+      <Row label="Arguments" hint='12 = int, 0.5 = float, true/false, text, "in quotes" for spaces'>
+        <TextField value={formatOscArgs(kind.args)} ariaLabel="OSC arguments" testId="osc-args" width={260} onCommit={(v) => patchKind(cue, { args: parseOscArgs(v) })} />
+      </Row>
+    </div>
+  );
+}
+
 function GroupTab({ cue, kind }: { cue: Cue; kind: GroupKind }) {
   const options: { value: GroupMode; label: string }[] = [
     { value: "parallel", label: "Parallel – fire all children together" },
@@ -552,6 +584,7 @@ export function Inspector() {
         {cur === "kind" && k.type === "audio" ? <AudioTab cue={cue} kind={k} /> : null}
         {cur === "kind" && k.type === "fade" ? <FadeTab cue={cue} kind={k} show={show} /> : null}
         {cur === "kind" && k.type === "midi" ? <MidiTab cue={cue} kind={k} show={show} /> : null}
+        {cur === "kind" && k.type === "osc" ? <OscTab cue={cue} kind={k} /> : null}
         {cur === "kind" && k.type === "timecode" ? <TimecodeTab cue={cue} kind={k} rate={rate} start={show.timecode.start} /> : null}
         {cur === "kind" && k.type === "control" ? <ControlTab cue={cue} kind={k} show={show} /> : null}
         {cur === "kind" && k.type === "group" ? <GroupTab cue={cue} kind={k} /> : null}

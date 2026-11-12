@@ -474,6 +474,12 @@ impl Io {
                     self.midi.send_at(due, &port, bytes);
                     Ok(())
                 }
+                Action::Osc { at, target, bytes } => {
+                    let due = self.clock.instant_of(self.local(at));
+                    self.midi
+                        .send_at(due, &format!("{}{target}", crate::midi::OSC_PREFIX), bytes);
+                    Ok(())
+                }
                 Action::MidiPanic => {
                     self.midi.panic();
                     Ok(())

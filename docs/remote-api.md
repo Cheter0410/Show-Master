@@ -156,12 +156,14 @@ mDNS/Bonjour fields (optional comfort, see `decisions.md`):
 
 ```jsonc
 {
-  "schema_version": 2, "name": "My Show", "next_id": 20, "notes": "stage manager memo",
+  "schema_version": 3, "name": "My Show", "next_id": 20, "notes": "stage manager memo",
   "settings": { "go_debounce_ms": 250, "panic_fade_ms": 0, "stop_fade_ms": 500, "panic_double_tap": false,
                 "double_tap_ms": 600, "quit_lock": true, "high_contrast": false,
                 "audio": { "backend": null, "device": null, "sample_rate": 48000, "buffer_frames": 256, "channels": 2 },
                 "remote": { "enabled": true, "port": 7400, "control_pin": "1234", "view_pin": "", "osc_port": 0, "mdns": true },
-                "timer_alarms": [ { "at": 3600.0, "label": "Interval" } ] },
+                "timer_alarms": [ { "at": 3600.0, "label": "Interval" } ],
+                "panic_send": [ { "kind": "osc", "host": "10.0.0.9", "port": 7000, "address": "/blackout", "args": [] },
+                                { "kind": "midi", "port": "Desk", "message": { "msg": "program_change", "channel": 1, "program": 99 } } ] },
   "patch": { "outputs": [ { "name": "L", "channel": 0 } ], "groups": [ { "name": "stereo", "layout": "stereo", "outputs": [0, 1] } ] },
   "midi_ports": [ { "name": "Desk", "device": "IAC Bus 1" } ],
   "rtp_midi": { "enabled": false, "session_name": "Show Master", "port": 5004, "connect_to": ["192.168.1.20:5004"], "journal": false,
@@ -200,6 +202,8 @@ Cue:
   //      msg: note_on | note_off | control_change{channel,controller,value} | program_change{channel,program}
   //           | pitch_bend{channel,value} | sysex{hex} | msc{device_id,command_format,command,q_number,q_list,q_path}
   //      msc command: go stop resume timed_go load set fire all_off restore reset go_off
+  // { "type": "osc", "host": "10.0.0.5", "port": 53000, "address": "/cue/1/start", "args": [1, 0.5, true, "text"] }
+  //      UDP, OSC 1.0 message; args: integer -> i, number with fraction -> f, true/false -> T/F, string -> s
   // { "type": "timecode", "tc": { "action": "start" | "stop" | "pause" | "resume" } | { "action": "start_from", "from": "…" } | { "action": "relocate", "to": "…" } }
   // { "type": "control", "action": "start"|"stop"|"pause"|"resume"|"load_to_time"|"arm"|"disarm"|"go_to"|"reset", "target": 5, "time": 0.0 }
   // { "type": "group", "mode": "parallel"|"playlist"|"random", "children": [ /* Cue */ ] }
@@ -208,7 +212,9 @@ Cue:
 ```
 
 All `midi_input` and `timecode.source` / `timecode.input` fields are optional in a showfile (defaults
-above); shows saved before they existed load unchanged (schema version stays 2).
+above); shows saved before they existed load unchanged. Schema 3 added OSC cues and
+`settings.panic_send` (messages sent right after PANIC's All Notes Off); v2 files load unchanged,
+older program versions refuse v3 files with "made by a newer version".
 
 ## External inputs
 

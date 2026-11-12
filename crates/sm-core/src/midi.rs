@@ -243,9 +243,183 @@ pub fn panic_messages() -> Vec<[u8; 3]> {
     v
 }
 
+/// Short text form of a message, used where a full editor would be too much
+/// (extra PANIC messages):
+///
+/// `note_on CH NOTE VEL`, `note_off CH NOTE VEL`, `cc CH CONTROLLER VALUE`,
+/// `pc CH PROGRAM`, `bend CH VALUE`, `sysex F0 .. F7`,
+/// `msc COMMAND DEVICE FORMAT [Q_NUMBER [Q_LIST [Q_PATH]]]`
+/// (COMMAND e.g. `go`, `all_off`, `stop`; DEVICE 127 = all; FORMAT 1 = lighting, 127 = all).
+impl MidiMessage {
+    pub fn to_text(&self) -> String {
+        match self {
+            MidiMessage::NoteOn {
+                channel,
+                note,
+                velocity,
+            } => format!("note_on {channel} {note} {velocity}"),
+            MidiMessage::NoteOff {
+                channel,
+                note,
+                velocity,
+            } => format!("note_off {channel} {note} {velocity}"),
+            MidiMessage::ControlChange {
+                channel,
+                controller,
+                value,
+            } => format!("cc {channel} {controller} {value}"),
+            MidiMessage::ProgramChange { channel, program } => format!("pc {channel} {program}"),
+            MidiMessage::PitchBend { channel, value } => format!("bend {channel} {value}"),
+            MidiMessage::Sysex { hex } => format!("sysex {hex}"),
+            MidiMessage::Msc {
+                device_id,
+                command_format,
+                command,
+                q_number,
+                q_list,
+                q_path,
+            } => {
+                let cmd = serde_json::to_value(command)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .unwrap_or_default();
+                let mut s = format!("msc {cmd} {device_id} {command_format}");
+                for q in [q_number, q_list, q_path] {
+                    if q.is_empty() {
+                        break;
+                    }
+                    s.push(' ');
+                    s.push_str(q);
+                }
+                s
+            }
+        }
+    }
+
+    pub fn parse_text(text: &str) -> Result<Self, String> {
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let Some((&kind, rest)) = words.split_first() else {
+            return Err("Enter a MIDI message, e.g. \"pc 1 99\"".into());
+        };
+        let num = |i: usize, name: &str, lo: i64, hi: i64| -> Result<i64, String> {
+            let w = rest
+                .get(i)
+                .ok_or_else(|| format!("{kind}: {name} missing"))?;
+            let v: i64 = w
+                .parse()
+                .map_err(|_| format!("{kind}: {name} \"{w}\" is not a number"))?;
+            if v < lo || v > hi {
+                return Err(format!("{kind}: {name} must be {lo}-{hi}"));
+            }
+            Ok(v)
+        };
+        let count = |n: usize| -> Result<(), String> {
+            if rest.len() > n {
+                Err(format!("{kind}: too many values"))
+            } else {
+                Ok(())
+            }
+        };
+        let ch = || num(0, "channel", 1, 16).map(|v| v as u8);
+        let msg = match kind.to_ascii_lowercase().as_str() {
+            "note_on" | "note" | "on" => {
+                count(3)?;
+                MidiMessage::NoteOn {
+                    channel: ch()?,
+                    note: num(1, "note", 0, 127)? as u8,
+                    velocity: num(2, "velocity", 0, 127)? as u8,
+                }
+            }
+            "note_off" | "off" => {
+                count(3)?;
+                MidiMessage::NoteOff {
+                    channel: ch()?,
+                    note: num(1, "note", 0, 127)? as u8,
+                    velocity: if rest.len() > 2 {
+                        num(2, "velocity", 0, 127)? as u8
+                    } else {
+                        0
+                    },
+                }
+            }
+            "cc" => {
+                count(3)?;
+                MidiMessage::ControlChange {
+                    channel: ch()?,
+                    controller: num(1, "controller", 0, 127)? as u8,
+                    value: num(2, "value", 0, 127)? as u8,
+                }
+            }
+            "pc" | "program" => {
+                count(2)?;
+                MidiMessage::ProgramChange {
+                    channel: ch()?,
+                    program: num(1, "program", 0, 127)? as u8,
+                }
+            }
+            "bend" => {
+                count(2)?;
+                MidiMessage::PitchBend {
+                    channel: ch()?,
+                    value: num(1, "value", -8192, 8191)? as i16,
+                }
+            }
+            "sysex" => MidiMessage::Sysex {
+                hex: rest.join(" "),
+            },
+            "msc" => {
+                count(6)?;
+                let c = rest
+                    .first()
+                    .ok_or("msc: command missing (go, stop, all_off, …)")?;
+                let command: MscCommand =
+                    serde_json::from_value(serde_json::Value::String(c.to_ascii_lowercase()))
+                        .map_err(|_| format!("msc: unknown command \"{c}\""))?;
+                let q = |i: usize| rest.get(i).map_or(String::new(), |s| (*s).to_string());
+                MidiMessage::Msc {
+                    device_id: num(1, "device", 0, 127)? as u8,
+                    command_format: num(2, "format", 0, 127)? as u8,
+                    command,
+                    q_number: q(3),
+                    q_list: q(4),
+                    q_path: q(5),
+                }
+            }
+            other => return Err(format!(
+                "unknown MIDI message \"{other}\" (note_on, note_off, cc, pc, bend, sysex, msc)"
+            )),
+        };
+        msg.to_bytes()?;
+        Ok(msg)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_form_round_trips() {
+        for t in [
+            "note_on 1 60 100",
+            "note_off 2 61 0",
+            "cc 16 7 127",
+            "pc 1 99",
+            "bend 3 -8192",
+            "sysex F0 7E 7F 06 01 F7",
+            "msc all_off 127 127",
+            "msc go 1 1 12.5 3",
+        ] {
+            let m = MidiMessage::parse_text(t).unwrap();
+            assert_eq!(m.to_text(), t);
+        }
+        assert!(MidiMessage::parse_text("pc 17 1").is_err());
+        assert!(MidiMessage::parse_text("pc 1").is_err());
+        assert!(MidiMessage::parse_text("cc 1 2 3 4").is_err());
+        assert!(MidiMessage::parse_text("msc jump 1 1").is_err());
+        assert!(MidiMessage::parse_text("").is_err());
+        assert!(MidiMessage::parse_text("sysex zz").is_err());
+    }
 
     #[test]
     fn channel_messages() {

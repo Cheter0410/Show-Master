@@ -9,7 +9,7 @@
 #[path = "edit_audio.rs"]
 mod audio;
 #[path = "edit_fields.rs"]
-mod fields;
+pub(crate) mod fields;
 #[path = "edit_inspector.rs"]
 mod inspector;
 #[path = "edit_table.rs"]
@@ -22,11 +22,12 @@ use serde_json::{json, Value};
 use sm_core::model::{ControlAction, Cue, CueKind, Show, TcAction};
 
 /// Cue types offered in the add row (command name, button text).
-pub const ADD_TYPES: [(&str, &str); 7] = [
+pub const ADD_TYPES: [(&str, &str); 8] = [
     ("audio", "Audio…"),
     ("memo", "Memo"),
     ("fade", "Fade"),
     ("midi", "MIDI"),
+    ("osc", "OSC"),
     ("timecode", "Timecode"),
     ("control", "Control"),
     ("group", "Group"),
@@ -566,6 +567,7 @@ pub fn type_label_of(kind: &str) -> &'static str {
         "audio" => "Audio",
         "fade" => "Fade",
         "midi" => "MIDI",
+        "osc" => "OSC",
         "timecode" => "Timecode",
         "control" => "Control",
         "group" => "Group",
@@ -621,6 +623,7 @@ pub fn target_text(cue: &Cue, show: &Show) -> String {
             };
             format!("{port} · {}", inspector::midi_summary(&m.message))
         }
+        CueKind::Osc(m) => m.summary(),
         CueKind::Timecode(t) => match &t.tc {
             TcAction::Start => "TC start".into(),
             TcAction::StartFrom { from } => format!("TC start from {from}"),

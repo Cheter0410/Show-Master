@@ -15,8 +15,8 @@
 use crate::chase::{ChaseStep, Chaser, TcObservation, TcStatus};
 use crate::db_to_lin;
 use crate::model::{
-    ContinueMode, ControlAction, Crosspoint, Cue, CueId, CueKind, Curve, GroupMode, ListId, Show,
-    TcAction, TcJumpPolicy, TcMode, TcSource,
+    ContinueMode, ControlAction, Crosspoint, Cue, CueId, CueKind, Curve, GroupMode, ListId,
+    PanicMessage, Show, TcAction, TcJumpPolicy, TcMode, TcSource,
 };
 use serde::{Deserialize, Serialize};
 use sm_timecode::{TcTransport, Timecode};
@@ -159,6 +159,12 @@ pub enum Action {
     Midi {
         at: u64,
         port: String,
+        bytes: Vec<u8>,
+    },
+    /// One OSC message (UDP payload) to `target` (`host:port`).
+    Osc {
+        at: u64,
+        target: String,
         bytes: Vec<u8>,
     },
     MidiPanic,
@@ -920,6 +926,20 @@ impl Engine {
                         let port = self.show.resolve_midi_port(&m.port).to_string();
                         self.actions.push(Action::Midi { at: t, port, bytes });
                     }
+                    Err(e) => {
+                        self.cue_error(id, t, e);
+                        return;
+                    }
+                }
+                self.insts[ix].action_done = true;
+            }
+            CueKind::Osc(m) => {
+                match m.encode() {
+                    Ok(bytes) => self.actions.push(Action::Osc {
+                        at: t,
+                        target: m.target(),
+                        bytes,
+                    }),
                     Err(e) => {
                         self.cue_error(id, t, e);
                         return;
@@ -1791,6 +1811,36 @@ impl Engine {
                     self.tc_action(&TcAction::Pause, t);
                 }
                 self.actions.push(Action::MidiPanic);
+                // Extra messages from the show settings, after All Notes Off.
+                for m in self.show.settings.panic_send.clone() {
+                    match m {
+                        PanicMessage::Midi { port, message } => match message.to_bytes() {
+                            Ok(bytes) => {
+                                let port = self.show.resolve_midi_port(&port).to_string();
+                                self.actions.push(Action::Midi { at: t, port, bytes });
+                            }
+                            Err(e) => self.emit(
+                                t,
+                                EventKind::Info {
+                                    message: format!("PANIC message: {e}"),
+                                },
+                            ),
+                        },
+                        PanicMessage::Osc(o) => match o.encode() {
+                            Ok(bytes) => self.actions.push(Action::Osc {
+                                at: t,
+                                target: o.target(),
+                                bytes,
+                            }),
+                            Err(e) => self.emit(
+                                t,
+                                EventKind::Info {
+                                    message: format!("PANIC message: {e}"),
+                                },
+                            ),
+                        },
+                    }
+                }
                 self.emit(t, EventKind::Panic);
                 Ok(())
             }

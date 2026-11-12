@@ -8,6 +8,7 @@ pub mod engine;
 pub mod midi;
 pub mod midi_in;
 pub mod model;
+pub mod osc;
 pub mod preflight;
 pub mod showfile;
 

@@ -91,7 +91,7 @@ kopiert sie nach `media/` und speichert BLAKE3-Hashes.
 
 ## Erweiterbarkeit (Nicht-Ziele, aber nicht verbaut)
 
-- Neue Cue-Typen (OSC, Video, Script, HTTP): Variante in `CueKind` + Zweig in `Engine::start_action`
+- Neue Cue-Typen (Video, Script, HTTP; OSC als Vorbild): Variante in `CueKind` + Zweig in `Engine::start_action`
   + `Action`, die der I/O-Hub ausführt.
 - Timecode-Eingang (umgesetzt, `sm_core::chase`): MTC/LTC werden zu Beobachtungen „Frame n begann bei
   Sample s“; der Chaser liefert daraus den `TcTransport`, Trigger und Sprungregeln funktionieren

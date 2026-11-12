@@ -208,6 +208,14 @@ fn single(
                 CueKind::Audio(_) => audio::audio_tab(ui, state, tick, cue, edit, out),
                 CueKind::Fade(_) => fade_tab(ui, show, cue, edit, out),
                 CueKind::Midi(_) => midi_tab(ui, state, cue, edit, out),
+                CueKind::Osc(m) => {
+                    let id = cue.id;
+                    grid(("insp_osc", id)).show(ui, |ui| {
+                        osc_rows(ui, &mut edit.drafts, ("osc", id), m, out, move |v| {
+                            kind_patch(id, v)
+                        });
+                    });
+                }
                 CueKind::Timecode(_) => timecode_tab(ui, show, cue, edit, out),
                 CueKind::Control(_) => control_tab(ui, show, cue, edit, out),
                 CueKind::Group(_) => group_tab(ui, cue, out),
@@ -1320,6 +1328,105 @@ fn timecode_tab(ui: &mut Ui, show: &Show, cue: &Cue, edit: &mut EditState, out: 
             ui.end_row();
         }
     });
+}
+
+/// Rows (for a 2-column grid) editing one OSC message: receiver, port,
+/// address, arguments. `patch` wraps a partial message into the command.
+pub(crate) fn osc_rows(
+    ui: &mut Ui,
+    drafts: &mut fields::Drafts,
+    salt: impl std::hash::Hash + std::fmt::Debug + Copy,
+    m: &sm_core::osc::OscMessage,
+    out: &mut Vec<Out>,
+    patch: impl Fn(Value) -> Value + Clone + 'static,
+) {
+    label(ui, "Receiver");
+    let p = patch.clone();
+    fields::field(
+        ui,
+        drafts,
+        Id::unique((salt, "host")),
+        &m.host,
+        Opts::new("IP address or host name of the receiver", 200.0).mono(),
+        out,
+        move |t| {
+            let t = t.trim();
+            if t.is_empty() {
+                return Err("Enter the receiver's IP address".into());
+            }
+            Ok(Some(p(json!({ "host": t }))))
+        },
+    );
+    ui.end_row();
+    label(ui, "Port");
+    let p = patch.clone();
+    fields::field(
+        ui,
+        drafts,
+        Id::unique((salt, "port")),
+        &m.port.to_string(),
+        Opts::new("UDP port the receiver listens on", 80.0).mono(),
+        out,
+        move |t| match t.trim().parse::<u16>() {
+            Ok(n) if n > 0 => Ok(Some(p(json!({ "port": n })))),
+            _ => Err("Port: 1-65535".into()),
+        },
+    );
+    ui.end_row();
+    label(ui, "Address");
+    let p = patch.clone();
+    fields::field(
+        ui,
+        drafts,
+        Id::unique((salt, "address")),
+        &m.address,
+        Opts::new("OSC address, e.g. /cue/1/start", 260.0)
+            .mono()
+            .hint("/cue/1/start"),
+        out,
+        move |t| {
+            let t = t.trim();
+            let probe = sm_core::osc::OscMessage {
+                address: t.to_string(),
+                ..Default::default()
+            };
+            probe.validate()?;
+            Ok(Some(p(json!({ "address": t }))))
+        },
+    );
+    ui.end_row();
+    label(ui, "Arguments");
+    let p = patch;
+    fields::field(
+        ui,
+        drafts,
+        Id::unique((salt, "args")),
+        &sm_core::osc::format_args(&m.args),
+        Opts::new(
+            "Separated by spaces: 12 = int, 0.5 = float, true/false, text = string, \"in quotes\" for spaces",
+            260.0,
+        )
+        .mono()
+        .hint("none"),
+        out,
+        move |t| Ok(Some(p(json!({ "args": sm_core::osc::parse_args(t) })))),
+    );
+    ui.end_row();
+    ui.label("");
+    let ok = m.validate();
+    ui.label(
+        RichText::new(match &ok {
+            Ok(()) => format!("Sends {}", m.summary()),
+            Err(e) => e.clone(),
+        })
+        .small()
+        .color(if ok.is_ok() {
+            theme::MUTED
+        } else {
+            theme::WARN
+        }),
+    );
+    ui.end_row();
 }
 
 const CONTROL_ACTIONS: [(ControlAction, &str); 9] = [

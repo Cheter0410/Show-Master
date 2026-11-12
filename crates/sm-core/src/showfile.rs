@@ -53,6 +53,9 @@ pub fn migrate(mut doc: Value) -> Result<Value, ShowfileError> {
     while version < u64::from(SCHEMA_VERSION) {
         match version {
             1 => migrate_v1_to_v2(&mut doc),
+            // v3 added OSC cues and `settings.panic_send`; nothing to convert.
+            // The bump makes older versions refuse such files cleanly.
+            2 => {}
             other => {
                 return Err(ShowfileError::Malformed(format!(
                     "no migration from schema {other}"

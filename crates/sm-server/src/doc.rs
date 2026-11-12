@@ -361,6 +361,7 @@ impl Document {
                     "audio" => CueKind::Audio(AudioCue::default()),
                     "fade" => CueKind::Fade(FadeCue::default()),
                     "midi" => CueKind::Midi(MidiCue::default()),
+                    "osc" => CueKind::Osc(sm_core::osc::OscMessage::default()),
                     "timecode" => CueKind::Timecode(TimecodeCue::default()),
                     "control" => CueKind::Control(ControlCue::default()),
                     "group" => CueKind::Group(GroupCue::default()),

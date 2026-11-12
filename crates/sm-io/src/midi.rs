@@ -121,6 +121,9 @@ type SharedRtp = Arc<Mutex<Option<Arc<Session>>>>;
 type Errors = Arc<Mutex<Vec<String>>>;
 
 pub const RTP_PREFIX: &str = "rtp:";
+/// Destinations `osc:host:port` are OSC messages over UDP; they share the
+/// sender thread so they are timed exactly like MIDI.
+pub const OSC_PREFIX: &str = "osc:";
 
 /// Owns all MIDI outputs and the sender thread.
 pub struct MidiHub {
@@ -142,6 +145,7 @@ fn sender_loop(
 ) {
     let mut heap: BinaryHeap<Scheduled> = BinaryHeap::new();
     let mut open: HashMap<String, Option<Box<dyn MidiSink>>> = HashMap::new();
+    let mut osc = OscSender::default();
     let report = |msg: String| {
         tracing::warn!("{msg}");
         if let Ok(mut e) = errors.lock() {
@@ -150,47 +154,55 @@ fn sender_loop(
             }
         }
     };
-    let deliver =
-        |open: &mut HashMap<String, Option<Box<dyn MidiSink>>>, port: &str, bytes: &[u8]| {
-            if port.starts_with(RTP_PREFIX) {
-                let session = rtp.lock().ok().and_then(|g| g.clone());
-                match session {
-                    Some(s) => {
-                        if let Err(e) = s.send(bytes) {
-                            report(format!("RTP-MIDI send failed: {e}"));
-                        }
-                    }
-                    None => report("RTP-MIDI session is not enabled".into()),
-                }
-                return;
+    let deliver = |open: &mut HashMap<String, Option<Box<dyn MidiSink>>>,
+                   osc: &mut OscSender,
+                   port: &str,
+                   bytes: &[u8]| {
+        if let Some(target) = port.strip_prefix(OSC_PREFIX) {
+            if let Err(e) = osc.send(target, bytes) {
+                report(format!("OSC to {target}: {e}"));
             }
-            if !open.contains_key(port) {
-                let sink = match backend.lock() {
-                    Ok(mut b) => b.open(port),
-                    Err(_) => Err("MIDI backend unavailable".into()),
-                };
-                match sink {
-                    Ok(s) => {
-                        open.insert(port.to_string(), Some(s));
-                    }
-                    Err(e) => {
-                        report(e);
-                        open.insert(port.to_string(), None);
+            return;
+        }
+        if port.starts_with(RTP_PREFIX) {
+            let session = rtp.lock().ok().and_then(|g| g.clone());
+            match session {
+                Some(s) => {
+                    if let Err(e) = s.send(bytes) {
+                        report(format!("RTP-MIDI send failed: {e}"));
                     }
                 }
+                None => report("RTP-MIDI session is not enabled".into()),
             }
-            if let Some(Some(sink)) = open.get_mut(port) {
-                if let Err(e) = sink.send(bytes) {
-                    report(format!("MIDI send to \"{port}\" failed: {e}"));
-                    open.remove(port);
+            return;
+        }
+        if !open.contains_key(port) {
+            let sink = match backend.lock() {
+                Ok(mut b) => b.open(port),
+                Err(_) => Err("MIDI backend unavailable".into()),
+            };
+            match sink {
+                Ok(s) => {
+                    open.insert(port.to_string(), Some(s));
+                }
+                Err(e) => {
+                    report(e);
+                    open.insert(port.to_string(), None);
                 }
             }
-        };
+        }
+        if let Some(Some(sink)) = open.get_mut(port) {
+            if let Err(e) = sink.send(bytes) {
+                report(format!("MIDI send to \"{port}\" failed: {e}"));
+                open.remove(port);
+            }
+        }
+    };
     loop {
         let now = Instant::now();
         while heap.peek().is_some_and(|s| s.due <= now) {
             if let Some(s) = heap.pop() {
-                deliver(&mut open, &s.port, &s.bytes);
+                deliver(&mut open, &mut osc, &s.port, &s.bytes);
             }
         }
         // Timers are coarse (and coalesced on some systems): sleep until shortly
@@ -220,14 +232,66 @@ fn sender_loop(
                     .collect();
                 for m in sm_core::midi::panic_messages() {
                     for p in &ports {
-                        deliver(&mut open, p, &m);
+                        deliver(&mut open, &mut osc, p, &m);
                     }
-                    deliver(&mut open, RTP_PREFIX, &m);
+                    deliver(&mut open, &mut osc, RTP_PREFIX, &m);
                 }
             }
             Ok(Msg::Reset) => open.clear(),
             Ok(Msg::Quit) | Err(RecvTimeoutError::Disconnected) => return,
             Err(RecvTimeoutError::Timeout) => {}
+        }
+    }
+}
+
+/// UDP socket for OSC (opened on first use) and resolved targets.
+#[derive(Default)]
+struct OscSender {
+    v4: Option<std::net::UdpSocket>,
+    v6: Option<std::net::UdpSocket>,
+    resolved: HashMap<String, std::net::SocketAddr>,
+}
+
+impl OscSender {
+    fn send(&mut self, target: &str, bytes: &[u8]) -> Result<(), String> {
+        let addr = match self.resolved.get(target) {
+            Some(a) => *a,
+            None => {
+                // Host names use the system resolver once (LAN names, hosts file).
+                let a = target
+                    .to_socket_addrs()
+                    .map_err(|e| e.to_string())?
+                    .next()
+                    .ok_or("address not found")?;
+                if self.resolved.len() > 256 {
+                    self.resolved.clear();
+                }
+                self.resolved.insert(target.to_string(), a);
+                a
+            }
+        };
+        let slot = if addr.is_ipv4() {
+            &mut self.v4
+        } else {
+            &mut self.v6
+        };
+        if slot.is_none() {
+            let bind = if addr.is_ipv4() {
+                "0.0.0.0:0"
+            } else {
+                "[::]:0"
+            };
+            let s = std::net::UdpSocket::bind(bind).map_err(|e| e.to_string())?;
+            let _ = s.set_broadcast(true);
+            *slot = Some(s);
+        }
+        match slot.as_ref() {
+            Some(s) => s.send_to(bytes, addr).map(|_| ()).map_err(|e| {
+                // Re-resolve next time (the receiver may have a new address).
+                self.resolved.remove(target);
+                e.to_string()
+            }),
+            None => Err("no socket".into()),
         }
     }
 }
@@ -450,6 +514,34 @@ impl MidiBackend for RecordingBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn osc_is_sent_over_udp_on_time() {
+        let rx = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        rx.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let port = rx.local_addr().unwrap().port();
+        let mut hub = MidiHub::new(Box::new(NoMidi));
+        let due = Instant::now() + Duration::from_millis(30);
+        let msg = sm_core::osc::OscMessage {
+            host: "127.0.0.1".into(),
+            port,
+            address: "/cue/7/start".into(),
+            args: vec![sm_core::osc::OscArg::Int(1)],
+        };
+        hub.send_at(due, &format!("{OSC_PREFIX}{}", msg.target()), msg.encode().unwrap());
+        let mut buf = [0u8; 256];
+        let (n, _) = rx.recv_from(&mut buf).unwrap();
+        // Never early (the sender spins up to the due instant).
+        assert!(Instant::now() >= due);
+        assert_eq!(&buf[..n], msg.encode().unwrap().as_slice());
+        // An unreachable name is reported, not fatal.
+        hub.send_at(Instant::now(), "osc:no-such-host.invalid:9", vec![0; 8]);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while hub.take_errors().is_empty() {
+            assert!(Instant::now() < deadline, "no error reported");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     #[test]
     fn scheduled_delivery_in_order_and_on_time() {

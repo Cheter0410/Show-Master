@@ -9,7 +9,7 @@ pub type ListId = u64;
 
 /// Current showfile schema version. Bump together with a migration step in
 /// [`crate::showfile`].
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
@@ -101,6 +101,21 @@ pub struct ShowSettings {
     pub audio: AudioSettings,
     pub remote: RemoteSettings,
     pub timer_alarms: Vec<TimerAlarm>,
+    /// Sent right after PANIC (after MIDI All Notes Off): e.g. a blackout
+    /// to the lighting desk or "stop all" to a video server.
+    pub panic_send: Vec<PanicMessage>,
+}
+
+/// An extra message sent on PANIC.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PanicMessage {
+    Midi {
+        /// Port alias or device name.
+        port: String,
+        message: crate::midi::MidiMessage,
+    },
+    Osc(crate::osc::OscMessage),
 }
 
 impl Default for ShowSettings {
@@ -116,6 +131,7 @@ impl Default for ShowSettings {
             audio: AudioSettings::default(),
             remote: RemoteSettings::default(),
             timer_alarms: Vec::new(),
+            panic_send: Vec::new(),
         }
     }
 }
@@ -624,6 +640,7 @@ impl Cue {
             CueKind::Audio(_) => "audio",
             CueKind::Fade(_) => "fade",
             CueKind::Midi(_) => "midi",
+            CueKind::Osc(_) => "osc",
             CueKind::Timecode(_) => "timecode",
             CueKind::Control(_) => "control",
             CueKind::Group(_) => "group",
@@ -638,6 +655,8 @@ pub enum CueKind {
     Audio(AudioCue),
     Fade(FadeCue),
     Midi(MidiCue),
+    /// Send one OSC message over UDP.
+    Osc(crate::osc::OscMessage),
     Timecode(TimecodeCue),
     Control(ControlCue),
     Group(GroupCue),

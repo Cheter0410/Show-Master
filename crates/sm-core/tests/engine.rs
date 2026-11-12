@@ -750,3 +750,77 @@ fn stop_all_leaves_a_free_running_timecode_alone() {
     e.command(Command::StopAll).unwrap();
     assert!(e.snapshot().tc.running);
 }
+
+#[test]
+fn osc_cue_sends_its_message_and_bad_ones_report() {
+    use sm_core::osc::{OscArg, OscMessage};
+    let mut b = B::new();
+    let ok = b.cue(CueKind::Osc(OscMessage {
+        host: "10.0.0.5".into(),
+        port: 53000,
+        address: "/cue/1/start".into(),
+        args: vec![OscArg::Int(1)],
+    }));
+    let bad = b.cue(CueKind::Osc(OscMessage {
+        address: "no-slash".into(),
+        ..OscMessage::default()
+    }));
+    let mut e = b.engine();
+    e.drain_actions();
+    e.command(Command::Go { list: None }).unwrap();
+    let a = e.drain_actions();
+    let sent: Vec<_> = a
+        .iter()
+        .filter_map(|a| match a {
+            Action::Osc { target, bytes, .. } => Some((target.clone(), bytes.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, "10.0.0.5:53000");
+    assert!(sent[0].1.starts_with(b"/cue/1/start\0"));
+    let _ = ok;
+    e.command(Command::Go { list: None }).unwrap();
+    assert!(e
+        .drain_actions()
+        .iter()
+        .all(|a| !matches!(a, Action::Osc { .. })));
+    let errors: Vec<_> = e
+        .drain_events()
+        .into_iter()
+        .filter(|ev| matches!(&ev.kind, EventKind::CueError { cue, .. } if *cue == bad))
+        .collect();
+    assert_eq!(errors.len(), 1);
+}
+
+#[test]
+fn panic_sends_the_extra_messages_after_all_notes_off() {
+    use sm_core::osc::OscMessage;
+    let mut b = B::new();
+    b.cue(audio(10.0));
+    b.0.settings.panic_send = vec![
+        PanicMessage::Osc(OscMessage {
+            host: "10.0.0.9".into(),
+            port: 7000,
+            address: "/blackout".into(),
+            args: vec![],
+        }),
+        PanicMessage::Midi {
+            port: "desk".into(),
+            message: MidiMessage::ProgramChange {
+                channel: 1,
+                program: 99,
+            },
+        },
+    ];
+    let mut e = b.engine();
+    e.drain_actions();
+    e.command(Command::Panic).unwrap();
+    let a = e.drain_actions();
+    let pos = |f: &dyn Fn(&Action) -> bool| a.iter().position(f);
+    let notes_off = pos(&|a| matches!(a, Action::MidiPanic)).unwrap();
+    let osc =
+        pos(&|a| matches!(a, Action::Osc { target, .. } if target == "10.0.0.9:7000")).unwrap();
+    let midi = pos(&|a| matches!(a, Action::Midi { port, bytes, .. } if port == "desk" && bytes == &vec![0xC0, 99])).unwrap();
+    assert!(notes_off < osc && osc < midi);
+}

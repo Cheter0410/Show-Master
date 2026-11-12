@@ -1,5 +1,6 @@
 // Pure helpers over the cue tree.
 import type { ActiveCue, Cue, CueList, CueType, Show } from "./api";
+import { formatOscArgs } from "./osc";
 
 export interface CueRow {
   cue: Cue;
@@ -66,6 +67,7 @@ export const TYPE_LABELS: Record<CueType, string> = {
   audio: "Audio",
   fade: "Fade",
   midi: "MIDI",
+  osc: "OSC",
   timecode: "Timecode",
   control: "Control",
   group: "Group",
@@ -87,6 +89,10 @@ export function cueTarget(cue: Cue, show: Show): string {
       const what =
         m.msg === "sysex" ? "SysEx" : m.msg === "msc" ? `MSC ${m.command}${m.q_number ? ` ${m.q_number}` : ""}` : m.msg.replace("_", " ");
       return `${k.port || "(no port)"} · ${what}`;
+    }
+    case "osc": {
+      const args = formatOscArgs(k.args);
+      return `${k.address}${args ? ` ${args}` : ""} → ${k.host}:${k.port}`;
     }
     case "timecode": {
       const tc = k.tc;
