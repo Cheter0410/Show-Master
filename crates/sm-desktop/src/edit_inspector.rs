@@ -609,6 +609,144 @@ fn fade_tab(ui: &mut Ui, show: &Show, cue: &Cue, edit: &mut EditState, out: &mut
         }
         ui.end_row();
     });
+    fade_crosspoints(ui, show, cue, edit, out);
+}
+
+/// Routing levels the fade moves to (source channel -> output, dB).
+fn fade_crosspoints(ui: &mut Ui, show: &Show, cue: &Cue, edit: &mut EditState, out: &mut Vec<Out>) {
+    let CueKind::Fade(f) = &cue.kind else { return };
+    let id = cue.id;
+    let target = f.target.and_then(|t| show.cue(t));
+    let src_channels = match target.map(|t| &t.kind) {
+        Some(CueKind::Audio(a)) => a.channels.max(1),
+        _ => 2,
+    };
+    let outputs: Vec<String> = show
+        .patch
+        .outputs
+        .iter()
+        .enumerate()
+        .map(|(i, o)| {
+            if o.name.is_empty() {
+                format!("Out {}", i + 1)
+            } else {
+                o.name.clone()
+            }
+        })
+        .collect();
+    let points = f.crosspoints.clone();
+    let send = |out: &mut Vec<Out>, pts: &[sm_core::model::Crosspoint]| {
+        out.push(Out::Cmd(kind_patch(id, json!({ "crosspoints": pts }))));
+    };
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Routing levels").strong());
+        hint(
+            ui,
+            "optional: fade single source-to-output levels of the target",
+        );
+    });
+    if points.is_empty() {
+        hint(
+            ui,
+            "No routing levels - the fade only changes the cue level.",
+        );
+    }
+    let mut next = points.clone();
+    let mut changed = false;
+    egui::Grid::new(Id::unique(("fade_xp", id)))
+        .num_columns(5)
+        .spacing(vec2(10.0, 4.0))
+        .show(ui, |ui| {
+            for (i, p) in points.iter().enumerate() {
+                let mut src = p.src;
+                egui::ComboBox::from_id_salt(("fade_xp_src", id, i))
+                    .width(90.0)
+                    .selected_text(format!("Source {}", src + 1))
+                    .show_ui(ui, |ui| {
+                        for c in 0..src_channels.max(p.src + 1) {
+                            ui.selectable_value(&mut src, c, format!("Source {}", c + 1));
+                        }
+                    });
+                ui.label("to");
+                let mut o = p.out;
+                let name = outputs
+                    .get(usize::from(o))
+                    .cloned()
+                    .unwrap_or_else(|| format!("Out {} (missing)", o + 1));
+                egui::ComboBox::from_id_salt(("fade_xp_out", id, i))
+                    .width(120.0)
+                    .selected_text(name)
+                    .show_ui(ui, |ui| {
+                        for (k, n) in outputs.iter().enumerate() {
+                            ui.selectable_value(&mut o, k as u16, n);
+                        }
+                    });
+                if src != p.src || o != p.out {
+                    if let Some(x) = next.get_mut(i) {
+                        x.src = src;
+                        x.out = o;
+                    }
+                    changed = true;
+                }
+                ui.horizontal(|ui| {
+                    let all = next.clone();
+                    fields::field(
+                        ui,
+                        &mut edit.drafts,
+                        Id::unique(("fade_xp_db", id, i)),
+                        &super::fmt_db_field(p.db),
+                        Opts::new("Routing level", 70.0).mono(),
+                        out,
+                        move |t| {
+                            let db = parse_db(t)?;
+                            let mut pts = all.clone();
+                            if let Some(x) = pts.get_mut(i) {
+                                x.db = db;
+                            }
+                            Ok(Some(kind_patch(id, json!({ "crosspoints": pts }))))
+                        },
+                    );
+                    ui.label("dB");
+                });
+                if ui.small_button("Remove").clicked() {
+                    next.remove(i.min(next.len().saturating_sub(1)));
+                    changed = true;
+                }
+                ui.end_row();
+            }
+        });
+    ui.horizontal(|ui| {
+        if ui.button("Add level").clicked() {
+            next.push(sm_core::model::Crosspoint {
+                src: 0,
+                out: 0,
+                db: 0.0,
+            });
+            changed = true;
+        }
+        let target_routing = match target.map(|t| &t.kind) {
+            Some(CueKind::Audio(a)) => Some(a.effective_routing(show.patch.outputs.len())),
+            _ => None,
+        };
+        if let Some(r) = target_routing {
+            if ui
+                .button("Start from target's routing")
+                .on_hover_text("Copy the target cue's current routing, then change the levels")
+                .clicked()
+            {
+                next = r;
+                changed = true;
+            }
+        }
+        if !points.is_empty() && ui.button("Clear").clicked() {
+            next.clear();
+            changed = true;
+        }
+    });
+    if changed {
+        send(out, &next);
+    }
 }
 
 const MIDI_TYPES: [(&str, &str); 7] = [

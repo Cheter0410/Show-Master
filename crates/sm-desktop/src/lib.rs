@@ -10,6 +10,7 @@ pub mod client;
 pub mod edit;
 pub mod live;
 pub mod model;
+pub mod recent;
 pub mod setup;
 pub mod theme;
 pub mod util;
@@ -56,7 +57,9 @@ pub fn run(
         options,
         Box::new(move |cc| {
             let client = client::Client::new(handle, rt);
-            Ok(Box::new(Window(App::new(&cc.egui_ctx, client, open))))
+            let mut app = App::new(&cc.egui_ctx, client, open);
+            app.recent = recent::Recent::load();
+            Ok(Box::new(Window(app)))
         }),
     )
 }

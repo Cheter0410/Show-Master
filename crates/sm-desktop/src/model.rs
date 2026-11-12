@@ -18,6 +18,8 @@ pub enum Mode {
 #[serde(default)]
 pub struct UiState {
     pub version: String,
+    /// The log file the running program writes.
+    pub log_file: Option<String>,
     pub mode: Mode,
     pub show: Show,
     pub show_path: Option<String>,

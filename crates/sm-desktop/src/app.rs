@@ -91,6 +91,10 @@ pub struct App {
     was_typing: bool,
     /// Path of a showfile to open at start (command line / file association).
     open_at_start: Option<PathBuf>,
+    pub recent: crate::recent::Recent,
+    last_show_path: Option<String>,
+    /// After stepping the playhead in Edit mode, select the new playhead cue.
+    select_playhead: bool,
 }
 
 impl App {
@@ -114,6 +118,10 @@ impl App {
             focus_goto: false,
             was_typing: false,
             open_at_start,
+            // Not persisted unless the real app loads it (tests must not touch the user's list).
+            recent: crate::recent::Recent::load_from(None),
+            last_show_path: None,
+            select_playhead: false,
         };
         // The theme is applied on the first frame (`logic`), on the context that draws.
         let _ = &mut app;
@@ -447,6 +455,47 @@ impl App {
         );
     }
 
+    /// Save the diagnostics bundle (log, system, state) via the system dialog.
+    pub fn export_diagnostics(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Export diagnostics")
+            .add_filter("Text", &["txt"])
+            .set_file_name("showmaster-diagnostics.txt")
+            .save_file()
+        else {
+            return;
+        };
+        match std::fs::write(&path, self.client.handle.diagnostics()) {
+            Ok(()) => self.toast(format!("Diagnostics saved to {}", path.display())),
+            Err(e) => self.toast_error(format!("Could not save diagnostics: {e}")),
+        }
+    }
+
+    /// Show the folder with the log file in the system file manager.
+    pub fn open_log_folder(&mut self) {
+        let Some(dir) = self
+            .client
+            .state
+            .log_file
+            .as_deref()
+            .and_then(|f| Path::new(f).parent())
+            .map(Path::to_path_buf)
+        else {
+            self.toast_error("The log file location is not known.");
+            return;
+        };
+        let opener = if cfg!(target_os = "windows") {
+            "explorer"
+        } else if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
+        if let Err(e) = std::process::Command::new(opener).arg(&dir).spawn() {
+            self.toast_error(format!("Could not open {}: {e}", dir.display()));
+        }
+    }
+
     fn handle_dropped_files(&mut self, ctx: &egui::Context) {
         let files: Vec<PathBuf> = ctx.input(|i| {
             i.raw
@@ -614,8 +663,11 @@ impl App {
             }
             "stop_all" => self.stop_all(),
             "toggle_pause" => self.toggle_pause(),
-            "next" => self.step_playhead(true),
-            "previous" => self.step_playhead(false),
+            "next" | "previous" => {
+                self.step_playhead(action == "next");
+                // In Edit mode the selection (and inspector) follows the playhead.
+                self.select_playhead = editing;
+            }
             "reset" => self.reset(),
             "preview" => {
                 if let Some(cue) = self.view.selection.last().copied() {
@@ -668,8 +720,26 @@ impl App {
 
     /// Everything that is not drawing: state, replies, signals, input.
     pub fn logic(&mut self, ctx: &egui::Context) {
-        self.client.refresh();
+        let changed = self.client.refresh();
         self.handle_replies();
+        if changed {
+            let path = self.client.state.show_path.clone();
+            if path != self.last_show_path {
+                if let Some(p) = &path {
+                    self.recent.add(Path::new(p));
+                }
+                self.last_show_path = path;
+            }
+            if self.select_playhead {
+                self.select_playhead = false;
+                if let Some(cue) = self
+                    .current_list()
+                    .and_then(|l| self.client.state.playhead(l))
+                {
+                    self.view.selection = vec![cue];
+                }
+            }
+        }
         self.apply_theme(ctx);
         let handle = self.client.handle.clone();
         if handle.raise.swap(false, Ordering::SeqCst) {
@@ -694,8 +764,17 @@ impl App {
         crate::setup::capture_keys(self, ctx);
         self.hotkeys(ctx);
         self.toasts.retain(|t| t.until > Instant::now());
-        // Clocks and meters move continuously.
-        ctx.request_repaint_after(Duration::from_millis(40));
+        // Clocks, meters and running cues move continuously; when nothing
+        // happens a few frames per second are enough (saves CPU and battery).
+        let t = &self.client.tick;
+        let busy = !t.active.is_empty()
+            || t.meters.peak.iter().any(|p| *p > 0.000_1)
+            || matches!(
+                self.client.state.update.state.as_str(),
+                "downloading" | "installing"
+            )
+            || self.panic_armed();
+        ctx.request_repaint_after(Duration::from_millis(if busy { 40 } else { 250 }));
     }
 
     fn handle_close_request(&mut self, ctx: &egui::Context) {
@@ -791,6 +870,29 @@ impl App {
                     if ui.button("Open…").clicked() {
                         self.open_show_dialog();
                     }
+                    let recent: Vec<PathBuf> = self.recent.existing().cloned().collect();
+                    ui.add_enabled_ui(!recent.is_empty(), |ui| {
+                        ui.menu_button("Open recent", |ui| {
+                            for p in &recent {
+                                let name = p
+                                    .file_stem()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("show")
+                                    .to_string();
+                                if ui
+                                    .button(name)
+                                    .on_hover_text(p.display().to_string())
+                                    .clicked()
+                                {
+                                    self.open_show(p.clone());
+                                }
+                            }
+                            ui.separator();
+                            if ui.button("Clear list").clicked() {
+                                self.recent.clear();
+                            }
+                        });
+                    });
                     ui.separator();
                     if ui.button("Save").clicked() {
                         self.save(None);
@@ -799,6 +901,13 @@ impl App {
                         self.save_as(None);
                     }
                     ui.separator();
+                    if ui
+                        .button("Export diagnostics…")
+                        .on_hover_text("Log, system and show state in one text file, for support")
+                        .clicked()
+                    {
+                        self.export_diagnostics();
+                    }
                     if ui
                         .button("Collect media into show folder")
                         .on_hover_text("Copy all audio files next to the showfile")

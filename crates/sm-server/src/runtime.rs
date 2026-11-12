@@ -238,6 +238,53 @@ impl Handle {
         self.quit.notify_one();
     }
 
+    /// A plain-text bundle for support: system, recent log (from the log file
+    /// when available), tick and state (remote PINs removed).
+    pub fn diagnostics(&self) -> String {
+        let (state, tick, log) = match self.published.read() {
+            Ok(p) => (
+                redact_state(p.state.clone()),
+                p.tick.clone(),
+                p.log_tail.clone(),
+            ),
+            Err(_) => (Value::Null, Value::Null, Vec::new()),
+        };
+        let mut out = format!(
+            "Show Master {VERSION} diagnostics\nos: {} {}\n",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        );
+        let log_file = state["log_file"].as_str().map(PathBuf::from);
+        let file_tail = log_file
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok())
+            .map(|bytes| {
+                // The last 512 KB are plenty and keep the bundle mailable.
+                let start = bytes.len().saturating_sub(512 * 1024);
+                String::from_utf8_lossy(bytes.get(start..).unwrap_or_default()).into_owned()
+            });
+        match (log_file, file_tail) {
+            (Some(path), Some(tail)) => {
+                out.push_str(&format!(
+                    "log file: {}\n\n== log file (end) ==\n{tail}",
+                    path.display()
+                ));
+            }
+            _ => {
+                out.push_str("\n== log ==\n");
+                for e in log {
+                    out.push_str(&format!("{} [{}] {}\n", e.time_ms, e.level, e.message));
+                }
+            }
+        }
+        out.push_str("\n== tick ==\n");
+        out.push_str(&serde_json::to_string_pretty(&tick).unwrap_or_default());
+        out.push_str("\n\n== state ==\n");
+        out.push_str(&serde_json::to_string_pretty(&state).unwrap_or_default());
+        out.push('\n');
+        out
+    }
+
     /// Stop the runtime thread (it autosaves on the way out). Join it afterwards.
     pub fn shutdown(&self) {
         self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -269,6 +316,8 @@ pub struct Config {
     pub show: Option<Show>,
     /// Look for a newer version at start-up (the only internet access there is).
     pub update_check: bool,
+    /// The log file this process writes (shown in the UI, read for diagnostics).
+    pub log_file: Option<PathBuf>,
 }
 
 struct Probe;
@@ -377,6 +426,7 @@ struct Runtime {
     new_log: Vec<LogEntry>,
     handle: Handle,
     port_override: Option<u16>,
+    log_file: Option<PathBuf>,
     /// The port the server actually listens on (set by the binary after bind).
     urls: (Option<Instant>, Vec<String>),
     state_dirty: bool,
@@ -469,6 +519,7 @@ impl Runtime {
             new_log: Vec::new(),
             handle,
             port_override: config.port,
+            log_file: config.log_file.clone(),
             urls: (None, Vec::new()),
             state_dirty: true,
             last_state: Value::Null,
@@ -1048,6 +1099,7 @@ impl Runtime {
         let rtp = &self.doc.show.rtp_midi;
         json!({
             "version": VERSION,
+            "log_file": self.log_file,
             "mode": self.mode,
             "show": self.doc.show,
             "show_path": self.doc.path,

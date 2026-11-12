@@ -447,3 +447,54 @@ fn lists_can_be_added_renamed_and_switched() {
         s["show"]["cue_lists"][1]["name"] == "Act 2"
     });
 }
+
+#[test]
+fn fade_routing_levels_can_be_added_and_copied_from_the_target() {
+    let env = Env::demo();
+    let mut h = harness(&env);
+    let id = id_of(&env, "2");
+    h.get_by_label("Cue 2 Fade intro").click();
+    settle(&mut h);
+    h.get_by_label("Fade tab").click();
+    settle(&mut h);
+    h.get_by_label("Add level").click();
+    env.wait(&mut h, "one crosspoint", |s| {
+        find_cue(s, id).is_some_and(|c| {
+            c["kind"]["crosspoints"]
+                .as_array()
+                .is_some_and(|a| a.len() == 1)
+        })
+    });
+    h.get_by_label("Start from target's routing").click();
+    env.wait(&mut h, "target routing copied", |s| {
+        // Stereo audio target -> two outputs in the default stereo patch.
+        find_cue(s, id).is_some_and(|c| {
+            c["kind"]["crosspoints"]
+                .as_array()
+                .is_some_and(|a| a.len() == 2)
+        })
+    });
+    h.get_by_label("Clear").click();
+    env.wait(&mut h, "cleared", |s| {
+        find_cue(s, id).is_some_and(|c| {
+            c["kind"]["crosspoints"]
+                .as_array()
+                .is_some_and(|a| a.is_empty())
+        })
+    });
+}
+
+#[test]
+fn stepping_the_playhead_in_edit_mode_selects_that_cue() {
+    let env = Env::demo();
+    let mut h = harness(&env);
+    let second = id_of(&env, "2");
+    h.key_press(egui::Key::ArrowDown);
+    env.wait(&mut h, "playhead on cue 2", |s| {
+        s["playheads"]
+            .as_object()
+            .is_some_and(|p| p.values().any(|v| v.as_u64() == Some(second)))
+    });
+    settle(&mut h);
+    assert_eq!(h.state().view.selection, vec![second]);
+}

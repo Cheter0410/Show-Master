@@ -468,26 +468,7 @@ async fn api_diagnostics(
     if role_for(&app, &addr, token_of(&q, &headers)) != Some(Role::Admin) {
         return deny();
     }
-    let (state, tick, log) = match app.handle.published.read() {
-        Ok(p) => (
-            redact_state(p.state.clone()),
-            p.tick.clone(),
-            p.log_tail.clone(),
-        ),
-        Err(_) => (Value::Null, Value::Null, Vec::new()),
-    };
-    let mut out = format!(
-        "Show Master {VERSION} diagnostics\nos: {} {}\n\n== log ==\n",
-        std::env::consts::OS,
-        std::env::consts::ARCH
-    );
-    for e in log {
-        out.push_str(&format!("{} [{}] {}\n", e.time_ms, e.level, e.message));
-    }
-    out.push_str("\n== tick ==\n");
-    out.push_str(&serde_json::to_string_pretty(&tick).unwrap_or_default());
-    out.push_str("\n\n== state ==\n");
-    out.push_str(&serde_json::to_string_pretty(&state).unwrap_or_default());
+    let out = app.handle.diagnostics();
     (
         [
             (header::CONTENT_TYPE, "text/plain; charset=utf-8"),

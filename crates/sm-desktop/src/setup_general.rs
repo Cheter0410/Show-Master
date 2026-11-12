@@ -269,16 +269,18 @@ pub(super) fn about_tab(ui: &mut egui::Ui, s: &UiState, out: &mut SetupState) {
     }
     heading(ui, "Logs");
     hint(ui, "The log file helps with support requests:");
-    ui.monospace(log_hint());
+    ui.monospace(s.log_file.clone().unwrap_or_else(log_hint));
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        hint(ui, "or the folder given with");
-        ui.label(
-            RichText::new("--log-dir")
-                .small()
-                .monospace()
-                .color(theme::MUTED),
-        );
+        if s.log_file.is_some() && ui.button("Show log folder").clicked() {
+            out.outbox_push(super::Out::OpenLogFolder);
+        }
+        if ui
+            .button("Export diagnostics…")
+            .on_hover_text("Log, system and show state in one text file")
+            .clicked()
+        {
+            out.outbox_push(super::Out::ExportDiagnostics);
+        }
     });
 }
 

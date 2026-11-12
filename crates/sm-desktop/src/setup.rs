@@ -50,12 +50,16 @@ const TABS: [(Tab, &str); 8] = [
 ];
 
 /// Something the window wants the app to do after drawing.
-enum Out {
+pub(super) enum Out {
     /// Send a command (errors become a toast).
     Cmd(Value),
     /// Send a command and show `ok` as a toast when it succeeds.
     CmdToast(Value, String),
     Error(String),
+    /// Save the diagnostics bundle (system dialog).
+    ExportDiagnostics,
+    /// Show the log folder in the file manager.
+    OpenLogFolder,
 }
 
 #[derive(Default)]
@@ -80,6 +84,10 @@ pub struct SetupState {
 }
 
 impl SetupState {
+    pub(super) fn outbox_push(&mut self, out: Out) {
+        self.outbox.push(out);
+    }
+
     /// True while the hotkey editor waits for a key press (global hotkeys pause).
     pub fn capturing_hotkey(&self) -> bool {
         self.open && self.capture.is_some()
@@ -215,6 +223,8 @@ fn flush(app: &mut App) {
                 Err(e) => app.toast_error(App::error_text(&e)),
             }),
             Out::Error(t) => app.toast_error(t),
+            Out::ExportDiagnostics => app.export_diagnostics(),
+            Out::OpenLogFolder => app.open_log_folder(),
         }
     }
 }

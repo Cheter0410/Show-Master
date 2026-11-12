@@ -318,6 +318,7 @@ fn main() -> std::process::ExitCode {
         show_path: args.show.clone(),
         port: args.port,
         update_check: args.update_check,
+        log_file: Some(log_path.clone()),
         ..Config::default()
     });
     let state = handle.state();
