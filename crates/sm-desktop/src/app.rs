@@ -61,7 +61,12 @@ enum Modal {
     Recovery,
     Update,
     CloseWhileRunning,
-    Message { title: String, text: String },
+    /// Shown the first time the window is closed: the show keeps running.
+    RunsInBackground,
+    Message {
+        title: String,
+        text: String,
+    },
 }
 
 struct Toast {
@@ -789,10 +794,16 @@ impl App {
         }
         self.apply_theme(ctx);
         let handle = self.client.handle.clone();
-        if handle.raise.swap(false, Ordering::SeqCst) {
-            ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
-            ctx.send_viewport_cmd(ViewportCommand::Visible(true));
-            ctx.send_viewport_cmd(ViewportCommand::Focus);
+        // Second start of the program, tray icon, Dock icon: show the window.
+        if handle.raise.swap(false, Ordering::SeqCst) | crate::background::take_show() {
+            self.show_window(ctx);
+        }
+        if crate::background::take_hide() {
+            self.hide_window(ctx);
+        }
+        if crate::background::take_quit() {
+            self.show_window(ctx);
+            self.request_quit(ctx);
         }
         if handle.quit_requested.load(Ordering::SeqCst) && !self.allow_close {
             // Quit button, remote quit or an installed update: close without asking.
@@ -846,21 +857,64 @@ impl App {
         ctx.request_repaint_after(Duration::from_millis(if busy { 40 } else { 250 }));
     }
 
+    /// The window's close button only hides the window: the show, the tablet
+    /// server and everything else keep running (see [`crate::background`]).
     fn handle_close_request(&mut self, ctx: &egui::Context) {
         if !ctx.input(|i| i.viewport().close_requested()) || self.allow_close {
+            return;
+        }
+        ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+        if self.prefs.background_hint_seen {
+            self.hide_window(ctx);
+        } else {
+            self.modal = Some(Modal::RunsInBackground);
+        }
+    }
+
+    /// Bring the (hidden or minimized) window to the front.
+    pub fn show_window(&mut self, ctx: &egui::Context) {
+        ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(ViewportCommand::Focus);
+    }
+
+    /// Hide the window and keep running; minimize where a hidden window
+    /// could not be found again (no tray icon, Wayland).
+    pub fn hide_window(&mut self, ctx: &egui::Context) {
+        if crate::background::can_hide() {
+            ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+        } else {
+            ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
+        }
+    }
+
+    /// The short address for tablets (`showmaster.local`), if known.
+    pub fn tablet_address(&self) -> Option<String> {
+        let r = &self.client.state.remote;
+        r.mdns
+            .as_ref()
+            .filter(|m| m.enabled)
+            .and_then(|m| m.url.as_deref())
+            .map(|u| crate::setup::remote::short_address(u).to_string())
+            .or_else(|| r.urls.first().map(|u| format!("{u}/view")))
+    }
+
+    /// Really quit Show Master (Quit button, Cmd+Q, tray menu): asks first
+    /// when cues are running, in Live mode with quit protection, or with
+    /// unsaved changes.
+    pub fn request_quit(&mut self, ctx: &egui::Context) {
+        if self.allow_close {
             return;
         }
         let s = &self.client.state;
         let running = !self.client.tick.active.is_empty();
         let locked = s.mode == Mode::Live && s.show.settings.quit_lock;
         if running || locked {
-            ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             self.modal = Some(Modal::CloseWhileRunning);
         } else if s.dirty {
-            ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             self.modal = Some(Modal::Unsaved(Pending::Close));
         } else {
-            self.allow_close = true;
+            self.close_now(ctx);
         }
     }
 
@@ -997,10 +1051,13 @@ impl App {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .button("Quit")
-                    .on_hover_text("Quit Show Master")
+                    .on_hover_text(
+                        "Quit Show Master: stops the show and the tablet remote. \
+                         Closing the window only hides it.",
+                    )
                     .clicked()
                 {
-                    ui.ctx().send_viewport_cmd(ViewportCommand::Close);
+                    self.request_quit(ui.ctx());
                 }
                 if !live && ui.button("Setup").clicked() {
                     self.setup.open = true;
@@ -1522,6 +1579,35 @@ impl App {
                             } else {
                                 self.close_now(ui.ctx());
                             }
+                        }
+                    });
+                }
+                Modal::RunsInBackground => {
+                    ui.heading("Show Master keeps running");
+                    ui.label("Closing the window does not stop the show: audio, timecode, MIDI and the tablet remote keep running in the background.");
+                    ui.add_space(4.0);
+                    ui.label(if crate::background::can_hide() {
+                        if cfg!(target_os = "macos") {
+                            "Open the window again from the Dock, by starting Show Master again or from the menu bar icon. Quit with Quit (Cmd+Q) or from the menu bar icon."
+                        } else {
+                            "Open the window again by starting Show Master again or by clicking the tray icon. Quit with Quit or from the tray icon."
+                        }
+                    } else {
+                        "There is no tray icon on this desktop, so the window is minimized instead. Quit with the Quit button."
+                    });
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            keep = false;
+                        }
+                        if ui.button("Quit Show Master").clicked() {
+                            keep = false;
+                            self.request_quit(ui.ctx());
+                        }
+                        if ui.add(egui::Button::new(RichText::new("Keep running").strong())).clicked() {
+                            keep = false;
+                            self.prefs.set_background_hint_seen();
+                            self.hide_window(ui.ctx());
                         }
                     });
                 }

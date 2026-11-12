@@ -52,6 +52,7 @@ impl TouchPref {
 struct Stored {
     touch: TouchPref,
     global_hotkeys: BTreeMap<String, String>,
+    background_hint_seen: bool,
 }
 
 pub struct Prefs {
@@ -59,6 +60,8 @@ pub struct Prefs {
     pub touch: TouchPref,
     /// System-wide hotkeys of this machine: action -> combination.
     pub global_hotkeys: BTreeMap<String, String>,
+    /// The "keeps running in the background" note was confirmed once.
+    pub background_hint_seen: bool,
 }
 
 impl Default for Prefs {
@@ -83,6 +86,7 @@ impl Prefs {
             file,
             touch: stored.touch,
             global_hotkeys: stored.global_hotkeys,
+            background_hint_seen: stored.background_hint_seen,
         }
     }
 
@@ -90,6 +94,13 @@ impl Prefs {
     pub fn set_global_hotkeys(&mut self, map: BTreeMap<String, String>) {
         if self.global_hotkeys != map {
             self.global_hotkeys = map;
+            self.save();
+        }
+    }
+
+    pub fn set_background_hint_seen(&mut self) {
+        if !self.background_hint_seen {
+            self.background_hint_seen = true;
             self.save();
         }
     }
@@ -109,6 +120,7 @@ impl Prefs {
         let stored = Stored {
             touch: self.touch,
             global_hotkeys: self.global_hotkeys.clone(),
+            background_hint_seen: self.background_hint_seen,
         };
         let Ok(text) = serde_json::to_string_pretty(&stored) else {
             return;

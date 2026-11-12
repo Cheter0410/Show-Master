@@ -24,10 +24,21 @@ sm-audio.workspace = true
 # System-wide hotkeys (X11, Windows RegisterHotKey, macOS RegisterEventHotKey).
 global-hotkey = "=0.10.0"
 
-# Receiving "open documents" events (double-click on a .smshow file).
+# Receiving "open documents" / "reopen" events and the app menu (Cmd+W, Cmd+Q).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["objc2-core-services", "NSAppleEventManager", "NSAppleEventDescriptor", "NSString", "NSURL", "NSObject"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSMenu", "NSMenuItem", "NSResponder"] }
+
+# Tray icon (menu bar on macOS, notification area on Windows): the app keeps
+# running in the background when the window is closed.
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+tray-icon = { version = "=0.26.1", default-features = false }
+
+# Linux: StatusNotifierItem over D-Bus (KDE, GNOME with the AppIndicator
+# extension, ...); no GTK main loop or libappindicator needed.
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "=0.3.7", default-features = false, features = ["tokio"] }
 
 [dev-dependencies]
 egui_kittest = { version = "0.37", features = ["eframe"] }

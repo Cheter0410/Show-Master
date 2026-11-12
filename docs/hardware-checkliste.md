@@ -58,6 +58,10 @@ validiert werden.
       zeigt den richtigen Namen
 - [ ] Windows: Bonjour-Dienst (iTunes/rtpMIDI) installiert und nicht installiert – Ankündigung klappt
       in beiden Fällen, Port 5353 wird geteilt
+- [ ] Fenster schließen: Show läuft weiter (Audio, iPad); Fenster kommt zurück über erneuten Start,
+      Tray-Symbol (Windows Infobereich, Mac Menüleiste, Linux KDE) und auf dem Mac über das Dock;
+      Cmd+W versteckt, Cmd+Q fragt bei laufenden Cues nach; Tray „Quit Show Master“ beendet
+- [ ] Linux GNOME ohne AppIndicator-Erweiterung bzw. Wayland: Schließen minimiert nur
 - [ ] Latenz GO vom iPad im WLAN (< 50 ms)
 - [ ] Stream Deck über Bitfocus Companion (siehe `streamdeck.md`)
 - [ ] Mehrstündiger Dauerlauf: `SM_SOAK_SECONDS=14400 cargo test --release -p sm-server --test soak -- --ignored --nocapture`

@@ -313,6 +313,7 @@ fn global_section(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
          application while Show Master runs.",
     );
     hint(ui, global::platform_hint());
+    hint(ui, global::HIDDEN_NOTE);
     if let Some(reason) = &p.unsupported {
         banner(ui, theme::WARN, reason);
     }

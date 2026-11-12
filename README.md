@@ -16,7 +16,11 @@ einziger Internetzugriff ist die abschaltbare Update-Prüfung.
 cargo run --release -p showmaster -- --make-demo ~/showmaster-demo
 ```
 
-Das Programm öffnet sein eigenes Fenster (native Rust-App, egui). Parallel läuft ein lokaler Webserver
+Das Programm öffnet sein eigenes Fenster (native Rust-App, egui). **Schließen des Fensters beendet die
+Show nicht:** Audio, Timecode, MIDI und Tablets laufen im Hintergrund weiter. Das Fenster kommt zurück,
+wenn man Show Master erneut startet, über das Tray-Symbol (Mac: Menüleiste) oder auf dem Mac über das
+Dock. Beendet wird nur mit **Quit** im Fenster (Mac: Cmd+Q) oder *Quit Show Master* im Tray-Menü.
+Parallel läuft ein lokaler Webserver
 nur für Fernsteuerung: Auf Handy oder iPad im selben lokalen Netz reicht im Browser
 **`showmaster.local`** – das öffnet die reine Anzeige (ohne PIN, falls keine View-PIN gesetzt ist).
 Oben rechts führt der Knopf **Control** zur Fernsteuerung (Control-PIN, Standard `1234`), **View** wieder

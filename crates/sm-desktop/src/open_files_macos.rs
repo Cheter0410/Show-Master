@@ -1,5 +1,8 @@
 //! macOS: receive "open documents" Apple Events (kCoreEventClass /
-//! kAEOpenDocuments) and queue the files.
+//! kAEOpenDocuments) and queue the files; "reopen" (kAEReopenApplication:
+//! Dock icon clicked, app started again while running) brings the hidden
+//! window back. Also installs the app menu: Cmd+W hides the window (the show
+//! keeps running), Cmd+Q quits through the same checks as the Quit button.
 //!
 //! This is the only Objective-C bridge in the app; it needs `unsafe` for the
 //! selector registration (see the SAFETY notes).
@@ -16,6 +19,8 @@ use std::sync::Mutex;
 /// 'aevt' and 'odoc' (Apple Event class / id for "open documents").
 const K_CORE_EVENT_CLASS: u32 = u32::from_be_bytes(*b"aevt");
 const K_AE_OPEN_DOCUMENTS: u32 = u32::from_be_bytes(*b"odoc");
+/// 'rapp' ("reopen application").
+const K_AE_REOPEN_APPLICATION: u32 = u32::from_be_bytes(*b"rapp");
 /// '----', the direct object (the list of files).
 const KEY_DIRECT_OBJECT: u32 = u32::from_be_bytes(*b"----");
 
@@ -29,6 +34,22 @@ define_class!(
         #[unsafe(method(handleOpenDocuments:withReplyEvent:))]
         fn handle_open_documents(&self, event: &NSAppleEventDescriptor, _reply: &NSAppleEventDescriptor) {
             super::push(files(event));
+            crate::background::request_show();
+        }
+
+        #[unsafe(method(handleReopen:withReplyEvent:))]
+        fn handle_reopen(&self, _event: &NSAppleEventDescriptor, _reply: &NSAppleEventDescriptor) {
+            crate::background::request_show();
+        }
+
+        #[unsafe(method(closeWindow:))]
+        fn close_window(&self, _sender: Option<&AnyObject>) {
+            crate::background::request_hide();
+        }
+
+        #[unsafe(method(quitApp:))]
+        fn quit_app(&self, _sender: Option<&AnyObject>) {
+            crate::background::request_quit();
         }
     }
 );
@@ -60,9 +81,9 @@ fn files(event: &NSAppleEventDescriptor) -> Vec<PathBuf> {
 /// The handler object must stay alive: the event manager does not retain it.
 static HANDLER: Mutex<Option<usize>> = Mutex::new(None);
 
-pub fn install() {
-    let Ok(mut slot) = HANDLER.lock() else { return };
-    let handler: &AnyObject = match *slot {
+fn handler() -> Option<&'static AnyObject> {
+    let mut slot = HANDLER.lock().ok()?;
+    Some(match *slot {
         // SAFETY: the pointer comes from `Retained::into_raw` below and is never freed.
         Some(ptr) => unsafe { &*(ptr as *const AnyObject) },
         None => {
@@ -73,7 +94,11 @@ pub fn install() {
             // SAFETY: just leaked above, valid for the rest of the process.
             unsafe { &*(ptr as *const AnyObject) }
         }
-    };
+    })
+}
+
+pub fn install() {
+    let Some(handler) = handler() else { return };
     let manager = NSAppleEventManager::sharedAppleEventManager();
     // SAFETY: `handler` is an OpenHandler, which implements exactly this
     // selector with the (event, reply) signature the event manager calls.
@@ -84,5 +109,48 @@ pub fn install() {
             K_CORE_EVENT_CLASS,
             K_AE_OPEN_DOCUMENTS,
         );
+        manager.setEventHandler_andSelector_forEventClass_andEventID(
+            handler,
+            sel!(handleReopen:withReplyEvent:),
+            K_CORE_EVENT_CLASS,
+            K_AE_REOPEN_APPLICATION,
+        );
     }
+}
+
+/// Replace the default app menu (whose Quit would end the process at once,
+/// without asking): "Close Window" (Cmd+W) hides, "Quit Show Master" (Cmd+Q)
+/// quits with the usual checks. Call on the main thread after launch.
+pub fn install_menu() {
+    use objc2::{MainThreadMarker, MainThreadOnly};
+    use objc2_app_kit::{NSApplication, NSMenu, NSMenuItem};
+    use objc2_foundation::NSString;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let Some(handler) = handler() else { return };
+    let item = |title: &str, action: objc2::runtime::Sel, key: &str| {
+        // SAFETY: plain initialisation of a menu item; the action selector is
+        // implemented by `handler`, which lives for the rest of the process.
+        unsafe {
+            let item = NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                &NSString::from_str(title),
+                Some(action),
+                &NSString::from_str(key),
+            );
+            item.setTarget(Some(handler));
+            item
+        }
+    };
+    let app_menu = NSMenu::new(mtm);
+    app_menu.addItem(&item("Close Window", sel!(closeWindow:), "w"));
+    app_menu.addItem(&NSMenuItem::separatorItem(mtm));
+    app_menu.addItem(&item("Quit Show Master", sel!(quitApp:), "q"));
+    let app_item = NSMenuItem::new(mtm);
+    app_item.setSubmenu(Some(&app_menu));
+    let bar = NSMenu::new(mtm);
+    bar.addItem(&app_item);
+    NSApplication::sharedApplication(mtm).setMainMenu(Some(&bar));
 }

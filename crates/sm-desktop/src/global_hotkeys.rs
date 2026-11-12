@@ -222,6 +222,10 @@ pub fn unsupported_reason(os: &str, env: impl Fn(&str) -> Option<String>) -> Opt
     None
 }
 
+/// Shown under the system-wide list on every platform.
+pub const HIDDEN_NOTE: &str = "While the window is closed (Show Master keeps running in the \
+     background) or minimized, presses take up to about 0.1 s longer.";
+
 /// Fixed platform notes shown under the system-wide list.
 pub fn platform_hint() -> &'static str {
     if cfg!(target_os = "macos") {

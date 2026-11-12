@@ -72,8 +72,24 @@ revidieren lassen.
   Cues oder ungespeicherter Show.
 - Downloads nur von `github.com/Cheter0410/show-master-releases/`, mit Prüfung von Größe und
   SHA-256-Digest; ein Programm-Patch muss wie eine ausführbare Datei des Systems aussehen.
-- Schließen des Fensters beendet das Programm. Im Live-Modus (Quit-Schutz), bei laufenden Cues oder
-  ungespeicherten Änderungen wird vorher nachgefragt. Der Windows-Release-Build hat kein Konsolenfenster.
+- **Fenster schließen ≠ beenden.** Das Schließen-Kreuz (macOS auch Cmd+W) versteckt das Fenster nur;
+  Engine, Audio, Timecode, MIDI und der Tablet-Server laufen im selben Prozess weiter. Ein Prozess
+  statt getrenntem Server + Fenster-Programm: keine Absprache zwischen zwei Programmen, nichts kann
+  auseinanderlaufen. Zurück kommt das Fenster durch erneutes Starten (der zweite Start meldet
+  `raise_window` an den laufenden und beendet sich), über das Tray-Symbol (macOS: Menüleiste) und auf
+  macOS über das Dock bzw. Finder (Apple Event „reopen“). Beim ersten Schließen erklärt ein Hinweis das
+  Verhalten (einmal pro Rechner, `desktop.json`).
+- **Beenden** nur über *Quit* im Fenster (macOS Cmd+Q – das eigene App-Menü ersetzt das von winit, dessen
+  Quit den Prozess ohne Rückfrage beenden würde) oder *Quit Show Master* im Tray-Menü. Im Live-Modus
+  (Quit-Schutz), bei laufenden Cues oder ungespeicherten Änderungen wird vorher nachgefragt (dazu kommt
+  das Fenster nach vorne). Remote-`quit` und das Update-Installieren beenden wie bisher direkt.
+- **Tray:** macOS/Windows über `tray-icon`, Linux über StatusNotifierItem (`ksni`, reines D-Bus, kein
+  GTK-Hauptloop und kein libappindicator nötig: KDE, Xfce, Cinnamon, GNOME mit AppIndicator-Erweiterung).
+  Ohne Tray (bzw. unter Wayland, das keine versteckten Fenster kennt) wird das Fenster beim Schließen nur
+  minimiert, damit es nie unauffindbar im Hintergrund läuft.
+- Bei verstecktem oder minimiertem Fenster drosselt eframe die Logik-Durchläufe auf etwa 10/s:
+  systemweite Hotkeys reagieren dann bis zu ~0,1 s später (Engine, Audio, Tablets, MIDI-Eingang und OSC
+  sind davon nicht betroffen). Der Windows-Release-Build hat kein Konsolenfenster.
 
 ## mDNS/Bonjour und RTP-MIDI-Recovery (nachträglich)
 

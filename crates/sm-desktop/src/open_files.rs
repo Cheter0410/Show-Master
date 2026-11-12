@@ -49,6 +49,13 @@ pub fn install() {
     macos::install();
 }
 
+/// macOS app menu (Cmd+W hides the window, Cmd+Q asks before quitting).
+/// Call once the window exists.
+pub fn install_menu() {
+    #[cfg(target_os = "macos")]
+    macos::install_menu();
+}
+
 #[cfg(target_os = "macos")]
 #[path = "open_files_macos.rs"]
 mod macos;

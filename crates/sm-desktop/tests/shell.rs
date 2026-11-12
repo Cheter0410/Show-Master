@@ -37,6 +37,48 @@ fn space_is_go_and_escape_is_panic() {
     });
 }
 
+/// The window's close button.
+fn close_window(h: &mut egui_kittest::Harness<'_, sm_desktop::App>) {
+    h.input_mut()
+        .viewports
+        .entry(egui::ViewportId::ROOT)
+        .or_default()
+        .events
+        .push(egui::ViewportEvent::Close);
+    h.run_steps(2);
+}
+
+#[test]
+fn closing_the_window_keeps_show_master_running() {
+    let env = Env::demo();
+    let mut h = env.harness();
+    close_window(&mut h);
+    // First time: explain that the show keeps running.
+    assert!(h.query_by_label("Show Master keeps running").is_some());
+    h.get_by_label("Keep running").click();
+    settle(&mut h);
+    assert!(h.query_by_label("Show Master keeps running").is_none());
+    // The runtime was not asked to quit.
+    assert!(!env
+        .handle
+        .quit_requested
+        .load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[test]
+fn quit_from_the_background_note_asks_while_cues_run() {
+    let env = Env::demo();
+    let mut h = env.harness();
+    h.key_press(egui::Key::Space);
+    env.wait(&mut h, "cue running", |_| {
+        !env.handle.tick()["active"].as_array().unwrap().is_empty()
+    });
+    close_window(&mut h);
+    h.get_by_label("Quit Show Master").click();
+    settle(&mut h);
+    assert!(h.query_by_label("Quit Show Master?").is_some());
+}
+
 #[test]
 fn quit_button_asks_nothing_when_idle_and_requests_close() {
     let env = Env::demo();

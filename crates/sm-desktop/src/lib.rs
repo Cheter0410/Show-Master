@@ -6,6 +6,7 @@
 //! slow or busy window never affects playback.
 
 pub mod app;
+pub mod background;
 pub mod client;
 pub mod edit;
 pub mod global_hotkeys;
@@ -17,6 +18,7 @@ pub mod recent;
 pub mod responsive;
 pub mod setup;
 pub mod theme;
+pub mod tray;
 pub mod util;
 pub mod widgets;
 
@@ -36,7 +38,8 @@ fn icon() -> Option<egui::IconData> {
     })
 }
 
-/// Open the window and run until it is closed. Must be called on the main thread.
+/// Open the window and run until Show Master quits (closing the window only
+/// hides it, see [`background`]). Must be called on the main thread.
 pub fn run(
     handle: sm_server::runtime::Handle,
     rt: tokio::runtime::Handle,
@@ -62,23 +65,30 @@ pub fn run(
         "Show Master",
         options,
         Box::new(move |cc| {
-            let client = client::Client::new(handle, rt);
+            let client = client::Client::new(handle, rt.clone());
             open_files::install();
             open_files::set_repaint_context(&cc.egui_ctx);
+            background::set_repaint_context(&cc.egui_ctx);
+            open_files::install_menu();
             let mut app = App::new(&cc.egui_ctx, client, open);
             app.recent = recent::Recent::load();
             app.prefs = prefs::Prefs::load();
             app.global_hotkeys = global_hotkeys::GlobalHotkeys::native();
-            Ok(Box::new(Window(app)))
+            let tray = tray::start(app.tablet_address(), &rt);
+            Ok(Box::new(Window(app, tray)))
         }),
     )
 }
 
-struct Window(App);
+/// The app and its tray icon (kept alive as long as the window loop runs).
+struct Window(App, Option<tray::Tray>);
 
 impl eframe::App for Window {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.0.logic(ctx);
+        if let Some(tray) = self.1.as_mut() {
+            tray.set_address(self.0.tablet_address());
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
