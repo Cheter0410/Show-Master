@@ -841,6 +841,11 @@ impl App {
         self.handle_close_request(ctx);
         self.handle_dropped_files(ctx);
         crate::setup::capture_keys(self, ctx);
+        let hidden = ctx.input(|i| {
+            let v = i.viewport();
+            v.visible() == Some(false) || v.minimized == Some(true)
+        });
+        crate::global_hotkeys::fast::update(&self.client.handle, hidden, self.current_list());
         crate::global_hotkeys::process(self, ctx);
         self.hotkeys(ctx);
         self.toasts.retain(|t| t.until > Instant::now());

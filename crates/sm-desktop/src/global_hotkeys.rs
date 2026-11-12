@@ -224,7 +224,8 @@ pub fn unsupported_reason(os: &str, env: impl Fn(&str) -> Option<String>) -> Opt
 
 /// Shown under the system-wide list on every platform.
 pub const HIDDEN_NOTE: &str = "While the window is closed (Show Master keeps running in the \
-     background) or minimized, presses take up to about 0.1 s longer.";
+     background) or minimized, GO, PANIC, Stop all and Pause still act at once; the other \
+     actions take up to about 0.1 s longer.";
 
 /// Fixed platform notes shown under the system-wide list.
 pub fn platform_hint() -> &'static str {
@@ -402,6 +403,7 @@ impl GlobalHotkeys {
                 }
             }
         }
+        fast::set_actions(&self.active);
     }
 
     /// Try failed registrations again on the next sync.
@@ -603,6 +605,167 @@ pub fn process(app: &mut App, ctx: &egui::Context) {
 }
 
 // ----------------------------------------------------------------------
+// Fast path while the window is hidden
+// ----------------------------------------------------------------------
+
+/// While the window is closed (running in the background) or minimized,
+/// eframe runs the UI logic only about 10 times a second. Transport hotkeys
+/// pressed then are sent to the runtime directly from the hook's event
+/// handler instead, without waiting for the next UI pass.
+pub mod fast {
+    use serde_json::{json, Value};
+    use sm_server::runtime::{parse_command, Handle, Role};
+    use std::collections::{BTreeMap, HashMap};
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    /// Actions that take the fast path (the rest waits for the UI pass).
+    pub const FAST_ACTIONS: [&str; 4] = ["go", "panic", "stop_all", "toggle_pause"];
+
+    struct State {
+        handle: Handle,
+        hidden: bool,
+        list: Option<u64>,
+        panic_tap: Option<Instant>,
+        last_go: Option<Instant>,
+        down: HashMap<u32, Instant>,
+    }
+
+    static STATE: Mutex<Option<State>> = Mutex::new(None);
+    /// Hotkey id -> combination (from the platform registrations).
+    static IDS: Mutex<BTreeMap<u32, String>> = Mutex::new(BTreeMap::new());
+    /// Combination -> action (the active registrations).
+    static ACTIONS: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
+
+    pub(super) fn set_id(id: u32, combo: Option<&str>) {
+        if let Ok(mut ids) = IDS.lock() {
+            match combo {
+                Some(c) => ids.insert(id, c.to_string()),
+                None => ids.remove(&id),
+            };
+        }
+    }
+
+    pub(super) fn set_actions(active: &BTreeMap<String, String>) {
+        if let Ok(mut a) = ACTIONS.lock() {
+            a.clone_from(active);
+        }
+    }
+
+    /// Called every UI pass: whether the window is hidden / minimized, and
+    /// the cue list GO applies to.
+    pub fn update(handle: &Handle, hidden: bool, list: Option<u64>) {
+        let Ok(mut g) = STATE.lock() else { return };
+        match g.as_mut() {
+            Some(s) => {
+                s.hidden = hidden;
+                s.list = list;
+                s.handle = handle.clone();
+            }
+            None => {
+                *g = Some(State {
+                    handle: handle.clone(),
+                    hidden,
+                    list,
+                    panic_tap: None,
+                    last_go: None,
+                    down: HashMap::new(),
+                });
+            }
+        }
+    }
+
+    /// From the hook: true when the press was handled here.
+    pub(super) fn on_event(id: u32, pressed: bool) -> bool {
+        let action = IDS
+            .lock()
+            .ok()
+            .and_then(|ids| ids.get(&id).cloned())
+            .and_then(|combo| ACTIONS.lock().ok().and_then(|a| a.get(&combo).cloned()));
+        let Some(action) = action else { return false };
+        let Ok(mut g) = STATE.lock() else {
+            return false;
+        };
+        let Some(s) = g.as_mut() else { return false };
+        if !pressed {
+            s.down.remove(&id);
+            return false; // the UI side forgets its own "down" state too
+        }
+        if !s.hidden || !FAST_ACTIONS.contains(&action.as_str()) {
+            return false;
+        }
+        // Auto-repeat of a held key fires once.
+        if s.down
+            .get(&id)
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(2))
+        {
+            return true;
+        }
+        s.down.insert(id, Instant::now());
+        fire(s, &action);
+        true
+    }
+
+    /// Run `action` as if pressed while the window is hidden; false when the
+    /// window is shown (the UI handles it) or the action is not a fast one.
+    pub fn fire_hidden(action: &str) -> bool {
+        let Ok(mut g) = STATE.lock() else {
+            return false;
+        };
+        match g.as_mut() {
+            Some(s) if s.hidden && FAST_ACTIONS.contains(&action) => {
+                fire(s, action);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn setting(s: &State, key: &str) -> Value {
+        s.handle
+            .published
+            .read()
+            .map(|p| p.state["show"]["settings"][key].clone())
+            .unwrap_or(Value::Null)
+    }
+
+    fn fire(s: &mut State, action: &str) {
+        let cmd = match action {
+            "go" => {
+                let ms = setting(s, "go_debounce_ms").as_u64().unwrap_or(0);
+                if s.last_go
+                    .is_some_and(|t| t.elapsed() < Duration::from_millis(ms))
+                {
+                    return;
+                }
+                s.last_go = Some(Instant::now());
+                json!({ "cmd": "go", "list": s.list })
+            }
+            "panic" => {
+                if setting(s, "panic_double_tap").as_bool().unwrap_or(false) {
+                    let ms = setting(s, "double_tap_ms").as_u64().unwrap_or(600);
+                    match s.panic_tap {
+                        Some(t) if t.elapsed() <= Duration::from_millis(ms) => s.panic_tap = None,
+                        _ => {
+                            s.panic_tap = Some(Instant::now());
+                            return;
+                        }
+                    }
+                }
+                json!({ "cmd": "panic" })
+            }
+            "stop_all" => json!({ "cmd": "stop_all" }),
+            "toggle_pause" => json!({ "cmd": "toggle_pause" }),
+            _ => return,
+        };
+        let result = parse_command(cmd).and_then(|c| s.handle.post(c, Role::Admin, "hotkey"));
+        if let Err(e) = result {
+            tracing::warn!("system-wide hotkey {action}: {e}");
+        }
+    }
+}
+
+// ----------------------------------------------------------------------
 // Platform hook (global-hotkey crate)
 // ----------------------------------------------------------------------
 
@@ -640,6 +803,12 @@ mod native {
         let (tx, rx) = channel();
         let ctx = ctx.clone();
         GlobalHotKeyEvent::set_event_handler(Some(move |e: GlobalHotKeyEvent| {
+            // Window closed or minimized: the UI only runs ~10 times a
+            // second then, so GO / PANIC / Stop / Pause go straight to the
+            // runtime from here.
+            if super::fast::on_event(e.id, e.state == HotKeyState::Pressed) {
+                return;
+            }
             // Never blocks: unbounded channel, then wake the window.
             let _ = tx.send(e);
             ctx.request_repaint();
@@ -666,12 +835,14 @@ mod native {
             })?;
             self.ids.insert(hk.id(), combo.to_string());
             self.keys.insert(combo.to_string(), hk);
+            super::fast::set_id(hk.id(), Some(combo));
             Ok(())
         }
 
         fn unregister(&mut self, combo: &str) {
             if let Some(hk) = self.keys.remove(combo) {
                 self.ids.remove(&hk.id());
+                super::fast::set_id(hk.id(), None);
                 self.down.remove(&hk.id());
                 if let Err(e) = self.manager.unregister(hk) {
                     tracing::warn!("system-wide hotkey {combo}: {e}");

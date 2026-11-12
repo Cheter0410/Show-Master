@@ -94,9 +94,10 @@ revidieren lassen.
   GTK-Hauptloop und kein libappindicator nötig: KDE, Xfce, Cinnamon, GNOME mit AppIndicator-Erweiterung).
   Ohne Tray (bzw. unter Wayland, das keine versteckten Fenster kennt) wird das Fenster beim Schließen nur
   minimiert, damit es nie unauffindbar im Hintergrund läuft.
-- Bei verstecktem oder minimiertem Fenster drosselt eframe die Logik-Durchläufe auf etwa 10/s:
-  systemweite Hotkeys reagieren dann bis zu ~0,1 s später (Engine, Audio, Tablets, MIDI-Eingang und OSC
-  sind davon nicht betroffen). Der Windows-Release-Build hat kein Konsolenfenster.
+- Bei verstecktem oder minimiertem Fenster drosselt eframe die Logik-Durchläufe auf etwa 10/s. Damit
+  systemweite Hotkeys trotzdem sofort wirken, schickt der Hotkey-Handler GO, PANIC, Stop all und Pause
+  in diesem Zustand direkt an die Runtime (mit GO-Entprellung und PANIC-Doppeldruck); die übrigen
+  Aktionen laufen weiter über die UI und können bis zu ~0,1 s später kommen. Der Windows-Release-Build hat kein Konsolenfenster.
 
 ## mDNS/Bonjour und RTP-MIDI-Recovery (nachträglich)
 
