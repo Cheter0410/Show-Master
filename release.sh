@@ -63,6 +63,9 @@ need_gh() {
     echo "Gleich öffnet sich der Browser: mit deinem GitHub-Konto anmelden und den Code bestätigen."
     gh auth login --hostname github.com --git-protocol https --web
   fi
+  # Git meldet sich über gh an (sonst fragt git pull/push nach Benutzer und
+  # Passwort, z. B. wenn bei "gh auth login" SSH gewählt wurde).
+  gh auth setup-git --hostname github.com >/dev/null 2>&1 || true
   if [ "$(gh api "repos/$RELEASES" --jq .permissions.push 2>/dev/null || echo false)" != "true" ]; then
     fail "Dein GitHub-Konto darf noch nicht in $RELEASES hochladen.
 Die Einladung annehmen: https://github.com/$RELEASES/invitations
@@ -190,10 +193,11 @@ back_to_branch() { [ -n "$BACK" ] && git checkout -q "$BACK" 2>/dev/null || true
 cmd_release() {
   [ -d .git ] || fail "Das geht nur in einem Git-Checkout (git clone ...)."
   [ -n "$(git status --porcelain --untracked-files=no)" ] && fail "Es gibt lokale Änderungen (git status). Ein Release wird nur aus dem Stand auf GitHub gebaut."
+  # Erst anmelden: schon der Pull braucht bei privaten Repos die Anmeldung.
+  need_gh
   step "Neuesten Stand holen"
   git pull -q --ff-only || fail "Konnte den neuesten Stand nicht holen."
   git fetch -q --tags --force
-  need_gh
 
   local v state
   v=$(version)
