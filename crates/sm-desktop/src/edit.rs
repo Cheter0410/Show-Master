@@ -358,7 +358,7 @@ fn add_row(app: &mut App, ui: &mut egui::Ui, out: &mut Vec<Out>) {
     let lists = &app.client.state.show.cue_lists;
     if lists.len() > 1 {
         let current = app.current_list();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             for l in lists {
                 let on = current == Some(l.id);
