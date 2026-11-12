@@ -35,7 +35,9 @@ pub fn cue_color(name: &str) -> Option<Color32> {
 
 pub const CUE_COLORS: [&str; 7] = ["", "red", "orange", "yellow", "green", "blue", "purple"];
 
-pub fn apply(ctx: &egui::Context, high_contrast: bool) {
+/// Apply the style. `touch` = touch-friendly controls (44 px targets,
+/// more spacing, slightly larger text).
+pub fn apply(ctx: &egui::Context, high_contrast: bool, touch: bool) {
     let mut style = (*ctx.global_style()).clone();
     let mut v = Visuals::dark();
     if high_contrast {
@@ -61,24 +63,47 @@ pub fn apply(ctx: &egui::Context, high_contrast: bool) {
     style.spacing.item_spacing = egui::vec2(8.0, 6.0);
     style.spacing.button_padding = egui::vec2(10.0, 5.0);
     style.spacing.interact_size.y = 26.0;
+    // Text sizes: body, small, heading, monospace.
+    let (body, small, heading, mono) = if touch {
+        (16.0, 13.0, 22.0, 15.0)
+    } else {
+        (14.0, 11.5, 20.0, 13.5)
+    };
+    if touch {
+        let t = crate::responsive::TOUCH_TARGET;
+        style.spacing.item_spacing = egui::vec2(10.0, 8.0);
+        // 12 px above and below the text: 44 px buttons and text fields with
+        // the text centred.
+        style.spacing.button_padding = egui::vec2(14.0, 12.0);
+        style.spacing.interact_size = egui::vec2(t, t);
+        style.spacing.icon_width = 24.0;
+        style.spacing.icon_width_inner = 14.0;
+        style.spacing.icon_spacing = 8.0;
+        style.spacing.combo_width = 120.0;
+        style.spacing.menu_width = 260.0;
+        style.spacing.slider_width = 140.0;
+        // Solid, wide scroll bars that can be grabbed with a finger.
+        style.spacing.scroll = egui::style::ScrollStyle::solid();
+        style.spacing.scroll.bar_width = 14.0;
+    }
     style
         .text_styles
-        .insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
+        .insert(TextStyle::Body, FontId::new(body, FontFamily::Proportional));
     style.text_styles.insert(
         TextStyle::Button,
-        FontId::new(14.0, FontFamily::Proportional),
+        FontId::new(body, FontFamily::Proportional),
     );
     style.text_styles.insert(
         TextStyle::Small,
-        FontId::new(11.5, FontFamily::Proportional),
+        FontId::new(small, FontFamily::Proportional),
     );
     style.text_styles.insert(
         TextStyle::Heading,
-        FontId::new(20.0, FontFamily::Proportional),
+        FontId::new(heading, FontFamily::Proportional),
     );
     style.text_styles.insert(
         TextStyle::Monospace,
-        FontId::new(13.5, FontFamily::Monospace),
+        FontId::new(mono, FontFamily::Monospace),
     );
     ctx.set_style_of(egui::Theme::Dark, style);
 }

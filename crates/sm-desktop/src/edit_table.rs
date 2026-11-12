@@ -16,6 +16,8 @@ use sm_core::model::{ContinueMode, Cue, CueKind, CueList};
 use std::collections::HashSet;
 
 pub const ROW_H: f32 = 30.0;
+/// Row height with touch-friendly controls.
+pub const ROW_H_TOUCH: f32 = 44.0;
 const HEADER_H: f32 = 24.0;
 const INDENT: f32 = 18.0;
 
@@ -229,13 +231,38 @@ struct Cols {
     cont: Rangef,
     tc: Rangef,
     armed: Rangef,
+    /// Touch mode: drag handle for reordering.
+    grip: Rangef,
+    /// Touch mode: "More" button (the row's context menu).
+    more: Rangef,
 }
 
+/// Table width from which all columns are shown (plus the touch columns).
+const FULL_W: f32 = 1080.0;
+/// Below this width the type and pre-wait columns are hidden too.
+const MIN_W: f32 = 700.0;
+
 impl Cols {
-    fn new(left: f32, width: f32) -> Self {
-        const FIXED: f32 = 52.0 + 26.0 + 58.0 + 74.0 + 76.0 + 86.0 + 76.0 + 30.0 + 104.0 + 54.0;
-        let flex = (width - FIXED).max(220.0);
-        let name_w = (flex * 0.45).floor();
+    /// Columns for a table `width` wide. Less important columns are hidden
+    /// (zero width) on smaller tables; their values stay in the inspector:
+    /// - below `FULL_W`: post-wait, continue glyph, TC trigger, armed;
+    /// - below `MIN_W`: also type and pre-wait.
+    fn new(left: f32, width: f32, touch: bool) -> Self {
+        let extra = if touch { 40.0 + 44.0 } else { 0.0 };
+        let level = if width >= FULL_W + extra {
+            0
+        } else if width >= MIN_W + extra {
+            1
+        } else {
+            2
+        };
+        let upto = |max_level: u8, w: f32| if level <= max_level { w } else { 0.0 };
+        let (kind, pre) = (upto(1, 74.0), upto(1, 76.0));
+        let (post, cont, tc, armed) = (upto(0, 76.0), upto(0, 30.0), upto(0, 104.0), upto(0, 54.0));
+        let (grip, more) = if touch { (40.0, 44.0) } else { (0.0, 0.0) };
+        let fixed = 52.0 + 26.0 + 58.0 + kind + pre + 86.0 + post + cont + tc + armed + grip + more;
+        let flex = (width - fixed).max(if level == 2 { 160.0 } else { 220.0 });
+        let name_w = (flex * if level == 2 { 0.55 } else { 0.45 }).floor();
         let mut x = left;
         let mut take = |w: f32| {
             let r = Rangef::new(x, x + w);
@@ -246,17 +273,24 @@ impl Cols {
             gutter: take(52.0),
             status: take(26.0),
             number: take(58.0),
-            kind: take(74.0),
+            kind: take(kind),
             name: take(name_w),
             target: take(flex - name_w),
-            pre: take(76.0),
+            pre: take(pre),
             dur: take(86.0),
-            post: take(76.0),
-            cont: take(30.0),
-            tc: take(104.0),
-            armed: take(54.0),
+            post: take(post),
+            cont: take(cont),
+            tc: take(tc),
+            armed: take(armed),
+            grip: take(grip),
+            more: take(more),
         }
     }
+}
+
+/// A column that is shown (hidden columns have zero width).
+fn visible(x: Rangef) -> bool {
+    x.span() > 0.5
 }
 
 fn cell(x: Rangef, row: Rect) -> Rect {
@@ -265,6 +299,9 @@ fn cell(x: Rangef, row: Rect) -> Rect {
 
 /// Paint text truncated to the cell.
 fn text_in(ui: &Ui, painter: &Painter, cell: Rect, text: impl Into<WidgetText>, align: Align) {
+    if cell.width() < 1.0 {
+        return; // hidden column
+    }
     let pad = 6.0;
     let galley = text.into().into_galley(
         ui,
@@ -314,14 +351,19 @@ pub(crate) fn show(
         *sel = rows.iter().map(|r| r.cue.id).collect();
     }
 
+    let touch = crate::responsive::get(ui.ctx()).touch;
+    let row_h = if touch { ROW_H_TOUCH } else { ROW_H };
     let full = ui.available_rect_before_wrap();
-    let cols = Cols::new(full.left(), full.width());
+    // Solid (touch) scroll bars take room from the rows.
+    let bar = ui.spacing().scroll.allocated_width();
+    let cols = Cols::new(full.left(), full.width() - bar, touch);
     // Header
     let (head, _) = ui.allocate_exact_size(vec2(full.width(), HEADER_H), Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(head, 0.0, ui.visuals().faint_bg_color);
     let h = |t: &str| RichText::new(t).small().strong().color(theme::MUTED);
     for (x, t, a) in [
+        (cols.gutter, "", Align::Min),
         (cols.number, "#", Align::Min),
         (cols.kind, "Type", Align::Min),
         (cols.name, "Name", Align::Min),
@@ -332,7 +374,9 @@ pub(crate) fn show(
         (cols.tc, "TC trigger", Align::Min),
         (cols.armed, "Armed", Align::Center),
     ] {
-        text_in(ui, painter, cell(x, head), h(t), a);
+        if visible(x) && !t.is_empty() {
+            text_in(ui, painter, cell(x, head), h(t), a);
+        }
     }
     painter.hline(
         head.x_range(),
@@ -341,16 +385,19 @@ pub(crate) fn show(
     );
 
     // Scroll a requested row into view.
+    // Touch mode: rows only sense clicks, so dragging the list scrolls it
+    // (cues are reordered with the grip column instead).
     let mut area = egui::ScrollArea::vertical()
         .id_salt(("edit_table", list_id))
-        .auto_shrink(false);
+        .auto_shrink(false)
+        .scroll_source(crate::responsive::scroll_source(ui.ctx()));
     if let Some(id) = st.scroll_to {
         if let Some(i) = rows.iter().position(|r| r.cue.id == id) {
-            let top = i as f32 * ROW_H;
+            let top = i as f32 * row_h;
             if top < st.offset {
                 area = area.vertical_scroll_offset(top);
-            } else if top + ROW_H > st.offset + st.view_h && st.view_h > 0.0 {
-                area = area.vertical_scroll_offset(top + ROW_H - st.view_h);
+            } else if top + row_h > st.offset + st.view_h && st.view_h > 0.0 {
+                area = area.vertical_scroll_offset(top + row_h - st.view_h);
             }
             st.scroll_to = None;
         } else {
@@ -368,7 +415,7 @@ pub(crate) fn show(
     let dragging = egui::DragAndDrop::has_payload_of_type::<DragCues>(ui.ctx());
     let output = area.show_viewport(ui, |ui, viewport| {
         let content = ui.max_rect();
-        let total = rows.len() as f32 * ROW_H;
+        let total = rows.len() as f32 * row_h;
         let height = total.max(viewport.height());
         ui.set_height(height);
         // Background: click on empty space clears the selection.
@@ -394,8 +441,8 @@ pub(crate) fn show(
                 theme::MUTED,
             );
         }
-        let first = (viewport.top() / ROW_H).floor().max(0.0) as usize;
-        let last = ((viewport.bottom() / ROW_H).ceil() as usize + 1).min(rows.len());
+        let first = (viewport.top() / row_h).floor().max(0.0) as usize;
+        let last = ((viewport.bottom() / row_h).ceil() as usize + 1).min(rows.len());
         let ctx = RowCtx {
             state,
             tick,
@@ -403,11 +450,12 @@ pub(crate) fn show(
             playhead,
             cols: &cols,
             order: &order,
+            touch,
         };
         for (i, row) in rows.iter().enumerate().take(last).skip(first) {
             let rect = Rect::from_min_size(
-                pos2(content.left(), content.top() + i as f32 * ROW_H),
-                vec2(content.width(), ROW_H),
+                pos2(content.left(), content.top() + i as f32 * row_h),
+                vec2(content.width(), row_h),
             );
             draw_row(ui, &ctx, row, i, rect, sel, edit, out);
         }
@@ -420,12 +468,12 @@ pub(crate) fn show(
             st.drop = pointer
                 .filter(|p| viewport.translate(content.min.to_vec2()).contains(*p))
                 .map(|p| {
-                    let i = ((p.y - content.top()) / ROW_H).floor();
+                    let i = ((p.y - content.top()) / row_h).floor();
                     match rows.get(i.max(0.0) as usize) {
                         Some(r) if i >= 0.0 => {
                             let rect = Rect::from_min_size(
-                                pos2(content.left(), content.top() + i * ROW_H),
-                                vec2(content.width(), ROW_H),
+                                pos2(content.left(), content.top() + i * row_h),
+                                vec2(content.width(), row_h),
                             );
                             let group = matches!(r.cue.kind, CueKind::Group(_));
                             DropTarget::Row(r.cue.id, drop_pos(rect, p.y, group))
@@ -442,7 +490,7 @@ pub(crate) fn show(
                     ui.scroll_with_delta(vec2(0.0, -6.0));
                 }
             }
-            paint_drop(ui, st.drop, &rows, content, total);
+            paint_drop(ui, st.drop, &rows, content, total, row_h);
             if ui.input(|i| i.pointer.any_released()) {
                 let payload = egui::DragAndDrop::take_payload::<DragCues>(ui.ctx());
                 if let (Some(p), Some(target)) = (payload, st.drop) {
@@ -482,7 +530,14 @@ pub(crate) fn show(
     renumber_dialog(ui.ctx(), &mut edit.table, out);
 }
 
-fn paint_drop(ui: &Ui, drop: Option<DropTarget>, rows: &[Row<'_>], content: Rect, total: f32) {
+fn paint_drop(
+    ui: &Ui,
+    drop: Option<DropTarget>,
+    rows: &[Row<'_>],
+    content: Rect,
+    total: f32,
+    row_h: f32,
+) {
     let Some(drop) = drop else { return };
     let stroke = Stroke::new(2.5, theme::RUNNING);
     let painter = ui.painter();
@@ -494,8 +549,8 @@ fn paint_drop(ui: &Ui, drop: Option<DropTarget>, rows: &[Row<'_>], content: Rect
             let Some(i) = rows.iter().position(|r| r.cue.id == id) else {
                 return;
             };
-            let top = content.top() + i as f32 * ROW_H;
-            let rect = Rect::from_min_size(pos2(content.left(), top), vec2(content.width(), ROW_H));
+            let top = content.top() + i as f32 * row_h;
+            let rect = Rect::from_min_size(pos2(content.left(), top), vec2(content.width(), row_h));
             let indent = rows[i].depth as f32 * INDENT;
             let x = Rangef::new(content.left() + 52.0 + indent, content.right());
             match pos {
@@ -520,6 +575,7 @@ struct RowCtx<'a> {
     playhead: Option<u64>,
     cols: &'a Cols,
     order: &'a [u64],
+    touch: bool,
 }
 
 /// What the row shows about the cue's runtime state.
@@ -571,7 +627,13 @@ fn draw_row(
     let is_group = matches!(cue.kind, CueKind::Group(_));
     let label = format!("Cue {}", cue_label(cue));
 
-    let resp = ui.interact(rect, Id::unique(("edit_row", id)), Sense::click_and_drag());
+    // Touch: a plain drag scrolls the table; the grip column moves cues.
+    let sense = if ctx.touch {
+        Sense::click()
+    } else {
+        Sense::click_and_drag()
+    };
+    let resp = ui.interact(rect, Id::unique(("edit_row", id)), sense);
     let hovered = resp.hovered();
 
     // --- background
@@ -782,8 +844,10 @@ fn draw_row(
         None => mono(String::new(), fg, false),
     };
     text_in(ui, &painter, cell(cols.post, rect), post, Align::Max);
-    let cont_cell = cell(cols.cont, rect);
-    continue_glyph(&painter, cont_cell.center(), cue.continue_mode, muted);
+    if visible(cols.cont) {
+        let cont_cell = cell(cols.cont, rect);
+        continue_glyph(&painter, cont_cell.center(), cue.continue_mode, muted);
+    }
     if let Some(tc) = cue.tc_trigger {
         text_in(
             ui,
@@ -823,7 +887,45 @@ fn draw_row(
             });
         }
     }
-    if resp.drag_started() {
+    // Touch: grip (drag to reorder) and "More" (the context menu, for
+    // fingers that cannot right-click; a long press opens it too).
+    let mut drag_started = resp.drag_started();
+    if ctx.touch {
+        let grip = cell(cols.grip, rect);
+        let g = ui.interact(grip, Id::unique(("edit_grip", id)), Sense::drag());
+        let c = if g.hovered() || g.dragged() {
+            fg
+        } else {
+            muted
+        };
+        for dy in [-5.0, 0.0, 5.0] {
+            painter.hline(
+                Rangef::new(grip.center().x - 8.0, grip.center().x + 8.0),
+                grip.center().y + dy,
+                Stroke::new(2.0, c),
+            );
+        }
+        drag_started |= g.drag_started();
+        let name = format!("Move {}", cue_label(cue));
+        g.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));
+
+        let more = cell(cols.more, rect).shrink2(vec2(4.0, 4.0));
+        let m = ui.interact(more, Id::unique(("edit_more", id)), Sense::click());
+        if m.hovered() {
+            painter.rect_filled(more, 4.0, v.widgets.hovered.weak_bg_fill);
+        }
+        for dx in [-6.0, 0.0, 6.0] {
+            painter.circle_filled(more.center() + vec2(dx, 0.0), 2.2, fg);
+        }
+        if m.clicked() && !sel.contains(&id) {
+            *sel = vec![id];
+            edit.table.anchor = Some(id);
+        }
+        let name = format!("More actions for {}", cue_label(cue));
+        m.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));
+        egui::Popup::menu(&m).show(|ui| context_menu(ui, ctx, row, sel, edit, out));
+    }
+    if drag_started {
         let ids: Vec<u64> = if sel.contains(&id) {
             ctx.order
                 .iter()
@@ -916,14 +1018,20 @@ fn draw_row(
         tr.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));
     }
 
-    // Armed checkbox
+    // Armed checkbox (hidden on compact tables: the inspector has it)
+    if !visible(cols.armed) {
+        inline_editor(ui, ctx, cue, rect, name_left, name_cell, inline, edit, out);
+        return;
+    }
     let armed_cell = cell(cols.armed, rect);
     let boxr = Rect::from_center_size(armed_cell.center(), vec2(16.0, 16.0));
-    let ar = ui.interact(
-        boxr.expand(4.0),
-        Id::unique(("edit_armed", id)),
-        Sense::click(),
-    );
+    // Touch: the whole cell is the target.
+    let hit = if ctx.touch {
+        armed_cell
+    } else {
+        boxr.expand(4.0)
+    };
+    let ar = ui.interact(hit, Id::unique(("edit_armed", id)), Sense::click());
     checkbox_glyph(&painter, boxr, cue.armed, ar.hovered());
     if ar.clicked() {
         out.push(Out::Cmd(json!({
@@ -932,8 +1040,24 @@ fn draw_row(
     }
     let name = format!("Armed {}", cue_label(cue));
     ar.widget_info(|| WidgetInfo::selected(Role::CheckBox, true, cue.armed, &name));
+    inline_editor(ui, ctx, cue, rect, name_left, name_cell, inline, edit, out);
+}
 
-    // Inline editor
+/// Inline editor of the number or name cell (double-click / "Rename").
+#[allow(clippy::too_many_arguments)]
+fn inline_editor(
+    ui: &mut Ui,
+    ctx: &RowCtx<'_>,
+    cue: &Cue,
+    rect: Rect,
+    name_left: f32,
+    name_cell: Rect,
+    inline: Option<InlineField>,
+    edit: &mut EditState,
+    out: &mut Vec<Out>,
+) {
+    let id = cue.id;
+    let cols = ctx.cols;
     if let Some(field) = inline {
         let (x, current, what) = match field {
             InlineField::Number => (cols.number, cue.number.as_str(), "number"),
@@ -1118,6 +1242,19 @@ fn context_menu(
         format!(" {n} cues")
     };
     ui.set_min_width(190.0);
+    if ui
+        .button("Rename")
+        .on_hover_text("Edit the name in the row (or double-click the name)")
+        .clicked()
+    {
+        *sel = vec![id];
+        edit.table.inline = Some(Inline {
+            cue: id,
+            field: InlineField::Name,
+            opened: false,
+        });
+        ui.close();
+    }
     if ui
         .button("Preview")
         .on_hover_text("Start this cue without moving the playhead")

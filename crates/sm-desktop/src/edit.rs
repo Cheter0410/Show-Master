@@ -107,16 +107,72 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             .selection
             .iter()
             .any(|id| state.show.cue(*id).is_some());
-        if any_selected {
+        // Inspector placement (see `responsive.rs` for the breakpoints):
+        // - wide and tall: bottom panel, as always;
+        // - wide but short: a side panel, so the table keeps its height;
+        // - compact or short: bottom panel that can be folded to one line,
+        //   never taller than the room left above a few table rows.
+        let screen = crate::responsive::get(ui.ctx());
+        let side = !screen.compact() && screen.short();
+        edit.insp.collapsible = !side && (screen.compact() || screen.short());
+        if !edit.insp.collapsible {
+            edit.insp.collapsed = false;
+        }
+        let frame = egui::Frame::new()
+            .fill(ui.visuals().window_fill)
+            .inner_margin(egui::Margin::symmetric(12, 8));
+        if any_selected && side {
+            let max = (ui.available_width() * 0.55).max(380.0);
+            egui::Panel::right("edit_inspector_side")
+                .resizable(true)
+                .default_size(480.0_f32.min(max))
+                .size_range(360.0..=max)
+                .frame(frame)
+                .show(ui, |ui| {
+                    ui.set_min_height(ui.available_height());
+                    inspector::show(ui, state, tick, &view.selection, edit, &mut out);
+                });
+        } else if any_selected && edit.insp.collapsed {
+            egui::Panel::bottom("edit_inspector_folded")
+                .frame(frame)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let what = match view.selection.as_slice() {
+                            [one] => state.show.cue(*one).map(cue_label).unwrap_or_default(),
+                            many => format!("{} cues selected", many.len()),
+                        };
+                        ui.label(
+                            RichText::new("INSPECTOR")
+                                .small()
+                                .strong()
+                                .color(theme::MUTED),
+                        );
+                        ui.add(egui::Label::new(RichText::new(what).strong()).truncate());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .button("Show inspector")
+                                .on_hover_text("Unfold the inspector")
+                                .clicked()
+                            {
+                                edit.insp.collapsed = false;
+                            }
+                        });
+                    });
+                });
+        } else if any_selected {
+            let avail = ui.available_height();
+            let (default, range) = if edit.insp.collapsible {
+                // Leave the table at least a header and three or four rows.
+                let max = (avail - 170.0).max(150.0);
+                ((avail * 0.5).clamp(150.0, max), 150.0..=max)
+            } else {
+                (340.0, 170.0..=760.0)
+            };
             egui::Panel::bottom("edit_inspector")
                 .resizable(true)
-                .default_size(340.0)
-                .size_range(170.0..=760.0)
-                .frame(
-                    egui::Frame::new()
-                        .fill(ui.visuals().window_fill)
-                        .inner_margin(egui::Margin::symmetric(12, 8)),
-                )
+                .default_size(default)
+                .size_range(range)
+                .frame(frame)
                 .show(ui, |ui| {
                     ui.set_min_height(ui.available_height());
                     inspector::show(ui, state, tick, &view.selection, edit, &mut out);
@@ -182,76 +238,123 @@ fn is_edit(cmd: &Value) -> bool {
 // Add-cue row, list tabs, mini transport
 // ---------------------------------------------------------------------------
 
+/// Add-cue buttons (one per type), or the same entries inside a menu.
+fn add_buttons(app: &App, ui: &mut egui::Ui, out: &mut Vec<Out>, in_menu: bool) {
+    for (kind, label) in ADD_TYPES {
+        let hint = if kind == "audio" {
+            "Add audio cues: choose one or more files".to_string()
+        } else {
+            format!("Add a {} cue after the selection", type_label_of(kind))
+        };
+        let resp = ui
+            .add(egui::Button::new(label))
+            .accessible_name(format!("Add {kind} cue"))
+            .on_hover_text(hint);
+        if resp.clicked() {
+            if kind == "audio" {
+                out.push(Out::AddAudio);
+            } else {
+                let list = app.current_list();
+                let after = app.view.selection.last().copied();
+                out.push(Out::CmdSelect(json!({
+                    "cmd": "add_cue", "kind": kind, "list": list, "after": after,
+                })));
+            }
+            if in_menu {
+                ui.close();
+            }
+        }
+    }
+}
+
+/// Duplicate / Delete / Lists.
+fn selection_buttons(app: &mut App, ui: &mut egui::Ui, out: &mut Vec<Out>) {
+    let has_sel = !app.view.selection.is_empty();
+    if ui
+        .add_enabled(has_sel, egui::Button::new("Duplicate"))
+        .accessible_name("Duplicate selected cues")
+        .on_hover_text("Duplicate the selected cues (Ctrl+D)")
+        .clicked()
+    {
+        out.push(Out::Action("duplicate"));
+    }
+    if ui
+        .add_enabled(
+            has_sel,
+            egui::Button::new(RichText::new("Delete").color(if has_sel {
+                theme::ERROR
+            } else {
+                theme::MUTED
+            })),
+        )
+        .accessible_name("Delete selected cues")
+        .on_hover_text("Delete the selected cues (Delete / Backspace key, undo with Ctrl+Z)")
+        .clicked()
+    {
+        out.push(Out::Action("delete"));
+    }
+    ui.separator();
+    lists_menu(app, ui);
+}
+
+/// GO / Stop all / PANIC and the NEXT label, laid out right to left.
+fn mini_transport(app: &mut App, ui: &mut egui::Ui, touch: bool) {
+    let (h, extra) = if touch { (44.0, 16.0) } else { (30.0, 0.0) };
+    widgets::panic_button(app, ui, egui::vec2(92.0 + extra, h));
+    if ui
+        .add_sized(
+            [84.0 + extra, h],
+            egui::Button::new(RichText::new("Stop all").strong()),
+        )
+        .on_hover_text("Stop all cues (with the stop fade)")
+        .clicked()
+    {
+        app.stop_all();
+    }
+    widgets::go_button(app, ui, egui::vec2(72.0 + extra, h));
+    next_label(app, ui);
+}
+
 fn add_row(app: &mut App, ui: &mut egui::Ui, out: &mut Vec<Out>) {
+    let touch = crate::responsive::get(ui.ctx()).touch;
+    // Fit check: the full row (every cue type as a button) needs the room
+    // of a wide screen; otherwise the types fold into an "Add cue" menu, and
+    // if even that does not fit the transport moves to a second row.
+    let bw = |ui: &egui::Ui, t: &str| App::button_width(ui, t);
+    let sel_w = bw(ui, "Duplicate") + bw(ui, "Delete") + bw(ui, "Lists") + 16.0;
+    let types_w: f32 = ADD_TYPES.iter().map(|(_, l)| bw(ui, l)).sum::<f32>();
+    let transport_w = 248.0 + if touch { 48.0 } else { 0.0 } + 3.0 * 8.0;
+    let avail = ui.available_width();
+    // The full row keeps room for the "NEXT: cue" label; the folded row lets
+    // it shrink (it truncates) before the transport moves down.
+    let full = 70.0 + types_w + sel_w + transport_w + 140.0 <= avail;
+    let one_row = full || bw(ui, "Add cue") + 20.0 + sel_w + transport_w + 40.0 <= avail;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        ui.label(RichText::new("Add cue").color(theme::MUTED));
-        for (kind, label) in ADD_TYPES {
-            let hint = if kind == "audio" {
-                "Add audio cues: choose one or more files".to_string()
-            } else {
-                format!("Add a {} cue after the selection", type_label_of(kind))
-            };
-            let resp = ui
-                .add(egui::Button::new(label))
-                .accessible_name(format!("Add {kind} cue"))
-                .on_hover_text(hint);
-            if resp.clicked() {
-                if kind == "audio" {
-                    out.push(Out::AddAudio);
-                } else {
-                    let list = app.current_list();
-                    let after = app.view.selection.last().copied();
-                    out.push(Out::CmdSelect(json!({
-                        "cmd": "add_cue", "kind": kind, "list": list, "after": after,
-                    })));
-                }
-            }
+        if full {
+            ui.label(RichText::new("Add cue").color(theme::MUTED));
+            add_buttons(app, ui, out, false);
+        } else {
+            ui.menu_button("Add cue", |ui| add_buttons(app, ui, out, true))
+                .response
+                .on_hover_text("Add a cue after the selection");
         }
         ui.separator();
-        let has_sel = !app.view.selection.is_empty();
-        if ui
-            .add_enabled(has_sel, egui::Button::new("Duplicate"))
-            .accessible_name("Duplicate selected cues")
-            .on_hover_text("Duplicate the selected cues (Ctrl+D)")
-            .clicked()
-        {
-            out.push(Out::Action("duplicate"));
+        selection_buttons(app, ui, out);
+        if one_row {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                mini_transport(app, ui, touch);
+            });
         }
-        if ui
-            .add_enabled(
-                has_sel,
-                egui::Button::new(RichText::new("Delete").color(if has_sel {
-                    theme::ERROR
-                } else {
-                    theme::MUTED
-                })),
-            )
-            .accessible_name("Delete selected cues")
-            .on_hover_text("Delete the selected cues (Delete / Backspace key, undo with Ctrl+Z)")
-            .clicked()
-        {
-            out.push(Out::Action("delete"));
-        }
-        ui.separator();
-        lists_menu(app, ui);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let h = 30.0;
-            widgets::panic_button(app, ui, egui::vec2(92.0, h));
-            if ui
-                .add_sized(
-                    [84.0, h],
-                    egui::Button::new(RichText::new("Stop all").strong()),
-                )
-                .on_hover_text("Stop all cues (with the stop fade)")
-                .clicked()
-            {
-                app.stop_all();
-            }
-            widgets::go_button(app, ui, egui::vec2(72.0, h));
-            next_label(app, ui);
-        });
     });
+    if !one_row {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                mini_transport(app, ui, touch);
+            });
+        });
+    }
     let lists = &app.client.state.show.cue_lists;
     if lists.len() > 1 {
         let current = app.current_list();
@@ -289,8 +392,17 @@ fn next_label(app: &App, ui: &mut egui::Ui) {
         Some(c) => cue_label(c),
         None => "end of list".into(),
     };
-    ui.add(egui::Label::new(RichText::new(text).strong()).truncate())
-        .on_hover_text("The cue GO fires next (click the left gutter of a row to change it)");
+    // Only the room left of the transport (a narrow row drops the label).
+    let room = ui.available_width() - 56.0;
+    if room < 50.0 {
+        return;
+    }
+    ui.scope(|ui| {
+        ui.set_max_width(room);
+        ui.add(egui::Label::new(RichText::new(text).strong()).truncate())
+    })
+    .inner
+    .on_hover_text("The cue GO fires next (click the left gutter of a row to change it)");
     ui.label(
         RichText::new(" NEXT ")
             .small()

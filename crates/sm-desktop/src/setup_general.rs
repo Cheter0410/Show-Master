@@ -112,6 +112,29 @@ pub(super) fn general_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
         });
     });
 
+    heading(ui, "This computer");
+    hint(ui, "Stored on this machine only, not in the show file.");
+    form(ui, "general_machine", |ui| {
+        row(ui, "Touch-friendly controls", |ui| {
+            for (pref, label) in crate::prefs::TouchPref::ALL {
+                if ui.selectable_label(st.touch_pref == pref, label).clicked()
+                    && st.touch_pref != pref
+                {
+                    st.touch_pref = pref;
+                    st.outbox_push(super::Out::SetTouch(pref));
+                }
+            }
+            unit(
+                ui,
+                if st.touch_active {
+                    "on now: larger buttons and rows, drag to scroll"
+                } else {
+                    "Auto = on once the touch screen is used"
+                },
+            );
+        });
+    });
+
     heading(ui, "Show timer alarms");
     hint(
         ui,

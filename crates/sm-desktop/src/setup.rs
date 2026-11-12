@@ -60,6 +60,8 @@ pub(super) enum Out {
     ExportDiagnostics,
     /// Show the log folder in the file manager.
     OpenLogFolder,
+    /// Per-machine touch-friendly controls setting (not in the show).
+    SetTouch(crate::prefs::TouchPref),
 }
 
 #[derive(Default)]
@@ -81,6 +83,10 @@ pub struct SetupState {
     hotkey_warning: Option<(String, String)>,
     /// QR code textures per URL (`None` = cannot be encoded).
     qr: HashMap<String, Option<egui::TextureHandle>>,
+    /// Touch-friendly controls setting of this machine (mirrors `App::prefs`).
+    touch_pref: crate::prefs::TouchPref,
+    /// Touch mode is on right now (for the hint next to the setting).
+    touch_active: bool,
 }
 
 impl SetupState {
@@ -141,38 +147,57 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 
     let mut open = true;
     {
+        app.setup.touch_pref = app.prefs.touch;
+        app.setup.touch_active = app.touch_mode();
         let st = &mut app.setup;
         let s = &app.client.state;
+        // Never larger than the main window: on small screens the window
+        // fills the content area (minus a margin) and its body scrolls.
+        let area = ctx.content_rect().shrink(8.0);
+        let size = egui::vec2(860.0_f32.min(area.width()), 600.0_f32.min(area.height()));
+        let min = egui::vec2(640.0_f32.min(area.width()), 420.0_f32.min(area.height()));
         egui::Window::new("Setup")
             .id(Id::unique("setup_window"))
             .open(&mut open)
-            .default_size([860.0, 600.0])
+            .default_size(size)
             .pivot(egui::Align2::CENTER_CENTER)
             .default_pos(ctx.content_rect().center())
-            .min_size([640.0, 420.0])
+            .min_size(min)
+            .max_size(area.size())
+            .constrain_to(area)
             .resizable(true)
             .collapsible(false)
             .show(ctx, |ui| {
-                ui.horizontal_top(|ui| {
-                    tab_column(ui, st);
+                // Narrow window: the tab column becomes a row of tabs on top.
+                let narrow = ui.available_width() < 800.0;
+                let content = |ui: &mut egui::Ui, st: &mut SetupState| {
+                    if live {
+                        banner(
+                            ui,
+                            theme::WARN,
+                            "Live mode: settings are locked. Switch to Edit to change them.",
+                        );
+                    }
+                    egui::ScrollArea::both()
+                        .id_salt("setup_scroll")
+                        .auto_shrink(false)
+                        .scroll_source(crate::responsive::scroll_source(ui.ctx()))
+                        .show(ui, |ui| {
+                            let enabled = !live || st.tab == Tab::About;
+                            ui.add_enabled_ui(enabled, |ui| body(ui, st, s));
+                        });
+                };
+                if narrow {
+                    tab_row(ui, st);
                     ui.separator();
-                    ui.vertical(|ui| {
-                        if live {
-                            banner(
-                                ui,
-                                theme::WARN,
-                                "Live mode: settings are locked. Switch to Edit to change them.",
-                            );
-                        }
-                        egui::ScrollArea::vertical()
-                            .id_salt("setup_scroll")
-                            .auto_shrink(false)
-                            .show(ui, |ui| {
-                                let enabled = !live || st.tab == Tab::About;
-                                ui.add_enabled_ui(enabled, |ui| body(ui, st, s));
-                            });
+                    content(ui, st);
+                } else {
+                    ui.horizontal_top(|ui| {
+                        tab_column(ui, st);
+                        ui.separator();
+                        ui.vertical(|ui| content(ui, st));
                     });
-                });
+                }
             });
     }
     if !open {
@@ -184,13 +209,35 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 }
 
 fn tab_column(ui: &mut egui::Ui, st: &mut SetupState) {
+    let w = if crate::responsive::get(ui.ctx()).touch {
+        170.0
+    } else {
+        140.0
+    };
     ui.vertical(|ui| {
-        ui.set_width(140.0);
+        ui.set_width(w);
         ui.spacing_mut().item_spacing.y = 4.0;
         for (tab, label) in TABS {
-            let b =
-                egui::Button::selectable(st.tab == tab, label).min_size(egui::vec2(140.0, 30.0));
+            let b = egui::Button::selectable(st.tab == tab, label).min_size(egui::vec2(w, 30.0));
             if ui.add(b).clicked() && st.tab != tab {
+                st.tab = tab;
+                st.capture = None;
+                st.confirm_layout = None;
+            }
+        }
+    });
+}
+
+/// Tabs as a wrapping row (narrow setup window).
+fn tab_row(ui: &mut egui::Ui, st: &mut SetupState) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+        for (tab, label) in TABS {
+            if ui
+                .add(egui::Button::selectable(st.tab == tab, label))
+                .clicked()
+                && st.tab != tab
+            {
                 st.tab = tab;
                 st.capture = None;
                 st.confirm_layout = None;
@@ -225,6 +272,7 @@ fn flush(app: &mut App) {
             Out::Error(t) => app.toast_error(t),
             Out::ExportDiagnostics => app.export_diagnostics(),
             Out::OpenLogFolder => app.open_log_folder(),
+            Out::SetTouch(t) => app.prefs.set_touch(t),
         }
     }
 }

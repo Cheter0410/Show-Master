@@ -15,6 +15,23 @@
 //! | Meters + master | Show notes | Event log       |  ---- PANIC ----   |
 //! +------------------------------------------------+--------------------+
 //! ```
+//!
+//! Narrow windows (< 900 px, see `responsive.rs`) stack the zones instead,
+//! so GO and PANIC stay large and reachable without scrolling:
+//!
+//! ```text
+//! +-----------------------------------------------------+
+//! | Time of day | Show time | Timecode | Next auto      |  (compact row)
+//! +--------------------------------------+--------------+
+//! | NEXT  number + name                  |      GO      |
+//! +--------------------------------------+--------------+
+//! | Pause | Stop all | Prev | Next | Reset |   PANIC    |
+//! +-----------------------------------------------------+
+//! | Cue window                                          |
+//! +-----------------------------------------------------+
+//! | [Meters] [Notes] [Log]  (tap to open / close)  ▮▮   |
+//! +-----------------------------------------------------+
+//! ```
 
 #[path = "live_clocks.rs"]
 pub mod clocks;
@@ -46,6 +63,16 @@ pub struct LiveState {
     notes_sent_at: Option<Instant>,
     notes_focused: bool,
     confirm_reset: bool,
+    /// Narrow layout: the open tools pane (`None` = folded).
+    pub tools_tab: Option<ToolsTab>,
+}
+
+/// Panes of the tools strip in the narrow layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolsTab {
+    Meters,
+    Notes,
+    Log,
 }
 
 impl Default for LiveState {
@@ -60,6 +87,7 @@ impl Default for LiveState {
             notes_sent_at: None,
             notes_focused: false,
             confirm_reset: false,
+            tools_tab: None,
         }
     }
 }
@@ -126,6 +154,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         let banner = Rect::from_min_size(r.min, Vec2::new(r.width(), 52.0));
         alarm_banner(app, ui, banner);
         r.min.y = banner.bottom() + GAP;
+    }
+
+    if app.screen.narrow() {
+        stacked(app, ui, r, hc);
+        reset_confirm(app, ui);
+        ui.advance_cursor_after_rect(full);
+        return;
     }
 
     let side_w = (r.width() * 0.3).clamp(300.0, 440.0);
@@ -256,14 +291,22 @@ fn cue_zone(app: &mut App, ui: &mut egui::Ui, rect: Rect, hc: bool) {
                 );
             }
         }
+        let touch = app.screen.touch;
+        let roomy = rect.width() >= 700.0;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.checkbox(&mut app.live.follow, "Follow playhead")
                 .on_hover_text("Keep the NEXT cue in view");
-            ui.label(
-                RichText::new("Double-click a cue to stand it by")
+            if roomy {
+                ui.label(
+                    RichText::new(if touch {
+                        "Double-tap a cue to stand it by"
+                    } else {
+                        "Double-click a cue to stand it by"
+                    })
                     .size(12.0)
                     .color(theme::MUTED),
-            );
+                );
+            }
         });
     });
     ui.add_space(4.0);
@@ -274,6 +317,11 @@ fn cue_zone(app: &mut App, ui: &mut egui::Ui, rect: Rect, hc: bool) {
         selection: &app.view.selection,
         follow: app.live.follow,
         high_contrast: hc,
+        row_h: if app.screen.touch {
+            cues::ROW_H_TOUCH
+        } else {
+            cues::ROW_H
+        },
     };
     let actions = cues::cue_window(&mut ui, &input, &mut app.live.cues);
     for a in actions {
@@ -339,6 +387,8 @@ fn next_panel(app: &mut App, ui: &mut egui::Ui, rect: Rect, hc: bool) {
     let mut ui = child(ui, inner, "live_next_panel");
     let ui = &mut ui;
     ui.spacing_mut().item_spacing.y = 6.0;
+    // Only labels here: no need for touch-sized rows.
+    ui.spacing_mut().interact_size.y = ui.spacing().interact_size.y.min(26.0);
     ui.horizontal(|ui| {
         ui.label(
             RichText::new(" NEXT ")
@@ -379,8 +429,12 @@ fn next_panel(app: &mut App, ui: &mut egui::Ui, rect: Rect, hc: bool) {
 
     // Number (huge, green) and name (large, up to 3 lines), painted as one block.
     let w = ui.available_width();
-    let num_size = (w * 0.16).clamp(34.0, 64.0);
-    let name_size = (num_size * 0.55).clamp(20.0, 32.0);
+    // As large as the width allows, but never taller than the panel (the
+    // narrow layout gives the panel little height).
+    let by_h = (ui.available_height() - 26.0) * 0.85;
+    let num_size = (w * 0.16).min(by_h).clamp(26.0, 64.0);
+    let name_size = (num_size * 0.55).clamp(18.0, 32.0);
+    let name_rows = if by_h < 64.0 { 2 } else { 3 };
     let painter = ui.painter().clone();
     let num_g = (!cue.number.is_empty()).then(|| {
         painter.layout_no_wrap(
@@ -401,7 +455,7 @@ fn next_panel(app: &mut App, ui: &mut egui::Ui, rect: Rect, hc: bool) {
         text,
         (w - num_w).max(40.0),
     );
-    job.wrap.max_rows = 3;
+    job.wrap.max_rows = name_rows;
     let name_g = painter.layout_job(job);
     let num_h = num_g.as_ref().map_or(0.0, |g| g.size().y);
     let block_h = num_h.max(name_g.size().y);
@@ -699,7 +753,14 @@ fn tools_zone(app: &mut App, ui: &mut egui::Ui, rect: Rect, hc: bool) {
     );
     let log = Rect::from_min_max(Pos2::new(notes.right() + GAP, rect.top()), rect.max);
 
-    // Meters + master fader.
+    mix_panel(app, ui, mix, hc);
+    notes_panel(app, ui, notes, hc);
+    log_panel(app, ui, log, hc);
+}
+
+/// Meters + master fader in `mix`.
+fn mix_panel(app: &mut App, ui: &mut egui::Ui, mix: Rect, hc: bool) {
+    let fader_w = 62.0;
     card(ui, mix, hc);
     let inner = mix.shrink(10.0);
     let meter_rect = Rect::from_min_max(
@@ -730,9 +791,6 @@ fn tools_zone(app: &mut App, ui: &mut egui::Ui, rect: Rect, hc: bool) {
     if let Some(db) = app.live.fader.due() {
         app.cmd(json!({ "cmd": "set_master", "db": db }));
     }
-
-    notes_panel(app, ui, notes, hc);
-    log_panel(app, ui, log, hc);
 }
 
 fn notes_panel(app: &mut App, ui: &mut egui::Ui, rect: Rect, hc: bool) {
@@ -845,4 +903,224 @@ fn log_panel(app: &mut App, ui: &mut egui::Ui, rect: Rect, hc: bool) {
                 });
             }
         });
+}
+
+// ---------------------------------------------------------------------------
+// Narrow layout: everything stacked
+// ---------------------------------------------------------------------------
+
+fn stacked(app: &mut App, ui: &mut egui::Ui, r: Rect, hc: bool) {
+    let touch = app.screen.touch;
+    let clock_h = 50.0;
+    let top_h = (r.height() * 0.24).clamp(104.0, 150.0);
+    let row_h = if touch { 52.0 } else { 46.0 };
+    let strip_h = if touch { 48.0 } else { 34.0 };
+    let fixed = clock_h + top_h + row_h + strip_h + GAP * 4.0;
+    // Room for the cue window and an open tools pane together.
+    let shared = (r.height() - fixed).max(0.0);
+    let mut pane_h = if app.live.tools_tab.is_some() {
+        (r.height() * 0.3).clamp(130.0, 220.0)
+    } else {
+        0.0
+    };
+    // Too little room for both: the open pane takes the cue window's place
+    // until its tab is tapped again (GO, PANIC and transport stay).
+    let min_cues = 150.0;
+    if pane_h > 0.0 && shared - pane_h - GAP < min_cues {
+        pane_h = shared - GAP;
+    }
+
+    let mut y = r.top();
+    let mut take = |h: f32| {
+        let rect = Rect::from_min_size(Pos2::new(r.left(), y), Vec2::new(r.width(), h));
+        y += h + GAP;
+        rect
+    };
+    let clocks = take(clock_h);
+    let top = take(top_h);
+    let transport = take(row_h);
+    let bottom_h = strip_h + if pane_h > 0.0 { pane_h + GAP } else { 0.0 };
+    let cue_rect = Rect::from_min_max(
+        Pos2::new(r.left(), y),
+        Pos2::new(r.right(), (r.bottom() - bottom_h - GAP).max(y)),
+    );
+    let tools = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - bottom_h), r.max);
+
+    if clocks::clock_strip(ui, clocks, &app.client.tick) {
+        app.cmd(json!({ "cmd": "reset_show_clock" }));
+    }
+
+    // NEXT panel and a big GO (right: thumb side on a tablet held in landscape).
+    let go_w = (r.width() * 0.32).clamp(180.0, 300.0);
+    let go = Rect::from_min_max(Pos2::new(top.right() - go_w, top.top()), top.max);
+    let next = Rect::from_min_max(top.min, Pos2::new(go.left() - GAP, top.bottom()));
+    next_panel(app, ui, next, hc);
+    {
+        let mut c = child(ui, go, "live_go_stacked");
+        widgets::go_button(app, &mut c, go.size());
+        let has_next = app
+            .current_list()
+            .and_then(|l| app.client.state.playhead(l))
+            .is_some();
+        if !has_next {
+            c.painter().text(
+                Pos2::new(go.center().x, go.bottom() - 8.0),
+                Align2::CENTER_BOTTOM,
+                "no cue standing by",
+                FontId::proportional(13.0),
+                Color32::from_white_alpha(210),
+            );
+        }
+    }
+
+    // Transport row; PANIC is wider and at the far right.
+    {
+        let mut c = child(ui, transport, "live_transport_stacked");
+        let ui = &mut c;
+        ui.spacing_mut().item_spacing = Vec2::splat(GAP);
+        let unit = (transport.width() - GAP * 5.0) / 6.6;
+        let b = Vec2::new(unit, row_h);
+        let paused = app.client.state.paused_all;
+        ui.horizontal(|ui| {
+            let (label, hint) = if paused {
+                ("Resume", "Resume all paused cues")
+            } else {
+                ("Pause", "Pause all running cues")
+            };
+            if tbutton(ui, b, label, hint, paused.then_some(theme::PAUSED)) {
+                app.toggle_pause();
+            }
+            if tbutton(
+                ui,
+                b,
+                "Stop all",
+                "Stop all cues (with the stop fade)",
+                None,
+            ) {
+                app.stop_all();
+            }
+            if tbutton(ui, b, "Prev", "Move the playhead up (does not fire)", None) {
+                app.step_playhead(false);
+            }
+            if tbutton(
+                ui,
+                b,
+                "Next",
+                "Move the playhead down (does not fire)",
+                None,
+            ) {
+                app.step_playhead(true);
+            }
+            if tbutton(
+                ui,
+                b,
+                "Reset",
+                "Stop all, playhead to the top, clear loads and reset the show clock (asks first)",
+                None,
+            ) {
+                app.live.confirm_reset = true;
+            }
+            let rest = ui.available_width();
+            widgets::panic_button(app, ui, Vec2::new(rest, row_h));
+        });
+        if app.panic_armed() {
+            ui.ctx().request_repaint_after(Duration::from_millis(50));
+        }
+    }
+
+    if cue_rect.height() >= 60.0 {
+        cue_zone(app, ui, cue_rect, hc);
+    }
+    tools_strip(app, ui, tools, strip_h, hc);
+}
+
+/// Tab strip (Meters / Notes / Log) with one pane below it; tapping the open
+/// tab folds the pane. Small level bars stay visible in the strip.
+fn tools_strip(app: &mut App, ui: &mut egui::Ui, rect: Rect, strip_h: f32, hc: bool) {
+    // The pane laid out for this frame (a tap below takes effect next frame).
+    let open = app.live.tools_tab;
+    let strip = Rect::from_min_size(rect.min, Vec2::new(rect.width(), strip_h));
+    {
+        let mut c = child(ui, strip, "live_tools_tabs");
+        c.horizontal(|ui| {
+            ui.set_height(strip_h);
+            for (tab, label) in [
+                (ToolsTab::Meters, "Meters"),
+                (ToolsTab::Notes, "Notes"),
+                (ToolsTab::Log, "Log"),
+            ] {
+                let on = app.live.tools_tab == Some(tab);
+                let resp = ui
+                    .add(
+                        egui::Button::new(RichText::new(label).strong())
+                            .selected(on)
+                            .min_size(Vec2::new(84.0, strip_h - 4.0)),
+                    )
+                    .on_hover_text(if on {
+                        "Tap again to fold"
+                    } else {
+                        "Show this pane"
+                    });
+                if resp.clicked() {
+                    app.live.tools_tab = if on { None } else { Some(tab) };
+                    ui.ctx().request_repaint();
+                }
+            }
+        });
+        // Mini meters at the right end of the strip.
+        let n = app.live.ballistics.channels.len();
+        if n > 0 {
+            let w = (strip.width() * 0.3).min(240.0);
+            let area = Rect::from_min_max(
+                Pos2::new(strip.right() - w, strip.top() + 6.0),
+                Pos2::new(strip.right(), strip.bottom() - 6.0),
+            );
+            let p = ui.painter_at(area);
+            let h = ((area.height() - (n as f32 - 1.0) * 2.0) / n as f32).clamp(2.0, 8.0);
+            for (i, ch) in app.live.ballistics.channels.iter().enumerate() {
+                let top = area.top() + i as f32 * (h + 2.0);
+                if top + h > area.bottom() + 0.5 {
+                    break;
+                }
+                let bar =
+                    Rect::from_min_size(Pos2::new(area.left(), top), Vec2::new(area.width(), h));
+                p.rect_filled(bar, 1.0, Color32::from_gray(if hc { 40 } else { 32 }));
+                let f = meters::frac(ch.peak);
+                let color = if ch.peak > -3.0 {
+                    theme::ERROR
+                } else if ch.peak > -12.0 {
+                    theme::PAUSED
+                } else {
+                    theme::NEXT
+                };
+                let mut fill = bar;
+                fill.set_width(bar.width() * f);
+                p.rect_filled(fill, 1.0, color);
+            }
+        }
+    }
+    let pane = Rect::from_min_max(Pos2::new(rect.left(), strip.bottom() + GAP), rect.max);
+    if open != Some(ToolsTab::Notes) {
+        flush_notes(app);
+    }
+    if pane.height() < 40.0 {
+        return;
+    }
+    match open {
+        Some(ToolsTab::Meters) => mix_panel(app, ui, pane, hc),
+        Some(ToolsTab::Notes) => notes_panel(app, ui, pane, hc),
+        Some(ToolsTab::Log) => log_panel(app, ui, pane, hc),
+        None => {}
+    }
+}
+
+/// Send typed notes whose editor is no longer shown.
+fn flush_notes(app: &mut App) {
+    let live = &mut app.live;
+    if live.notes_dirty_at.take().is_some() {
+        live.notes_focused = false;
+        live.notes_sent_at = Some(Instant::now());
+        let text = live.notes.clone();
+        app.cmd(json!({ "cmd": "set_notes", "text": text }));
+    }
 }

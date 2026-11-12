@@ -11,7 +11,9 @@ pub mod edit;
 pub mod live;
 pub mod model;
 pub mod open_files;
+pub mod prefs;
 pub mod recent;
+pub mod responsive;
 pub mod setup;
 pub mod theme;
 pub mod util;
@@ -43,7 +45,7 @@ pub fn run(
         .with_title("Show Master")
         .with_app_id("showmaster")
         .with_inner_size([1440.0, 900.0])
-        .with_min_inner_size([960.0, 600.0])
+        .with_min_inner_size(responsive::MIN_SIZE)
         .with_drag_and_drop(true);
     if let Some(icon) = icon() {
         viewport = viewport.with_icon(icon);
@@ -64,6 +66,7 @@ pub fn run(
             open_files::set_repaint_context(&cc.egui_ctx);
             let mut app = App::new(&cc.egui_ctx, client, open);
             app.recent = recent::Recent::load();
+            app.prefs = prefs::Prefs::load();
             Ok(Box::new(Window(app)))
         }),
     )

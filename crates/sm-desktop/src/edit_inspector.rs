@@ -33,6 +33,32 @@ pub struct InspectorState {
     pub wave_drag: Option<audio::WaveDrag>,
     renumber_start: String,
     renumber_step: String,
+    /// The inspector can be folded away (short / compact screens).
+    pub collapsible: bool,
+    /// Folded: only a one-line strip is shown.
+    pub collapsed: bool,
+}
+
+/// "Hide" button of a collapsible inspector (right-to-left layouts).
+fn hide_button(ui: &mut Ui, st: &mut InspectorState) {
+    if st.collapsible
+        && ui
+            .button("Hide")
+            .accessible_name("Hide inspector")
+            .on_hover_text("Fold the inspector away to give the cue table more room")
+            .clicked()
+    {
+        st.collapsed = true;
+    }
+}
+
+/// Scroll area for the inspector body: both directions, so fields wider
+/// than a small screen stay reachable.
+fn body_scroll(ui: &Ui, salt: &str) -> egui::ScrollArea {
+    egui::ScrollArea::both()
+        .id_salt(salt)
+        .auto_shrink(false)
+        .scroll_source(crate::responsive::scroll_source(ui.ctx()))
 }
 
 pub(crate) fn cue_patch(id: u64, patch: Value) -> Value {
@@ -97,15 +123,9 @@ fn single(
         *tab = Tab::Basic;
     }
     let running = tick.active(cue.id).is_some();
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(type_label(cue).to_uppercase())
-                .small()
-                .strong()
-                .color(theme::MUTED),
-        );
-        ui.add(egui::Label::new(RichText::new(cue_label(cue)).strong().size(16.0)).truncate());
-        ui.add_space(12.0);
+    // Narrow inspector: the tabs move to a second row.
+    let two_rows = ui.available_width() < 780.0;
+    let tabs = |ui: &mut Ui, tab: &mut Tab| {
         tab_button(ui, tab, Tab::Basic, "Basic");
         tab_button(ui, tab, Tab::Timing, "Timing");
         if let Some(k) = kind_tab {
@@ -114,7 +134,37 @@ fn single(
         if is_audio {
             tab_button(ui, tab, Tab::Routing, "Routing");
         }
+    };
+    let collapsible = edit.insp.collapsible;
+    let mut collapse = false;
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(type_label(cue).to_uppercase())
+                .small()
+                .strong()
+                .color(theme::MUTED),
+        );
+        let reserve = if two_rows { 300.0 } else { 0.0 };
+        ui.scope(|ui| {
+            if two_rows {
+                ui.set_max_width((ui.available_width() - reserve).max(60.0));
+            }
+            ui.add(egui::Label::new(RichText::new(cue_label(cue)).strong().size(16.0)).truncate());
+        });
+        if !two_rows {
+            ui.add_space(12.0);
+            tabs(ui, tab);
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if collapsible
+                && ui
+                    .button("Hide")
+                    .accessible_name("Hide inspector")
+                    .on_hover_text("Fold the inspector away to give the cue table more room")
+                    .clicked()
+            {
+                collapse = true;
+            }
             if ui
                 .button(RichText::new("Delete").color(theme::ERROR))
                 .accessible_name("Delete this cue")
@@ -141,28 +191,31 @@ fn single(
             }
         });
     });
+    if two_rows {
+        ui.horizontal(|ui| tabs(ui, tab));
+    }
+    if collapse {
+        edit.insp.collapsed = true;
+    }
     ui.separator();
     let tab = edit.insp.tab;
-    egui::ScrollArea::vertical()
-        .id_salt("insp_scroll")
-        .auto_shrink(false)
-        .show(ui, |ui| {
-            ui.add_space(2.0);
-            match tab {
-                Tab::Basic => basic_tab(ui, cue, edit, out),
-                Tab::Timing => timing_tab(ui, show, cue, edit, out),
-                Tab::Kind => match &cue.kind {
-                    CueKind::Audio(_) => audio::audio_tab(ui, state, tick, cue, edit, out),
-                    CueKind::Fade(_) => fade_tab(ui, show, cue, edit, out),
-                    CueKind::Midi(_) => midi_tab(ui, state, cue, edit, out),
-                    CueKind::Timecode(_) => timecode_tab(ui, show, cue, edit, out),
-                    CueKind::Control(_) => control_tab(ui, show, cue, edit, out),
-                    CueKind::Group(_) => group_tab(ui, cue, out),
-                    CueKind::Memo => {}
-                },
-                Tab::Routing => audio::routing_tab(ui, show, cue, out),
-            }
-        });
+    body_scroll(ui, "insp_scroll").show(ui, |ui| {
+        ui.add_space(2.0);
+        match tab {
+            Tab::Basic => basic_tab(ui, cue, edit, out),
+            Tab::Timing => timing_tab(ui, show, cue, edit, out),
+            Tab::Kind => match &cue.kind {
+                CueKind::Audio(_) => audio::audio_tab(ui, state, tick, cue, edit, out),
+                CueKind::Fade(_) => fade_tab(ui, show, cue, edit, out),
+                CueKind::Midi(_) => midi_tab(ui, state, cue, edit, out),
+                CueKind::Timecode(_) => timecode_tab(ui, show, cue, edit, out),
+                CueKind::Control(_) => control_tab(ui, show, cue, edit, out),
+                CueKind::Group(_) => group_tab(ui, cue, out),
+                CueKind::Memo => {}
+            },
+            Tab::Routing => audio::routing_tab(ui, show, cue, out),
+        }
+    });
 }
 
 fn grid(id: impl std::hash::Hash + std::fmt::Debug) -> egui::Grid {
@@ -191,6 +244,15 @@ fn columns(
     right: impl FnOnce(&mut Ui, &mut EditState, &mut Vec<Out>),
 ) {
     let (edit, out) = cx;
+    // Not enough room for two columns: stack them.
+    if ui.available_width() < left_w + 280.0 {
+        ui.vertical(|ui| {
+            left(ui, edit, out);
+            ui.add_space(8.0);
+            right(ui, edit, out);
+        });
+        return;
+    }
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(left_w);
@@ -1390,8 +1452,6 @@ fn common<T: PartialEq + Copy>(cues: &[&Cue], get: impl Fn(&Cue) -> T) -> Option
 }
 
 fn bulk(ui: &mut Ui, cues: &[&Cue], edit: &mut EditState, out: &mut Vec<Out>) {
-    let ids: Vec<u64> = cues.iter().map(|c| c.id).collect();
-    let patch = |p: Value| Out::Cmd(json!({ "cmd": "update_cues", "cues": ids, "patch": p }));
     ui.horizontal(|ui| {
         ui.label(
             RichText::new(format!("{} cues selected", cues.len()))
@@ -1399,8 +1459,17 @@ fn bulk(ui: &mut Ui, cues: &[&Cue], edit: &mut EditState, out: &mut Vec<Out>) {
                 .size(16.0),
         );
         hint(ui, "changes apply to all selected cues");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            hide_button(ui, &mut edit.insp);
+        });
     });
     ui.separator();
+    body_scroll(ui, "insp_bulk_scroll").show(ui, |ui| bulk_body(ui, cues, edit, out));
+}
+
+fn bulk_body(ui: &mut Ui, cues: &[&Cue], edit: &mut EditState, out: &mut Vec<Out>) {
+    let ids: Vec<u64> = cues.iter().map(|c| c.id).collect();
+    let patch = |p: Value| Out::Cmd(json!({ "cmd": "update_cues", "cues": ids, "patch": p }));
     let armed = common(cues, |c| c.armed);
     let cont = common(cues, |c| c.continue_mode);
     let color = cues

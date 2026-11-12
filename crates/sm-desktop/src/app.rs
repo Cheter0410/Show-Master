@@ -82,7 +82,14 @@ pub struct App {
     last_go: Option<Instant>,
     panic_tap: Option<Instant>,
     allow_close: bool,
-    high_contrast: Option<bool>,
+    /// Style last applied: (high contrast, touch mode).
+    style_key: Option<(bool, bool)>,
+    /// Per-machine preferences (touch mode).
+    pub prefs: crate::prefs::Prefs,
+    /// A touch event was seen this session (drives touch mode "Auto").
+    pub touch_seen: bool,
+    /// Size class of the window this frame.
+    pub screen: crate::responsive::Screen,
     recovery_asked: bool,
     pub goto_text: String,
     focus_goto: bool,
@@ -112,7 +119,10 @@ impl App {
             last_go: None,
             panic_tap: None,
             allow_close: false,
-            high_contrast: None,
+            style_key: None,
+            prefs: crate::prefs::Prefs::default(),
+            touch_seen: false,
+            screen: crate::responsive::Screen::default(),
             recovery_asked: false,
             goto_text: String::new(),
             focus_goto: false,
@@ -732,13 +742,24 @@ impl App {
     // Frame
     // ------------------------------------------------------------------
 
+    /// Touch-friendly controls are on (setting, or "Auto" and a touch was seen).
+    pub fn touch_mode(&self) -> bool {
+        self.prefs.touch.resolve(self.touch_seen)
+    }
+
     fn apply_theme(&mut self, ctx: &egui::Context) {
-        let hc = self.client.state.show.settings.high_contrast;
-        if self.high_contrast != Some(hc) {
-            ctx.set_theme(egui::Theme::Dark);
-            theme::apply(ctx, hc);
-            self.high_contrast = Some(hc);
+        if !self.touch_seen && ctx.input(|i| i.has_touch_screen()) {
+            self.touch_seen = true;
         }
+        let touch = self.touch_mode();
+        let key = (self.client.state.show.settings.high_contrast, touch);
+        if self.style_key != Some(key) {
+            ctx.set_theme(egui::Theme::Dark);
+            theme::apply(ctx, key.0, key.1);
+            self.style_key = Some(key);
+        }
+        self.screen = crate::responsive::Screen::new(ctx.content_rect().size(), touch);
+        crate::responsive::store(ctx, self.screen);
     }
 
     /// Everything that is not drawing: state, replies, signals, input.
@@ -881,8 +902,84 @@ impl App {
         }
     }
 
+    /// File menu entries (also the folded "Menu" on narrow screens).
+    fn file_menu_items(&mut self, ui: &mut egui::Ui) {
+        if ui.button("New show").clicked() {
+            self.new_show();
+        }
+        if ui.button("Open…").clicked() {
+            self.open_show_dialog();
+        }
+        let recent: Vec<PathBuf> = self.recent.existing().cloned().collect();
+        ui.add_enabled_ui(!recent.is_empty(), |ui| {
+            ui.menu_button("Open recent", |ui| {
+                for p in &recent {
+                    let name = p
+                        .file_stem()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("show")
+                        .to_string();
+                    if ui
+                        .button(name)
+                        .on_hover_text(p.display().to_string())
+                        .clicked()
+                    {
+                        self.open_show(p.clone());
+                    }
+                }
+                ui.separator();
+                if ui.button("Clear list").clicked() {
+                    self.recent.clear();
+                }
+            });
+        });
+        ui.separator();
+        if ui.button("Save").clicked() {
+            self.save(None);
+        }
+        if ui.button("Save as…").clicked() {
+            self.save_as(None);
+        }
+        ui.separator();
+        if ui
+            .button("Export diagnostics…")
+            .on_hover_text("Log, system and show state in one text file, for support")
+            .clicked()
+        {
+            self.export_diagnostics();
+        }
+        if ui
+            .button("Collect media into show folder")
+            .on_hover_text("Copy all audio files next to the showfile")
+            .clicked()
+        {
+            self.cmd_then(json!({ "cmd": "collect_media" }), |app, r| match r {
+                Ok(v) => app.toast(format!(
+                    "Collected {} file(s)",
+                    v["copied"].as_u64().unwrap_or(0)
+                )),
+                Err(e) => app.toast_error(App::error_text(&e)),
+            });
+        }
+    }
+
+    /// Width of a button with `text` (for fitting toolbars).
+    pub fn button_width(ui: &egui::Ui, text: &str) -> f32 {
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let w = ui
+            .painter()
+            .layout_no_wrap(text.to_string(), font, Color32::WHITE)
+            .size()
+            .x;
+        w + 2.0 * ui.spacing().button_padding.x + ui.spacing().item_spacing.x
+    }
+
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let live = self.is_live();
+        let screen = self.screen;
+        // Narrow screens (or compact + touch): File, Save, Undo and Redo fold
+        // into one "Menu"; the "Go to cue" caption is dropped.
+        let fold = screen.fold_toolbar();
         ui.horizontal(|ui| {
             if live {
                 ui.label(
@@ -892,98 +989,6 @@ impl App {
                         .background_color(theme::LIVE)
                         .size(16.0),
                 );
-            }
-            let s = &self.client.state;
-            let title = if s.dirty {
-                format!("{} *", s.show.name)
-            } else {
-                s.show.name.clone()
-            };
-            ui.label(RichText::new(title).strong().size(17.0))
-                .on_hover_text(
-                    s.show_path
-                        .clone()
-                        .unwrap_or_else(|| "Not saved yet".into()),
-                );
-            ui.separator();
-            if !live {
-                ui.menu_button("File", |ui| {
-                    if ui.button("New show").clicked() {
-                        self.new_show();
-                    }
-                    if ui.button("Open…").clicked() {
-                        self.open_show_dialog();
-                    }
-                    let recent: Vec<PathBuf> = self.recent.existing().cloned().collect();
-                    ui.add_enabled_ui(!recent.is_empty(), |ui| {
-                        ui.menu_button("Open recent", |ui| {
-                            for p in &recent {
-                                let name = p
-                                    .file_stem()
-                                    .and_then(|n| n.to_str())
-                                    .unwrap_or("show")
-                                    .to_string();
-                                if ui
-                                    .button(name)
-                                    .on_hover_text(p.display().to_string())
-                                    .clicked()
-                                {
-                                    self.open_show(p.clone());
-                                }
-                            }
-                            ui.separator();
-                            if ui.button("Clear list").clicked() {
-                                self.recent.clear();
-                            }
-                        });
-                    });
-                    ui.separator();
-                    if ui.button("Save").clicked() {
-                        self.save(None);
-                    }
-                    if ui.button("Save as…").clicked() {
-                        self.save_as(None);
-                    }
-                    ui.separator();
-                    if ui
-                        .button("Export diagnostics…")
-                        .on_hover_text("Log, system and show state in one text file, for support")
-                        .clicked()
-                    {
-                        self.export_diagnostics();
-                    }
-                    if ui
-                        .button("Collect media into show folder")
-                        .on_hover_text("Copy all audio files next to the showfile")
-                        .clicked()
-                    {
-                        self.cmd_then(json!({ "cmd": "collect_media" }), |app, r| match r {
-                            Ok(v) => app.toast(format!(
-                                "Collected {} file(s)",
-                                v["copied"].as_u64().unwrap_or(0)
-                            )),
-                            Err(e) => app.toast_error(App::error_text(&e)),
-                        });
-                    }
-                });
-                if ui.button("Save").clicked() {
-                    self.save(None);
-                }
-                let (can_undo, can_redo) = (self.client.state.can_undo, self.client.state.can_redo);
-                if ui
-                    .add_enabled(can_undo, egui::Button::new("Undo"))
-                    .on_hover_text("Undo")
-                    .clicked()
-                {
-                    self.cmd(json!({ "cmd": "undo" }));
-                }
-                if ui
-                    .add_enabled(can_redo, egui::Button::new("Redo"))
-                    .on_hover_text("Redo")
-                    .clicked()
-                {
-                    self.cmd(json!({ "cmd": "redo" }));
-                }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
@@ -1000,10 +1005,16 @@ impl App {
                 self.update_button(ui);
                 let goto = ui.add(
                     egui::TextEdit::singleline(&mut self.goto_text)
-                        .hint_text("#")
-                        .desired_width(56.0)
+                        .hint_text(if screen.compact() { "Cue #" } else { "#" })
+                        .desired_width(match (screen.touch, screen.compact()) {
+                            (true, _) => 76.0,
+                            (false, true) => 60.0,
+                            (false, false) => 56.0,
+                        })
                         .id(Id::unique("goto_box")),
                 );
+                ui.ctx()
+                    .accesskit_node_builder(goto.id, |b| b.set_label("Go to cue number"));
                 if self.focus_goto {
                     goto.request_focus();
                     self.focus_goto = false;
@@ -1012,7 +1023,96 @@ impl App {
                     let n = std::mem::take(&mut self.goto_text);
                     self.goto_number(&n);
                 }
-                ui.label("Go to cue");
+                if !screen.compact() {
+                    ui.label("Go to cue");
+                }
+                // The rest, left to right: show title (truncated) and file buttons.
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    let tools: f32 = if live {
+                        0.0
+                    } else if fold {
+                        Self::button_width(ui, "Menu") + 12.0
+                    } else {
+                        ["File", "Save", "Undo", "Redo"]
+                            .iter()
+                            .map(|t| Self::button_width(ui, t))
+                            .sum::<f32>()
+                            + 12.0
+                    };
+                    let title_w = (ui.available_width() - tools).max(40.0);
+                    let s = &self.client.state;
+                    let title = if s.dirty {
+                        format!("{} *", s.show.name)
+                    } else {
+                        s.show.name.clone()
+                    };
+                    let path = s
+                        .show_path
+                        .clone()
+                        .unwrap_or_else(|| "Not saved yet".into());
+                    let t = ui
+                        .scope(|ui| {
+                            ui.set_max_width(title_w);
+                            ui.add(
+                                egui::Label::new(RichText::new(title).strong().size(17.0))
+                                    .truncate()
+                                    .sense(egui::Sense::click()),
+                            )
+                        })
+                        .inner;
+                    // Tap alternative to the hover text (touch screens have no hover).
+                    if t.on_hover_text(&path).clicked() {
+                        self.toast(path);
+                    }
+                    if live {
+                        return;
+                    }
+                    ui.separator();
+                    let (can_undo, can_redo) =
+                        (self.client.state.can_undo, self.client.state.can_redo);
+                    if fold {
+                        ui.menu_button("Menu", |ui| {
+                            if ui.button("Save").clicked() {
+                                self.save(None);
+                            }
+                            if ui
+                                .add_enabled(can_undo, egui::Button::new("Undo"))
+                                .clicked()
+                            {
+                                self.cmd(json!({ "cmd": "undo" }));
+                            }
+                            if ui
+                                .add_enabled(can_redo, egui::Button::new("Redo"))
+                                .clicked()
+                            {
+                                self.cmd(json!({ "cmd": "redo" }));
+                            }
+                            ui.separator();
+                            self.file_menu_items(ui);
+                        })
+                        .response
+                        .on_hover_text("File, save, undo and redo");
+                        return;
+                    }
+                    ui.menu_button("File", |ui| self.file_menu_items(ui));
+                    if ui.button("Save").clicked() {
+                        self.save(None);
+                    }
+                    if ui
+                        .add_enabled(can_undo, egui::Button::new("Undo"))
+                        .on_hover_text("Undo")
+                        .clicked()
+                    {
+                        self.cmd(json!({ "cmd": "undo" }));
+                    }
+                    if ui
+                        .add_enabled(can_redo, egui::Button::new("Redo"))
+                        .on_hover_text("Redo")
+                        .clicked()
+                    {
+                        self.cmd(json!({ "cmd": "redo" }));
+                    }
+                });
             });
         });
     }
@@ -1064,35 +1164,158 @@ impl App {
         }
     }
 
-    fn status_bar(&mut self, ui: &mut egui::Ui) {
+    /// Status bar items: (text, colour, priority, hint). Lower priority
+    /// numbers are kept longest when the bar is too narrow.
+    fn status_items(&self) -> Vec<(String, Option<Color32>, u8, Option<&'static str>)> {
         let s = &self.client.state;
         let t = &self.client.tick;
+        let mut items = Vec::new();
+        if let Some(err) = &s.audio.error {
+            items.push((format!("Audio: {err}"), Some(theme::ERROR), 0, None));
+        } else if s.audio.is_null {
+            items.push((
+                "No audio device (silent)".to_string(),
+                Some(theme::WARN),
+                0,
+                None,
+            ));
+        }
+        items.push((
+            format!("{} · {}", s.audio.backend, s.audio.device),
+            None,
+            3,
+            None,
+        ));
+        items.push((format!("{} Hz", s.audio.sample_rate), None, 4, None));
+        if let Some(b) = s.audio.buffer_frames {
+            items.push((format!("{b} frames"), None, 5, None));
+        }
+        items.push((format!("{} out", s.audio.channels), None, 5, None));
+        items.push((format!("CPU {:.0}%", t.cpu * 100.0), None, 1, None));
+        items.push((
+            format!("Underruns {}", t.underruns),
+            (t.underruns > 0).then_some(theme::ERROR),
+            1,
+            None,
+        ));
+        items.push((format!("Voices {}", t.voices), None, 4, None));
+        items.push((format!("MIDI ports {}", s.midi.ports.len()), None, 6, None));
+        if s.midi.rtp.enabled {
+            let up = s
+                .midi
+                .rtp
+                .peers
+                .iter()
+                .filter(|p| p.state == "connected")
+                .count();
+            items.push((
+                format!("RTP-MIDI {up}/{}", s.midi.rtp.peers.len()),
+                None,
+                6,
+                None,
+            ));
+        }
+        items.push((format!("Remotes {}", s.remote.clients.len()), None, 6, None));
+        if let Some(url) = s.remote.urls.first() {
+            items.push((
+                format!("{url}/remote"),
+                None,
+                7,
+                Some("Open this address on a tablet in the same network (Setup > Remote shows a QR code)"),
+            ));
+        }
+        items
+    }
+
+    /// One line. Items that do not fit (lowest priority first) move into a
+    /// "Details" popup that opens on click / tap; the audio error is shortened.
+    fn status_bar(&mut self, ui: &mut egui::Ui) {
+        let items = self.status_items();
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 14.0;
-            let small = |t: String| RichText::new(t).small();
-            if let Some(err) = &s.audio.error {
-                ui.label(small(format!("Audio: {err}")).color(theme::ERROR)).on_hover_text(err);
-            } else if s.audio.is_null {
-                ui.label(small("No audio device (silent)".into()).color(theme::WARN));
+            let small = |t: &str| RichText::new(t).small();
+            let font = egui::TextStyle::Small.resolve(ui.style());
+            let gap = ui.spacing().item_spacing.x;
+            let widths: Vec<f32> = items
+                .iter()
+                .map(|(t, ..)| {
+                    ui.painter()
+                        .layout_no_wrap(t.clone(), font.clone(), Color32::WHITE)
+                        .size()
+                        .x
+                        + gap
+                })
+                .collect();
+            let avail = ui.available_width();
+            let total: f32 = widths.iter().sum();
+            let mut shown = vec![true; items.len()];
+            let mut error_w = None;
+            if total > avail {
+                let details_w = Self::button_width(ui, "Details") + 4.0;
+                let mut budget = avail - details_w;
+                // The audio problem stays, shortened to at most 40 % of the bar.
+                if items.first().is_some_and(|i| i.2 == 0) {
+                    let w = widths[0].min(avail * 0.4);
+                    error_w = Some(w - gap);
+                    budget -= w;
+                }
+                let mut order: Vec<usize> = (0..items.len()).filter(|i| items[*i].2 > 0).collect();
+                order.sort_by_key(|i| items[*i].2);
+                shown = vec![false; items.len()];
+                if error_w.is_some() {
+                    shown[0] = true;
+                }
+                for i in order {
+                    if widths[i] <= budget {
+                        budget -= widths[i];
+                        shown[i] = true;
+                    } else {
+                        // Keep the display order stable: stop at the first misfit.
+                        break;
+                    }
+                }
             }
-            ui.label(small(format!("{} · {}", s.audio.backend, s.audio.device)));
-            ui.label(small(format!("{} Hz", s.audio.sample_rate)));
-            if let Some(b) = s.audio.buffer_frames {
-                ui.label(small(format!("{b} frames")));
+            for (i, (text, color, prio, hint)) in items.iter().enumerate() {
+                if !shown[i] {
+                    continue;
+                }
+                let mut rt = small(text);
+                if let Some(c) = color {
+                    rt = rt.color(*c);
+                }
+                let resp = if *prio == 0 && error_w.is_some() {
+                    ui.scope(|ui| {
+                        ui.set_max_width(error_w.unwrap_or(200.0));
+                        ui.add(egui::Label::new(rt).truncate())
+                    })
+                    .inner
+                } else {
+                    ui.label(rt)
+                };
+                if *prio == 0 {
+                    resp.on_hover_text(text.as_str());
+                } else if let Some(h) = hint {
+                    resp.on_hover_text(*h);
+                }
             }
-            ui.label(small(format!("{} out", s.audio.channels)));
-            ui.label(small(format!("CPU {:.0}%", t.cpu * 100.0)));
-            let under = small(format!("Underruns {}", t.underruns));
-            ui.label(if t.underruns > 0 { under.color(theme::ERROR) } else { under });
-            ui.label(small(format!("Voices {}", t.voices)));
-            ui.label(small(format!("MIDI ports {}", s.midi.ports.len())));
-            if s.midi.rtp.enabled {
-                let up = s.midi.rtp.peers.iter().filter(|p| p.state == "connected").count();
-                ui.label(small(format!("RTP-MIDI {up}/{}", s.midi.rtp.peers.len())));
-            }
-            ui.label(small(format!("Remotes {}", s.remote.clients.len())));
-            if let Some(url) = s.remote.urls.first() {
-                ui.label(small(format!("{url}/remote"))).on_hover_text("Open this address on a tablet in the same network (Setup > Remote shows a QR code)");
+            if shown.iter().any(|s| !s) || error_w.is_some() {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.menu_button(small("Details"), |ui| {
+                        ui.set_max_width(self.screen.dialog_width(420.0));
+                        for (text, color, _, hint) in &items {
+                            let mut rt = RichText::new(text);
+                            if let Some(c) = color {
+                                rt = rt.color(*c);
+                            }
+                            ui.add(egui::Label::new(rt).wrap());
+                            if let Some(h) = hint {
+                                ui.label(RichText::new(*h).small().color(theme::MUTED));
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("All audio, MIDI and network status");
+                });
             }
         });
     }
@@ -1101,6 +1324,7 @@ impl App {
         if self.toasts.is_empty() {
             return;
         }
+        let max_w = self.screen.dialog_width(380.0);
         egui::Area::new(Id::unique("toasts"))
             .anchor(Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -40.0))
             .order(egui::Order::Tooltip)
@@ -1117,7 +1341,7 @@ impl App {
                         .corner_radius(6.0)
                         .inner_margin(10.0)
                         .show(ui, |ui| {
-                            ui.set_max_width(380.0);
+                            ui.set_max_width(max_w);
                             ui.label(RichText::new(&t.text).color(Color32::WHITE));
                         });
                     ui.add_space(6.0);
@@ -1135,14 +1359,16 @@ impl App {
         };
         let mut keep = true;
         let mut next: Option<Modal> = None;
+        let max_w = self.screen.dialog_width(520.0);
+        let max_h = (self.screen.height * 0.4).clamp(120.0, 320.0);
         let resp = egui::Modal::new(Id::unique("app_modal")).show(ctx, |ui| {
-            ui.set_max_width(520.0);
+            ui.set_max_width(max_w);
             match &modal {
                 Modal::Preflight(issues) => {
                     ui.heading("Pre-flight check");
                     ui.label("Before going live, please look at these points:");
                     ui.add_space(6.0);
-                    egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| {
                         for i in issues {
                             let (tag, color) = match i.severity {
                                 Severity::Error => ("ERROR", theme::ERROR),
@@ -1235,7 +1461,7 @@ impl App {
                     ui.heading(format!("Show Master {} is available", u.version.clone().unwrap_or_default()));
                     ui.label(RichText::new(format!("Installed: {}", u.current)).color(theme::MUTED));
                     if let Some(notes) = u.notes.as_ref().filter(|n| !n.is_empty()) {
-                        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                        egui::ScrollArea::vertical().max_height(max_h.min(220.0)).show(ui, |ui| {
                             ui.label(notes);
                         });
                     }

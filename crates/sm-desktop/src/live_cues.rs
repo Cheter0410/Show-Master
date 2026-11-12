@@ -13,6 +13,8 @@ use std::sync::Arc;
 
 /// Height of one cue row (without spacing).
 pub const ROW_H: f32 = 52.0;
+/// Row height with touch-friendly controls.
+pub const ROW_H_TOUCH: f32 = 60.0;
 /// Space between rows.
 pub const ROW_GAP: f32 = 2.0;
 
@@ -290,6 +292,8 @@ pub struct CueWindowInput<'a> {
     pub selection: &'a [u64],
     pub follow: bool,
     pub high_contrast: bool,
+    /// Row height (`ROW_H`, or `ROW_H_TOUCH` in touch mode).
+    pub row_h: f32,
 }
 
 /// Draw the cue rows into the current ui (fills it). Returns user actions.
@@ -324,7 +328,8 @@ pub fn cue_window(
 
     // Follow the playhead: scroll only when it moved (or following was
     // switched on) and the NEXT row is not comfortably visible.
-    let step = ROW_H + ROW_GAP;
+    let row_h = input.row_h;
+    let step = row_h + ROW_GAP;
     let mut scroll_to = None;
     let changed = win.last_playhead != playhead
         || win.last_list != Some(list.id)
@@ -338,8 +343,8 @@ pub fn cue_window(
             } else {
                 ui.available_height()
             };
-            let margin = (view - ROW_H).clamp(0.0, step * 1.5);
-            let visible = top >= win.offset && top + ROW_H <= win.offset + view - margin;
+            let margin = (view - row_h).clamp(0.0, step * 1.5);
+            let visible = top >= win.offset && top + row_h <= win.offset + view - margin;
             if !visible {
                 let desired = (top - view * 0.3).max(0.0);
                 scroll_to = Some((desired / step).floor() * step);
@@ -353,18 +358,19 @@ pub fn cue_window(
 
     let mut area = egui::ScrollArea::vertical()
         .id_salt("live_cue_rows")
-        .auto_shrink([false, false]);
+        .auto_shrink([false, false])
+        .scroll_source(crate::responsive::scroll_source(ui.ctx()));
     if let Some(y) = scroll_to {
         area = area.vertical_scroll_offset(y);
     }
     // `show_rows` positions rows with the ui's item spacing.
     ui.spacing_mut().item_spacing.y = ROW_GAP;
-    let out = area.show_rows(ui, ROW_H, flat.len(), |ui, range| {
+    let out = area.show_rows(ui, row_h, flat.len(), |ui, range| {
         ui.spacing_mut().item_spacing.y = ROW_GAP;
         for i in range {
             let (cue, depth) = flat[i];
             let (rect, _) =
-                ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::hover());
+                ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::hover());
             if let Some(a) = draw_row(ui, rect, i, cue, depth, playhead == Some(cue.id), input) {
                 actions.push(a);
             }
@@ -440,7 +446,10 @@ fn draw_row(
     // Cue colour swatch on the left edge.
     if let Some(c) = theme::cue_color(&cue.color) {
         p.rect_filled(
-            Rect::from_min_size(rect.min + Vec2::new(2.0, 4.0), Vec2::new(5.0, ROW_H - 8.0)),
+            Rect::from_min_size(
+                rect.min + Vec2::new(2.0, 4.0),
+                Vec2::new(5.0, rect.height() - 8.0),
+            ),
             2.0,
             dim(c),
         );
