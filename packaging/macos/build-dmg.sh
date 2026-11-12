@@ -11,7 +11,9 @@
 #                               `xcrun notarytool store-credentials showmaster ...`)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-[ "$(uname -s)" = "Darwin" ] || { echo "This script must run on macOS."; exit 1; }
+# shellcheck source=../../scripts/ui.sh
+. scripts/ui.sh
+[ "$(uname -s)" = "Darwin" ] || ui_fail "This script must run on macOS."
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
 
 # Prerequisites: say exactly what is missing and how to get it.
@@ -56,7 +58,9 @@ fi
 if [ ! -f ui/dist/index.html ] || [ -n "${REBUILD_UI:-}" ]; then
   (cd ui && npm ci && npm run build)
 fi
-mkdir -p dist && touch dist/.build-start   # release.sh uploads only newer files
+V=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+mkdir -p dist
+ui_header "Show Master $V" "Mac bauen"
 # This Mac's own architecture (also when the terminal runs under Rosetta).
 if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then HOST=arm64; else HOST=x86_64; fi
 ARCHS="${ARCHS:-$HOST}"
@@ -66,37 +70,24 @@ for a in $ARCHS; do
   case "$a" in
     arm64|aarch64) a=arm64; t=aarch64-apple-darwin ;;
     x86_64|intel) a=x86_64; t=x86_64-apple-darwin ;;
-    *) echo "Unknown architecture in ARCHS: $a (use arm64 and/or x86_64)"; exit 1 ;;
+    *) ui_fail "Unknown architecture in ARCHS: $a (use arm64 and/or x86_64)" ;;
   esac
   if [ "$a" = "$HOST" ] && [ "$(uname -m)" = "$HOST" ]; then
     # Native build without --target: build tools and the app share one
     # compile (with --target cargo builds the build-time crates separately,
     # which looks like everything is compiled twice).
-    echo "== Building for this Mac ($a)"
-    cargo build --release --locked -p showmaster
+    ui_run "Programm für diesen Mac ($a)" cargo build --release --locked -p showmaster
     BINS+=("target/release/showmaster")
   else
-    echo "== Building for $t"
-    rustup target add "$t"
-    cargo build --release --locked -p showmaster --target "$t"
+    rustup target list --installed 2>/dev/null | grep -qx "$t" || ui_run "Rust-Ziel $t (einmalig)" rustup target add "$t"
+    ui_run "Programm für $a" cargo build --release --locked -p showmaster --target "$t"
     BINS+=("target/$t/release/showmaster")
   fi
 done
+# Only made again when a program (or the version / signing) changed.
+KEY="$V-$(ui_fingerprint "${BINS[@]}" packaging/macos/Info.plist assets/icon.png)${SIGN_IDENTITY:+-signed}${NOTARY_PROFILE:+-notarized}"
+DMG="dist/ShowMaster-$V.dmg"
 
-V=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print([p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="showmaster"][0])')
-WORK=$(mktemp -d)
-APP="$WORK/dmg/ShowMaster.app"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" dist
-lipo -create -output "$APP/Contents/MacOS/showmaster" "${BINS[@]}"
-sed "s/APP_VERSION/$V/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
-cp README.md "$APP/Contents/Resources/"
-ICONSET="$WORK/ShowMaster.iconset"
-mkdir -p "$ICONSET"
-for s in 16 32 128 256 512; do
-  sips -z $s $s assets/icon.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-  sips -z $((s*2)) $((s*2)) assets/icon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
-done
-iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/ShowMaster.icns"
 # notarize <file>: submit to Apple, wait, fail with the log unless accepted.
 notarize() {
   local out id status
@@ -110,10 +101,10 @@ notarize() {
     exit 1
   fi
 }
+sign_app() {
 if [ -n "${SIGN_IDENTITY:-}" ]; then
   # Developer ID with hardened runtime and secure timestamp (required for notarization).
   # Entitlements: audio input only (LTC timecode from an audio input); see the file.
-  echo "== Signing with $SIGN_IDENTITY"
   codesign --force --options runtime --timestamp \
     --entitlements packaging/macos/entitlements.plist \
     --sign "$SIGN_IDENTITY" "$APP"
@@ -121,7 +112,6 @@ if [ -n "${SIGN_IDENTITY:-}" ]; then
   if [ -n "${NOTARY_PROFILE:-}" ]; then
     # Notarize and staple the app itself too: show computers are often offline, and a
     # stapled ticket lets Gatekeeper check the app without asking Apple's servers.
-    echo "== Notarizing the app"
     ditto -c -k --keepParent "$APP" "$WORK/ShowMaster.zip"
     notarize "$WORK/ShowMaster.zip"
     xcrun stapler staple "$APP"
@@ -132,27 +122,55 @@ else
   codesign --force --deep -s - "$APP"
   codesign --verify --deep "$APP"
 fi
-lipo -info "$APP/Contents/MacOS/showmaster"
-ln -s /Applications "$WORK/dmg/Applications"
-rm -f "dist/ShowMaster-$V.dmg"
-hdiutil create -volname "Show Master" -srcfolder "$WORK/dmg" -ov -format UDZO "dist/ShowMaster-$V.dmg"
-if [ -n "${SIGN_IDENTITY:-}" ]; then
-  codesign --force --timestamp --sign "$SIGN_IDENTITY" "dist/ShowMaster-$V.dmg"
-  if [ -n "${NOTARY_PROFILE:-}" ]; then
-    echo "== Notarizing the DMG"
-    notarize "dist/ShowMaster-$V.dmg"
-    xcrun stapler staple "dist/ShowMaster-$V.dmg"
-    xcrun stapler validate "dist/ShowMaster-$V.dmg"
-    spctl --assess --type open --context context:primary-signature --verbose "dist/ShowMaster-$V.dmg"
+}
+make_dmg() {
+  WORK=$(mktemp -d)
+  APP="$WORK/dmg/ShowMaster.app"
+  mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" dist
+  lipo -create -output "$APP/Contents/MacOS/showmaster" "${BINS[@]}"
+  sed "s/APP_VERSION/$V/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
+  cp README.md "$APP/Contents/Resources/"
+  ICONSET="$WORK/ShowMaster.iconset"
+  mkdir -p "$ICONSET"
+  for s in 16 32 128 256 512; do
+    sips -z $s $s assets/icon.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
+    sips -z $((s*2)) $((s*2)) assets/icon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/ShowMaster.icns"
+  sign_app
+  ln -s /Applications "$WORK/dmg/Applications"
+  rm -f "$DMG"
+  hdiutil create -volname "Show Master" -srcfolder "$WORK/dmg" -ov -format UDZO "$DMG"
+  if [ -n "${SIGN_IDENTITY:-}" ]; then
+    codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
+    if [ -n "${NOTARY_PROFILE:-}" ]; then
+      notarize "$DMG"
+      xcrun stapler staple "$DMG"
+      xcrun stapler validate "$DMG"
+      spctl --assess --type open --context context:primary-signature --verbose "$DMG"
+    fi
   fi
+  rm -rf "$WORK"
+}
+if ui_fresh "$DMG" "$KEY"; then ui_skip "App und DMG" "unverändert"; else
+  ui_run "App und DMG" make_dmg && ui_made "$DMG" "$KEY"
 fi
+FILES=("$DMG")
+
 # Program-only downloads for the in-app updater.
 for b in "${BINS[@]}"; do
   case "$b" in
-    *aarch64*) gzip -9 -c "$b" > dist/showmaster-macos-arm64.gz ;;
-    *) gzip -9 -c "$b" > dist/showmaster-macos-x86_64.gz ;;
+    *aarch64-apple-darwin*) arch=arm64 ;;
+    *x86_64-apple-darwin*) arch=x86_64 ;;
+    *) arch=$HOST ;;
   esac
+  GZ="dist/showmaster-macos-$arch.gz"
+  BKEY="$V-$(ui_fingerprint "$b")"
+  if ui_fresh "$GZ" "$BKEY"; then ui_skip "Update-Datei $(basename "$GZ")" "unverändert"; else
+    ui_run "Update-Datei $(basename "$GZ")" sh -c "gzip -9 -c '$b' > '$GZ'" && ui_made "$GZ" "$BKEY"
+  fi
+  FILES+=("$GZ")
 done
-rm -rf "$WORK"
-ls -la dist
-echo "Built dist/ShowMaster-$V.dmg"
+
+{ echo "$V"; printf '%s\n' "${FILES[@]}"; } > dist/files-mac.txt
+ui_done

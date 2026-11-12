@@ -6,80 +6,79 @@
 #   cd ~/Desktop/dev/show-master
 #   bash install-mac.sh
 #
-# Run it again later to update (it pulls the newest version first). Missing
-# tools (Xcode command line tools, Rust) are installed. The result:
-#   dist/ShowMaster-x.y.z.dmg   installer (this Mac's type; UNIVERSAL=1 for Intel + Apple Silicon)
+# Run it again later to update. Only what is needed is done: an unchanged DMG
+# is not built again, an unchanged app not installed again. Missing tools
+# (Xcode command line tools, Rust) are installed.
+#   dist/ShowMaster-x.y.z.dmg      installer (this Mac's type; UNIVERSAL=1 for Intel + Apple Silicon)
 #   /Applications/ShowMaster.app   installed on this Mac (skip with NO_INSTALL=1)
 set -euo pipefail
 cd "$(dirname "$0")"
-[ "$(uname -s)" = "Darwin" ] || { echo "This script is for macOS (Linux: ./install.sh)."; exit 1; }
-
-say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
+# shellcheck source=scripts/ui.sh
+. scripts/ui.sh
+[ "$(uname -s)" = "Darwin" ] || ui_fail "Dieses Skript ist für macOS (Linux: ./install.sh)."
+[ -n "${SM_PULLED:-}" ] || ui_header "Show Master" "Installieren / Aktualisieren"
 
 if ! xcode-select -p >/dev/null 2>&1; then
   xcode-select --install || true
-  echo
-  echo ">>> In the window that opened, click 'Install' and wait until it is done."
-  echo ">>> Then run this again:  bash install-mac.sh"
-  exit 1
+  ui_fail "Im Fenster, das sich geöffnet hat, auf 'Installieren' klicken und warten. Dann nochmal: bash install-mac.sh"
 fi
 
 if [ -z "${SM_PULLED:-}" ] && [ -d .git ]; then
   if git diff --quiet && git diff --cached --quiet; then
-    say "Fetching the newest version"
-    git pull --ff-only || echo "(could not update - building the version that is here)"
-    # Run the freshly pulled copy of this script (bash would go on reading
-    # the old one).
-    SM_PULLED=1 exec bash "$(pwd)/$(basename "$0")" "$@"
+    git fetch -q 2>/dev/null || true
+    if [ -n "$(git rev-list HEAD..@{u} 2>/dev/null)" ]; then
+      ui_run "Neuesten Stand holen" git pull -q --ff-only
+      SM_PULLED=1 exec bash "$(pwd)/$(basename "$0")" "$@"
+    fi
+    ui_ok "Quellcode ist aktuell"
   else
-    echo "(local changes in $(pwd) - not updating; 'git status' shows them)"
+    ui_warn "Lokale Änderungen – baue den Stand, der hier liegt"
   fi
+else
+  ui_ok "Quellcode ist aktuell"
 fi
 
 if [ ! -x "$HOME/.cargo/bin/rustup" ] && ! command -v rustup >/dev/null 2>&1; then
-  say "Installing Rust"
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+  ui_run "Rust installieren (einmalig)" sh -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal"
 fi
 # shellcheck disable=SC1091
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 
-# This Mac's architecture only (one compile). UNIVERSAL=1 builds the DMG for
-# Intel and Apple Silicon Macs (for publishing a release).
-if [ -n "${UNIVERSAL:-}" ]; then
-  export ARCHS="arm64 x86_64"
-elif [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then
-  export ARCHS="arm64"
-else
-  export ARCHS="x86_64"
-fi
-say "Building the DMG for $ARCHS only (takes a few minutes the first time)"
+ui_section "Bauen"
 ./packaging/macos/build-dmg.sh
-DMG=$(ls -t dist/ShowMaster-*.dmg | head -n 1)
+V=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+DMG="dist/ShowMaster-$V.dmg"
 
+ui_section "Installieren"
 if [ -n "${NO_INSTALL:-}" ]; then
-  open dist
-  say "Done: $DMG"
+  ui_skip "Installieren" "NO_INSTALL gesetzt"
+  ui_ok "Installer: $DMG"
+  ui_done
   exit 0
 fi
-
-if pgrep -x showmaster >/dev/null 2>&1; then
-  say "Show Master is running"
-  echo "Not replacing the app while it runs (a show may be going on)."
-  echo "Quit it (Quit in the window, Cmd+Q or the menu bar icon), then run this again -"
-  echo "or install from the DMG: $DMG"
-  open dist
-  exit 0
+# The DMG this app came from (kept next to the build outputs).
+STAMP=dist/.made/installed-app
+WANT=$(cat "dist/.made/$(basename "$DMG")" 2>/dev/null || echo none)
+if [ -d /Applications/ShowMaster.app ] && [ "$(cat "$STAMP" 2>/dev/null)" = "$WANT" ]; then
+  ui_skip "In /Applications" "Show Master $V ist schon installiert"
+elif pgrep -x showmaster >/dev/null 2>&1; then
+  ui_warn "Show Master läuft gerade – nicht ersetzt (es könnte eine Show laufen)."
+  ui_info "Beenden (Quit, Cmd+Q oder Menüleisten-Symbol), dann nochmal: bash install-mac.sh"
+else
+  put() {
+    MNT=$(mktemp -d)
+    hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG" >/dev/null
+    rm -rf /Applications/ShowMaster.app
+    ditto "$MNT/ShowMaster.app" /Applications/ShowMaster.app
+    hdiutil detach "$MNT" -quiet >/dev/null 2>&1 || true
+    rmdir "$MNT" 2>/dev/null || true
+    xattr -dr com.apple.quarantine /Applications/ShowMaster.app 2>/dev/null || true
+  }
+  ui_run "In /Applications" put
+  printf '%s' "$WANT" > "$STAMP"
 fi
 
-say "Installing into /Applications"
-MNT=$(mktemp -d)
-hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG" >/dev/null
-trap 'hdiutil detach "$MNT" -quiet >/dev/null 2>&1 || true; rmdir "$MNT" 2>/dev/null || true' EXIT
-rm -rf /Applications/ShowMaster.app
-ditto "$MNT/ShowMaster.app" /Applications/ShowMaster.app
-xattr -dr com.apple.quarantine /Applications/ShowMaster.app 2>/dev/null || true
-
-say "Done"
-echo "Show Master is in Programme / Applications (start it from Launchpad or Spotlight)."
-echo "The installer for other Macs: $DMG"
-echo "On a phone or tablet in the same network: showmaster.local"
+ui_section "Fertig"
+ui_ok "Show Master ist in Programme (Launchpad, Spotlight)"
+ui_ok "Am Handy / Tablet im selben Netz:  showmaster.local"
+ui_done

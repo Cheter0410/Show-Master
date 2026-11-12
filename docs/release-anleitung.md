@@ -33,10 +33,14 @@ Show Master 0.4.1: Entwurf (noch nicht für Nutzer sichtbar)
   ✓ Linux    showmaster-0.4.1-linux-x86_64.tar.gz
 ```
 
-Auf dem Bildschirm stehen nur die Schritte und Ergebnisse; alles andere (Compiler, Tests, Installer)
-steht im Protokoll `/tmp/release-<Ordnername>.log`. Bei einem Fehler zeigt das Skript die letzten Zeilen
-daraus. Die Tests laufen ohne echte Audiogeräte (nur die stumme Ausgabe), damit sie den Ton des Rechners
-nicht stören.
+Auf dem Bildschirm steht jeder Schritt mit Spinner und Laufzeit, danach ✓, ↷ (übersprungen, weil schon
+erledigt) oder ✗. Alles andere (Compiler, Tests, Installer) steht im Protokoll, dessen Pfad am Ende
+angezeigt wird; bei einem Fehler zeigt das Skript nur den betroffenen Teil daraus.
+
+Nichts wird doppelt gemacht: die Tests laufen einmal pro Stand, Pakete und Installer werden nur neu
+gebaut, wenn sich das Programm darin geändert hat, und hochgeladen wird nur, was noch fehlt oder sich
+geändert hat. Ein zweiter Lauf nach einem Abbruch macht also genau da weiter. Die Tests laufen ohne echte
+Audiogeräte (nur die stumme Ausgabe), damit sie den Ton des Rechners nicht stören.
 
 Tipp: Commit-Nachrichten so schreiben, dass sie als „Was ist neu“ taugen (z. B. „Waveform zoom“).
 
