@@ -40,6 +40,9 @@ pub struct Io {
     reconnect_backoff: std::time::Duration,
     pub midi: MidiHub,
     http: crate::http_out::HttpOut,
+    /// Backup computer in standby: no MIDI / OSC / HTTP / timecode output.
+    external_muted: bool,
+    ltc_enabled: bool,
     mtc: MtcGenerator,
     mtc_port: Option<String>,
     clock: ClockMap,
@@ -94,6 +97,8 @@ impl Io {
             reconnect_backoff: std::time::Duration::from_secs(5),
             midi: MidiHub::new(midi),
             http: crate::http_out::HttpOut::new(),
+            external_muted: false,
+            ltc_enabled: false,
             mtc: MtcGenerator::new(sr),
             mtc_port: None,
             clock: ClockMap::new(sr),
@@ -155,10 +160,11 @@ impl Io {
             .channel
             .store(usize::from(tc.ltc_channel), Ordering::Relaxed);
         self.audio.ltc.set_gain(db_to_lin(tc.ltc_level_db).min(1.0));
+        self.ltc_enabled = tc.ltc_enabled;
         self.audio
             .ltc
             .enabled
-            .store(tc.ltc_enabled, Ordering::Relaxed);
+            .store(tc.ltc_enabled && !self.external_muted, Ordering::Relaxed);
         self.mtc_port = (tc.mtc_enabled && !tc.mtc_port.is_empty())
             .then(|| show.resolve_midi_port(&tc.mtc_port).to_string());
         if let Err(e) = self.midi.configure_rtp(&show.rtp_midi) {
@@ -166,6 +172,19 @@ impl Io {
         }
         self.inputs.configure(show, self.midi.rtp_session());
         warnings
+    }
+
+    /// Backup computer: silence everything that leaves this machine except
+    /// the audio itself (MIDI incl. MTC and RTP-MIDI, OSC, HTTP, LTC), so a
+    /// device wired to both computers does not get every command twice.
+    pub fn set_external_muted(&mut self, muted: bool) {
+        self.external_muted = muted;
+        self.midi.set_muted(muted);
+        self.http.set_muted(muted);
+        self.audio
+            .ltc
+            .enabled
+            .store(self.ltc_enabled && !muted, Ordering::Relaxed);
     }
 
     /// Replace the input backends (tests, virtual devices) and apply the show.

@@ -301,6 +301,8 @@ export interface RemoteState {
   clients: RemoteClient[];
   /** Bonjour name (`http://showmaster.local`), null without mDNS. */
   mdns?: { enabled: boolean; url: string | null } | null;
+  /** Main / backup computer link. */
+  link?: { role: "off" | "main" | "backup"; standby: boolean; taken_over: boolean; failover_url: string | null } | null;
 }
 
 export type Severity = "error" | "warning" | "info";

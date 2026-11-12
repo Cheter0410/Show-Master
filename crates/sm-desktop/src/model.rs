@@ -202,6 +202,10 @@ pub struct LinkInfo {
     pub peer: String,
     pub has_key: bool,
     pub connected: bool,
+    pub standby: bool,
+    pub taken_over: bool,
+    pub backup_took_over: bool,
+    pub auto_takeover: bool,
     pub last_seen_ms: Option<u64>,
     pub error: Option<String>,
 }

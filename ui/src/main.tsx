@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { startFailover } from "./failover";
 import { boot, route } from "./session";
 import "./styles.css";
 
@@ -20,3 +21,5 @@ if (el) {
   );
 }
 void boot();
+// Tablets move to the backup computer when the main stops answering.
+if (route !== "desktop") startFailover();

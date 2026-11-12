@@ -2,6 +2,7 @@
 // command acks. The server owns the show; this layer only mirrors it.
 import { CommandError, type Command, type ServerMsg } from "./api";
 import { applyPatch } from "./patch";
+import { noteFailover } from "./failover";
 import { appendLog, getApp, setApp, toast } from "./store";
 
 const BACKOFF_MIN = 250;
@@ -57,6 +58,7 @@ function handle(msg: ServerMsg): void {
     case "state":
       backoff = BACKOFF_MIN;
       setApp({ doc: msg.state, rev: msg.rev, conn: "open", everConnected: true });
+      noteFailover(msg.state.remote?.link?.failover_url);
       break;
     case "patch": {
       const s = getApp();

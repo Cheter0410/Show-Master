@@ -62,6 +62,9 @@ validiert werden.
       Tray-Symbol (Windows Infobereich, Mac Menüleiste, Linux KDE) und auf dem Mac über das Dock;
       Cmd+W versteckt, Cmd+Q fragt bei laufenden Cues nach; Tray „Quit Show Master“ beendet
 - [ ] Linux GNOME ohne AppIndicator-Erweiterung bzw. Wayland: Schließen minimiert nur
+- [ ] Backup-Rechner im echten Netz: Main hart ausschalten (Stromkabel / Netzwerkkabel) – Backup übernimmt
+      nach ~2 s, Lichtpult bekommt danach MSC vom Backup (vorher nie doppelt), iPad wechselt ohne PIN,
+      `showmaster.local` zeigt auf den Backup; Main wieder an → Main zeigt „Backup has taken over“
 - [ ] Latenz GO vom iPad im WLAN (< 50 ms)
 - [ ] Stream Deck über Bitfocus Companion (siehe `streamdeck.md`)
 - [ ] Mehrstündiger Dauerlauf: `SM_SOAK_SECONDS=14400 cargo test --release -p sm-server --test soak -- --ignored --nocapture`

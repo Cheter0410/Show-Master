@@ -135,6 +135,9 @@ pub struct MidiHub {
     errors: Errors,
     seq: u64,
     ports_cache: (Option<Instant>, Vec<String>),
+    /// Backup computer in standby: nothing leaves this machine (MIDI, MTC,
+    /// RTP-MIDI, OSC).
+    muted: bool,
 }
 
 fn sender_loop(
@@ -316,11 +319,20 @@ impl MidiHub {
             errors,
             seq: 0,
             ports_cache: (None, Vec::new()),
+            muted: false,
         }
     }
 
     /// Queue a message for delivery at `due` (immediately if in the past).
+    /// Drop everything sent while muted (backup computer in standby).
+    pub fn set_muted(&mut self, muted: bool) {
+        self.muted = muted;
+    }
+
     pub fn send_at(&mut self, due: Instant, port: &str, bytes: Vec<u8>) {
+        if self.muted {
+            return;
+        }
         self.seq += 1;
         let _ = self.tx.send(Msg::Send(Scheduled {
             due,
@@ -333,6 +345,9 @@ impl MidiHub {
     /// Drop everything queued and send All Notes Off / All Sound Off / Reset
     /// Controllers on all channels of every port in use.
     pub fn panic(&mut self) {
+        if self.muted {
+            return;
+        }
         let _ = self.tx.send(Msg::Panic);
     }
 

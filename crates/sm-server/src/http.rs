@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast::error::RecvError;
 
@@ -25,7 +25,6 @@ struct Assets;
 
 pub struct AppState {
     handle: Handle,
-    tokens: Mutex<HashMap<String, Role>>,
     admin_token: String,
     next_client: AtomicU64,
 }
@@ -73,7 +72,6 @@ pub fn local_urls(port: u16) -> Vec<String> {
 pub fn router(handle: Handle) -> Router {
     let state: App = Arc::new(AppState {
         handle,
-        tokens: Mutex::new(HashMap::new()),
         admin_token: random_token(),
         next_client: AtomicU64::new(1),
     });
@@ -163,7 +161,13 @@ fn role_for(app: &AppState, addr: &SocketAddr, token: Option<&str>) -> Option<Ro
             }
             return None;
         }
-        if let Some(role) = app.tokens.lock().ok().and_then(|t| t.get(token).copied()) {
+        if let Some(role) = app
+            .handle
+            .sessions
+            .lock()
+            .ok()
+            .and_then(|t| t.get(token).copied())
+        {
             return Some(role);
         }
         // A paired device (QR code with token).
@@ -250,7 +254,7 @@ async fn login(State(app): State<App>, Json(body): Json<Login>) -> Response {
     match role {
         Some(role) => {
             let token = random_token();
-            if let Ok(mut t) = app.tokens.lock() {
+            if let Ok(mut t) = app.handle.sessions.lock() {
                 t.insert(token.clone(), role);
             }
             Json(json!({ "token": token, "role": role })).into_response()
@@ -469,14 +473,22 @@ async fn api_link(State(app): State<App>, headers: HeaderMap, Json(msg): Json<Va
         .get(crate::link::HEADER)
         .and_then(|h| h.to_str().ok())
         .unwrap_or("");
-    let ok = app
+    let (ok, taken_over) = app
         .handle
         .link
         .lock()
-        .map(|l| l.accepts(key))
-        .unwrap_or(false);
+        .map(|l| (l.accepts(key), l.taken_over()))
+        .unwrap_or((false, false));
     if !ok {
         return deny();
+    }
+    if taken_over {
+        // Running on its own now: the (returned) main must not steer it.
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "ok": false, "error": "taken_over" })),
+        )
+            .into_response();
     }
     let cmd = crate::runtime::AnyCommand::Sys(crate::runtime::SysCommand::LinkApply { msg });
     match app.handle.command(cmd, Role::Admin, "link").await {
@@ -768,7 +780,7 @@ async fn client(
                     if target == id {
                         let _ = tx.send(Message::Text(json!({ "t": "kicked" }).to_string().into())).await;
                         // A kicked client must log in again.
-                        if let (Some(t), Ok(mut tokens)) = (&token, app.tokens.lock()) {
+                        if let (Some(t), Ok(mut tokens)) = (&token, app.handle.sessions.lock()) {
                             tokens.remove(t);
                         }
                         break;

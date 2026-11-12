@@ -110,6 +110,19 @@ impl Pairings {
             .map(|p| p.name.clone())
     }
 
+    /// Everything, tokens included (only for the backup computer link).
+    pub fn export(&self) -> Vec<Pairing> {
+        self.list.clone()
+    }
+
+    /// Take over the main computer's pairings (backup computer).
+    pub fn replace(&mut self, list: Vec<Pairing>) {
+        if self.list != list {
+            self.list = list;
+            self.save();
+        }
+    }
+
     /// The list for the state document (no tokens).
     pub fn public(&self) -> serde_json::Value {
         serde_json::Value::Array(

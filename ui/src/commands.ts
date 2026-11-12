@@ -12,6 +12,7 @@ const ERROR_TEXT: Record<string, string> = {
   timeout: "Server did not answer in time",
   unsaved_changes: "The show has unsaved changes",
   cues_running: "Cues are still running",
+  backup_standby: "This is the backup computer – it follows the main; take over there first",
 };
 
 export function errorText(e: unknown): string {

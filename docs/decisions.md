@@ -213,17 +213,26 @@ revidieren lassen.
 
 ## Backup-Rechner (nachträglich)
 
-- **Spiegeln statt Synchronisieren der Audio-Ausgabe:** Der Hauptrechner schickt jeden Transport-Befehl
-  direkt nach der eigenen Ausführung an den Backup (HTTP `POST /api/link`, gemeinsamer Schlüssel), dazu
-  Show-Dokument und Modus bei Änderung (alle 0,5 s geprüft) und nach jedem (Wieder-)Verbinden alles
-  inklusive Playheads. Der Backup führt dieselben Befehle aus und läuft damit parallel; Zeit-Trigger
-  (Auto-Continue, Timecode) laufen auf beiden deterministisch. Versatz: Netzwerk-Latenz (LAN ~1–5 ms).
-- **Nichts wird nachgeholt:** Befehle, die nicht zugestellt werden konnten, werden verworfen (ein GO
-  Sekunden später wäre falsch); nach dem Wiederverbinden wird der Zustand (Show, Modus, Playheads)
-  abgeglichen, laufende Cues aber nicht.
-- **Kein automatisches Umschalten:** Der Backup zeigt nur an, dass der Main nicht mehr antwortet (3 s);
-  umgeschaltet wird extern (Audio-Umschalter, zweite Zuspielung). Tablets verbinden sich dann mit dem
-  Backup (eigene IP bzw. `showmaster-2.local`).
+- **Parallel mitspielen, nichts doppelt:** Der Hauptrechner schickt jeden Transport-Befehl direkt nach der
+  eigenen Ausführung an den Backup (HTTP `POST /api/link`, gemeinsamer Schlüssel), dazu Show-Dokument,
+  Modus und Tablet-Anmeldungen (PIN-Sitzungen, QR-Kopplungen) bei Änderung und nach jedem
+  (Wieder-)Verbinden alles inklusive Playheads. Der Backup spielt Audio mit, solange er folgt
+  (**Standby**), aber alles, was den Rechner sonst verlässt, ist stumm: MIDI (inkl. MTC, RTP-MIDI, MSC),
+  OSC, HTTP, LTC und die PANIC-Zusatznachrichten. Eigene Befehle (Tastatur, MIDI-/OSC-Eingang, Tablets)
+  lehnt er ab (`backup_standby`). So kommt bei Geräten, die an beiden Rechnern hängen, nichts doppelt an.
+- **Übernahme:** Hört der Backup den Main 2 s lang nicht (Pings alle 0,4 s), übernimmt er selbst (lässt
+  sich abschalten) oder per Knopf *Take over now*: Ausgänge aktiv, Befehle erlaubt, der Bonjour-Name
+  `showmaster.local` wird zurückgeholt. Tablets, die den Main verlieren, prüfen nach 2,5 s den Backup
+  (Adresse vom Main) und wechseln mit ihrer Anmeldung dorthin – ohne PIN. Audio läuft durchgehend, weil
+  der Backup die ganze Zeit mitgespielt hat; umgeschaltet wird der Ton extern (Umschalter / Pult).
+- **Kein Zurückspringen:** Ein Backup, der übernommen hat, nimmt keine Befehle vom Main mehr an (409), auch
+  wenn dieser wiederkommt – zwei aktive Rechner würden alles doppelt senden. Der Main zeigt das rot an;
+  *Follow the main again* am Backup stellt den Normalzustand wieder her.
+- **Lücke:** Ein Signal nach außen (z. B. MIDI ans Lichtpult), das genau in den 2 s zwischen Ausfall und
+  Übernahme fällig war, geht verloren; Befehle werden nie verspätet nachgeholt.
+- **Grenzen:** Stream Deck / Companion zeigen weiter auf die Adresse des Mains (in Companion den Backup als
+  zweite Verbindung anlegen). Laufende Cues werden nach einer Netzwerk-Unterbrechung nicht abgeglichen,
+  nur Show, Modus und Playheads. Beide Audiosignale nie zusammen ins Pult (wenige ms Versatz).
 - **Rolle pro Rechner** (`link.json`), nicht in der Show: beide Rechner öffnen dieselbe Showdatei. Medien
   müssen auf dem Backup relativ zur Show am selben Ort liegen (Show-Ordner oder Show-Paket kopieren).
 

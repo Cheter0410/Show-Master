@@ -79,7 +79,13 @@ pub enum SysCommand {
         peer: String,
         #[serde(default)]
         key: String,
+        #[serde(default)]
+        auto_takeover: Option<bool>,
     },
+    /// Backup: run on its own now (unmutes outputs, accepts commands).
+    LinkTakeOver,
+    /// Backup: follow the main again.
+    LinkFollowMain,
     /// A message from the main computer (only via `/api/link` with the key).
     LinkApply {
         msg: Value,
@@ -226,6 +232,9 @@ pub struct Handle {
     pub pairings: Arc<Mutex<crate::pairing::Pairings>>,
     /// Main / backup computer link (per machine, see `link.rs`).
     pub link: Arc<Mutex<crate::link::Link>>,
+    /// PIN logins of remote clients: token -> role (also mirrored to a
+    /// backup computer so tablets can move there without a new login).
+    pub sessions: Arc<Mutex<std::collections::HashMap<String, Role>>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -479,6 +488,8 @@ struct Runtime {
     /// The port the server actually listens on (set by the binary after bind).
     urls: (Option<Instant>, Vec<String>),
     state_dirty: bool,
+    /// External outputs muted (backup computer in standby).
+    ext_muted: bool,
     /// Incoming MIDI: mapping state, last message, when the UI last saw it.
     inputs: crate::inputs::InputState,
     last_state: Value,
@@ -505,6 +516,7 @@ pub fn spawn(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         link: Arc::new(Mutex::new(crate::link::Link::load(
             config.data_dir.as_ref().map(|d| d.join("link.json")),
         ))),
+        sessions: Arc::default(),
         stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
     let h = handle.clone();
@@ -595,6 +607,7 @@ impl Runtime {
             net_status: config.net_status.take(),
             urls: (None, Vec::new()),
             state_dirty: true,
+            ext_muted: false,
             inputs: crate::inputs::InputState::default(),
             last_state: Value::Null,
             rev: 0,
@@ -687,6 +700,7 @@ impl Runtime {
                 }
                 self.process_inputs();
                 self.pump();
+                self.update_standby();
                 self.link_sync();
             }));
             if step.is_err() {
@@ -967,6 +981,10 @@ impl Runtime {
         }
         match command {
             AnyCommand::Engine(cmd) => {
+                // A backup that follows its main only takes commands from it.
+                if origin != "link" && self.handle.link.lock().is_ok_and(|l| l.standby()) {
+                    return Err("backup_standby".into());
+                }
                 // Main computer: mirror every transport command to the backup.
                 let mirror = (origin != "link")
                     .then(|| serde_json::to_value(&cmd).ok())
@@ -1003,6 +1021,29 @@ impl Runtime {
         }
     }
 
+    /// Mute / unmute this computer's outputs to match the link state, and
+    /// take over when the main went silent.
+    fn update_standby(&mut self) {
+        let (standby, took_over) = match self.handle.link.lock() {
+            Ok(mut l) => {
+                let took = l.check_takeover();
+                (l.standby(), took)
+            }
+            Err(_) => return,
+        };
+        if took_over {
+            self.note(
+                "error",
+                "MAIN COMPUTER LOST - the backup has taken over (outputs active)".into(),
+            );
+        }
+        if standby != self.ext_muted {
+            self.ext_muted = standby;
+            self.io.set_external_muted(standby);
+            self.state_dirty = true;
+        }
+    }
+
     /// Main computer: send the show / mode when they changed.
     fn link_sync(&mut self) {
         let Ok(mut link) = self.handle.link.lock() else {
@@ -1023,7 +1064,11 @@ impl Runtime {
             .iter()
             .map(|l| (l.id.to_string(), json!(l.playhead)))
             .collect();
-        link.maybe_sync(&show, mode, &Value::Object(heads));
+        let auth = json!({
+            "sessions": self.handle.sessions.lock().map(|s| json!(*s)).unwrap_or(Value::Null),
+            "pairings": self.handle.pairings.lock().map(|p| json!(p.export())).unwrap_or(Value::Null),
+        });
+        link.maybe_sync(&show, mode, &Value::Object(heads), &auth);
     }
 
     /// Backup computer: apply what the main sent.
@@ -1060,6 +1105,23 @@ impl Runtime {
                 };
                 if mode != self.mode {
                     self.sys(SysCommand::SetMode { mode, force: true })?;
+                }
+                // Logins of the main's tablets work here too (failover).
+                if let Some(s) = msg["auth"]["sessions"].as_object() {
+                    if let Ok(mut mine) = self.handle.sessions.lock() {
+                        for (token, role) in s {
+                            if let Ok(role) = serde_json::from_value::<Role>(role.clone()) {
+                                mine.insert(token.clone(), role);
+                            }
+                        }
+                    }
+                }
+                if let Ok(list) = serde_json::from_value::<Vec<crate::pairing::Pairing>>(
+                    msg["auth"]["pairings"].clone(),
+                ) {
+                    if let Ok(mut p) = self.handle.pairings.lock() {
+                        p.replace(list);
+                    }
                 }
                 if msg["initial"] == true {
                     if let Some(heads) = msg["playheads"].as_object() {
@@ -1230,7 +1292,35 @@ impl Runtime {
                 self.kick_token(&token);
                 Ok(Value::Null)
             }
-            SysCommand::SetLink { role, peer, key } => {
+            SysCommand::LinkTakeOver => {
+                self.handle
+                    .link
+                    .lock()
+                    .map_err(|_| "link unavailable".to_string())?
+                    .take_over();
+                self.note(
+                    "warn",
+                    "BACKUP HAS TAKEN OVER - running on its own, outputs active".into(),
+                );
+                self.update_standby();
+                Ok(Value::Null)
+            }
+            SysCommand::LinkFollowMain => {
+                self.handle
+                    .link
+                    .lock()
+                    .map_err(|_| "link unavailable".to_string())?
+                    .follow_main();
+                self.note("info", "backup: following the main computer again".into());
+                self.update_standby();
+                Ok(Value::Null)
+            }
+            SysCommand::SetLink {
+                role,
+                peer,
+                key,
+                auto_takeover,
+            } => {
                 let mut link = self
                     .handle
                     .link
@@ -1242,9 +1332,16 @@ impl Runtime {
                 } else {
                     key
                 };
-                link.set(crate::link::LinkConfig { role, peer, key })?;
+                let auto_takeover = auto_takeover.unwrap_or(link.config().auto_takeover);
+                link.set(crate::link::LinkConfig {
+                    role,
+                    peer,
+                    key,
+                    auto_takeover,
+                })?;
                 drop(link);
                 self.note("info", format!("backup link: {role:?}"));
+                self.update_standby();
                 Ok(Value::Null)
             }
             SysCommand::LinkApply { msg } => self.link_apply(&msg),

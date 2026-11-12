@@ -485,6 +485,21 @@ fn backup_section(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
             }
             unit(ui, "IP or name of the backup (its web port, default 7400)");
         });
+        if role == "backup" {
+            row(ui, "If the main fails", |ui| {
+                let mut on = link.auto_takeover;
+                if ui
+                    .checkbox(&mut on, "Take over automatically after 2 s of silence")
+                    .on_hover_text(
+                        "Unmutes this computer's MIDI / OSC / HTTP / timecode outputs and accepts \
+                         commands. Without it, press \"Take over now\" in the banner.",
+                    )
+                    .changed()
+                {
+                    st.send(json!({ "cmd": "set_link", "role": "backup", "peer": link.peer, "key": "", "auto_takeover": on }));
+                }
+            });
+        }
         row(ui, "Status", |ui| {
             let (text, color) = match (role.as_str(), link.connected) {
                 ("main", true) => ("Backup reachable, in sync".to_string(), theme::NEXT),
@@ -498,6 +513,9 @@ fn backup_section(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
                     ),
                     theme::ERROR,
                 ),
+                ("backup", _) if link.taken_over => {
+                    ("Taken over - running on its own".to_string(), theme::ERROR)
+                }
                 ("backup", true) => ("Following the main computer".to_string(), theme::NEXT),
                 ("backup", false) => ("Waiting for the main computer".to_string(), theme::WARN),
                 _ => ("Not linked".to_string(), theme::MUTED),

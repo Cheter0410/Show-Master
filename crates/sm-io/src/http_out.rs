@@ -24,6 +24,7 @@ type Log = Arc<Mutex<Vec<String>>>;
 pub struct HttpOut {
     tx: mpsc::Sender<Job>,
     log: Log,
+    muted: bool,
 }
 
 impl Default for HttpOut {
@@ -40,10 +41,22 @@ impl HttpOut {
         let _ = std::thread::Builder::new()
             .name("sm-http".into())
             .spawn(move || run(rx, l));
-        Self { tx, log }
+        Self {
+            tx,
+            log,
+            muted: false,
+        }
+    }
+
+    /// Backup computer in standby: requests are dropped.
+    pub fn set_muted(&mut self, muted: bool) {
+        self.muted = muted;
     }
 
     pub fn send_at(&self, due: Instant, addr: String, bytes: Vec<u8>, summary: String) {
+        if self.muted {
+            return;
+        }
         let _ = self.tx.send(Job {
             due,
             addr,

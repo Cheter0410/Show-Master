@@ -23,11 +23,20 @@ const KEY = `sm.session.${wantedRole}`;
 /** Token of a QR-code pairing; kept across browser restarts. */
 const PAIR_KEY = "sm.pair";
 let pairInMemory: string | null = null;
+let incomingSession: string | null = null;
 
 // `?pair=TOKEN` from a pairing QR code: remember it, then drop it from the
 // address bar (so it is not bookmarked or shown).
 if (typeof location !== "undefined") {
   const params = new URLSearchParams(location.search);
+  // `?session=TOKEN`: a tablet that moved here from the main computer.
+  const moved = params.get("session");
+  if (moved) {
+    incomingSession = moved;
+    params.delete("session");
+    const rest = params.toString();
+    history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
+  }
   const pair = params.get("pair");
   if (pair) {
     try {
@@ -104,6 +113,15 @@ async function establish(): Promise<boolean> {
   if (usable(info.role)) {
     ready(info.token, info.role);
     return true;
+  }
+  // Moved here from the main computer with its login.
+  if (incomingSession) {
+    const moved = await fetchSession(incomingSession);
+    incomingSession = null;
+    if (usable(moved.role)) {
+      ready(moved.token, moved.role);
+      return true;
+    }
   }
   // A paired device (QR code) logs in with its pairing token.
   const pair = pairToken();

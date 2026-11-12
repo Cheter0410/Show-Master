@@ -128,7 +128,23 @@ pub fn start(handle: Handle, shared: Shared, http_port: Option<u16>) -> Option<A
 fn run(handle: &Handle, shared: &Shared, http_port: Option<u16>, stop: &AtomicBool) {
     let mut mdns = Mdns::new();
     let mut last: Option<Desired> = None;
+    let mut took_over = false;
     while !stop.load(Ordering::SeqCst) {
+        // A backup that has just taken over claims the plain name again
+        // (`showmaster.local`, it was `showmaster-2.local` while the main ran),
+        // so tablets that type the name reach it.
+        let taken = handle
+            .published
+            .read()
+            .ok()
+            .is_some_and(|p| p.state["remote"]["link"]["taken_over"] == true);
+        if taken && !took_over {
+            tracing::info!("backup took over: announcing the plain Bonjour name again");
+            mdns.shutdown();
+            std::thread::sleep(Duration::from_millis(200));
+            mdns = Mdns::new();
+        }
+        took_over = taken;
         let wanted = handle
             .published
             .read()

@@ -28,6 +28,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const HEADER: &str = "x-showmaster-link";
+const TAKEN_OVER: &str = "the backup has taken over - this computer is no longer mirrored";
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -38,7 +39,7 @@ pub enum LinkRole {
     Backup,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(default)]
 pub struct LinkConfig {
     pub role: LinkRole,
@@ -46,6 +47,25 @@ pub struct LinkConfig {
     pub peer: String,
     /// Shared key, the same on both computers.
     pub key: String,
+    /// Backup: take over by itself when the main is silent for
+    /// [`LOST_AFTER`] (after it has been heard once).
+    #[serde(default = "yes")]
+    pub auto_takeover: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for LinkConfig {
+    fn default() -> Self {
+        Self {
+            role: LinkRole::Off,
+            peer: String::new(),
+            key: String::new(),
+            auto_takeover: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -56,6 +76,10 @@ struct Status {
     /// Backup: when the main was last heard of.
     last_seen: Option<Instant>,
     last_seen_ms: Option<u64>,
+    /// Main: the backup said it has taken over.
+    backup_took_over: bool,
+    /// Backup: web port of the main (for tablets that fail over back).
+    main_addr: Option<String>,
 }
 
 fn now_ms() -> u64 {
@@ -65,9 +89,10 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-const PING_EVERY: Duration = Duration::from_secs(1);
-/// The backup reports the main as lost after this long without a message.
-pub const LOST_AFTER: Duration = Duration::from_secs(3);
+const PING_EVERY: Duration = Duration::from_millis(400);
+/// The backup reports the main as lost (and takes over, if set) after this
+/// long without a message.
+pub const LOST_AFTER: Duration = Duration::from_millis(2000);
 const SYNC_CHECK: Duration = Duration::from_millis(500);
 
 pub struct Link {
@@ -80,6 +105,8 @@ pub struct Link {
     last_check: Option<Instant>,
     last_hash: Option<u64>,
     last_mode: Option<String>,
+    /// Backup: running on its own (taken over), not following the main.
+    taken_over: bool,
 }
 
 impl Link {
@@ -98,6 +125,7 @@ impl Link {
             last_check: None,
             last_hash: None,
             last_mode: None,
+            taken_over: false,
         };
         l.apply(config);
         l
@@ -138,6 +166,7 @@ impl Link {
         self.need_full.store(true, Ordering::SeqCst);
         self.last_hash = None;
         self.last_mode = None;
+        self.taken_over = false;
         if config.role == LinkRole::Main && !config.peer.trim().is_empty() {
             let (tx, rx) = mpsc::channel();
             let (peer, key) = (config.peer.trim().to_string(), config.key.clone());
@@ -167,7 +196,7 @@ impl Link {
 
     /// Main: called often; sends the show / mode when they changed (checked
     /// twice a second) and everything after a (re)connect.
-    pub fn maybe_sync(&mut self, show: &Value, mode: &str, playheads: &Value) {
+    pub fn maybe_sync(&mut self, show: &Value, mode: &str, playheads: &Value, auth: &Value) {
         let Some(tx) = &self.tx else { return };
         let full = self.need_full.load(Ordering::SeqCst);
         if !full && self.last_check.is_some_and(|t| t.elapsed() < SYNC_CHECK) {
@@ -178,6 +207,7 @@ impl Link {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
             show.to_string().hash(&mut h);
+            auth.to_string().hash(&mut h);
             h.finish()
         };
         if !full && self.last_hash == Some(hash) && self.last_mode.as_deref() == Some(mode) {
@@ -188,14 +218,82 @@ impl Link {
         self.last_mode = Some(mode.to_string());
         let _ = tx.send(json!({
             "kind": "sync", "show": show, "mode": mode, "playheads": playheads, "initial": full,
+            "auth": auth,
         }));
     }
 
-    /// Backup: is this request from our main?
+    /// Backup: is this request from our main (right key)?
     pub fn accepts(&self, key: &str) -> bool {
         self.config.role == LinkRole::Backup
             && self.config.key.len() >= 4
             && crate::http::token_eq(&self.config.key, key)
+    }
+
+    /// Backup that follows the main: its own outputs (MIDI, OSC, HTTP,
+    /// timecode) are muted and local transport commands are refused, so
+    /// nothing happens twice. Audio keeps playing for a seamless switch.
+    pub fn standby(&self) -> bool {
+        self.config.role == LinkRole::Backup && !self.taken_over
+    }
+
+    pub fn taken_over(&self) -> bool {
+        self.taken_over
+    }
+
+    /// Backup: run on its own from now on (button, or the main went silent).
+    pub fn take_over(&mut self) {
+        if self.config.role == LinkRole::Backup {
+            self.taken_over = true;
+        }
+    }
+
+    /// Backup: follow the main again (it sends everything when it is back).
+    pub fn follow_main(&mut self) {
+        self.taken_over = false;
+        if let Ok(mut s) = self.status.lock() {
+            s.last_seen = None;
+        }
+    }
+
+    /// Backup, called often: take over when the main, once heard, has been
+    /// silent for [`LOST_AFTER`]. Returns true at that moment.
+    pub fn check_takeover(&mut self) -> bool {
+        if self.config.role != LinkRole::Backup || self.taken_over || !self.config.auto_takeover {
+            return false;
+        }
+        let lost = self
+            .status
+            .lock()
+            .map(|s| s.last_seen.is_some_and(|t| t.elapsed() >= LOST_AFTER))
+            .unwrap_or(false);
+        if lost {
+            self.taken_over = true;
+        }
+        lost
+    }
+
+    /// Backup: the main's web address (from its messages), for tablets.
+    pub fn set_main_addr(&self, addr: String) {
+        if let Ok(mut s) = self.status.lock() {
+            s.main_addr = Some(addr);
+        }
+    }
+
+    /// Where tablets go when this computer stops answering: the main points
+    /// them at the backup.
+    pub fn failover_url(&self) -> Option<String> {
+        match self.config.role {
+            LinkRole::Main if !self.config.peer.trim().is_empty() => {
+                let p = self
+                    .config
+                    .peer
+                    .trim()
+                    .trim_start_matches("http://")
+                    .trim_end_matches('/');
+                Some(format!("http://{p}"))
+            }
+            _ => None,
+        }
     }
 
     /// Backup: a message from the main arrived.
@@ -212,6 +310,11 @@ impl Link {
         let main_alive = s.last_seen.is_some_and(|t| t.elapsed() < LOST_AFTER);
         json!({
             "role": self.config.role,
+            "standby": self.standby(),
+            "taken_over": self.taken_over,
+            "backup_took_over": s.backup_took_over,
+            "auto_takeover": self.config.auto_takeover,
+            "failover_url": self.failover_url(),
             "peer": self.config.peer,
             "has_key": !self.config.key.is_empty(),
             "connected": match self.config.role {
@@ -268,6 +371,7 @@ fn post(addr: std::net::SocketAddr, key: &str, body: &str) -> Result<(), String>
     match line.split_whitespace().nth(1) {
         Some("200") => Ok(()),
         Some("401") => Err("the backup refused the link key (or is not set to Backup)".into()),
+        Some("409") => Err(TAKEN_OVER.into()),
         Some(code) => Err(format!("backup answered {code}")),
         None => Err("no answer".into()),
     }
@@ -295,11 +399,13 @@ fn sender(
             match &result {
                 Ok(()) => {
                     s.connected = true;
+                    s.backup_took_over = false;
                     s.last_ok_ms = Some(now_ms());
                     s.error = None;
                 }
                 Err(e) => {
                     s.connected = false;
+                    s.backup_took_over = e == TAKEN_OVER;
                     s.error = Some(e.clone());
                 }
             }
@@ -331,20 +437,23 @@ mod tests {
             .set(LinkConfig {
                 role: LinkRole::Backup,
                 peer: String::new(),
-                key: "ab".into()
+                key: "ab".into(),
+                auto_takeover: true,
             })
             .is_err());
         assert!(l
             .set(LinkConfig {
                 role: LinkRole::Main,
                 peer: String::new(),
-                key: "abcd".into()
+                key: "abcd".into(),
+                auto_takeover: true,
             })
             .is_err());
         l.set(LinkConfig {
             role: LinkRole::Backup,
             peer: String::new(),
             key: "secret".into(),
+            auto_takeover: true,
         })
         .unwrap();
         let again = Link::load(Some(file));

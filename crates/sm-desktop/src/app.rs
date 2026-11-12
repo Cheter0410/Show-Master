@@ -222,6 +222,7 @@ impl App {
             "unsaved_changes" => "The show has unsaved changes.".into(),
             "forbidden" => "Not allowed.".into(),
             "path_required" => "Choose where to save the show.".into(),
+            "backup_standby" => "This is the backup computer and follows the main - use \"Take over now\" to run it yourself.".into(),
             other => other.to_string(),
         }
     }
@@ -1222,9 +1223,62 @@ impl App {
         ctx.send_viewport_cmd(ViewportCommand::Close);
     }
 
+    /// Main / backup computer state, impossible to miss.
+    fn backup_banner(&mut self, ui: &mut egui::Ui) {
+        let Some(l) = self.client.state.remote.link.clone() else {
+            return;
+        };
+        let (text, color, button): (String, Color32, Option<(&str, Value)>) = match l.role.as_str() {
+            "backup" if l.taken_over => (
+                "BACKUP HAS TAKEN OVER - this computer runs the show on its own, all outputs active".into(),
+                theme::ERROR,
+                Some(("Follow the main again", json!({ "cmd": "link_follow_main" }))),
+            ),
+            "backup" if l.connected => (
+                "BACKUP - following the main computer (audio plays, MIDI / OSC / timecode outputs are muted)".into(),
+                theme::NEXT,
+                Some(("Take over now", json!({ "cmd": "link_take_over" }))),
+            ),
+            "backup" => (
+                if l.auto_takeover && l.last_seen_ms.is_some() {
+                    "BACKUP - main not heard - taking over...".into()
+                } else {
+                    "BACKUP - waiting for the main computer (outputs muted)".into()
+                },
+                theme::WARN,
+                Some(("Take over now", json!({ "cmd": "link_take_over" }))),
+            ),
+            "main" if l.backup_took_over => (
+                "The BACKUP HAS TAKEN OVER - this computer is no longer mirrored. Mute its outputs or let the backup follow again.".into(),
+                theme::ERROR,
+                None,
+            ),
+            _ => return,
+        };
+        egui::Panel::top("backup_banner")
+            .frame(
+                egui::Frame::new()
+                    .fill(color)
+                    .inner_margin(egui::Margin::symmetric(10, 6)),
+            )
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(text).strong().color(Color32::WHITE));
+                    if let Some((label, cmd)) = button {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(RichText::new(label).strong()).clicked() {
+                                self.cmd(cmd);
+                            }
+                        });
+                    }
+                });
+            });
+    }
+
     /// Draw the whole window.
     pub fn ui_root(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        self.backup_banner(ui);
         egui::Panel::top("top_bar").show(ui, |ui| {
             ui.add_space(4.0);
             self.top_bar(ui);
