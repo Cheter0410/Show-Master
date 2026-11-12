@@ -60,6 +60,13 @@ erneut ausführen = aktualisieren, `./install.sh --uninstall` entfernt es):
 git clone https://github.com/Cheter0410/Show-Master.git && cd Show-Master && ./install.sh
 ```
 
+**Mac direkt aus dem Repository** (holt den neuesten Stand, installiert fehlende Werkzeuge, baut das DMG
+und installiert die App nach *Programme*; erneut ausführen = aktualisieren):
+
+```bash
+git clone https://github.com/Cheter0410/Show-Master.git ~/Desktop/dev/show-master; cd ~/Desktop/dev/show-master && bash install-mac.sh
+```
+
 Die Installer liegen auf der [Download-Seite](https://github.com/Cheter0410/show-master-releases/releases/latest)
 (sobald dort eine Version veröffentlicht ist). Gebaut werden sie lokal, siehe *Pakete bauen*.
 
