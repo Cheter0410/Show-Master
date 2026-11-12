@@ -211,6 +211,22 @@ try {
       if (roles !== "admin,control") throw new Error(`clients: ${roles}`);
       return `clients: ${roles}`;
     });
+    await step("remote timecode tab: start, pause, locate drive the generator", async () => {
+      await rp.tap('[data-testid="tab-tc"]');
+      await rp.waitForSelector('[data-testid="tc-panel"]');
+      await rp.tap('[data-testid="tc-start"]');
+      await rp.waitForSelector('[data-testid="tc-pause"]:not([disabled])');
+      await rp.tap('[data-testid="tc-pause"]');
+      await rp.waitForSelector('[data-testid="tc-resume"]:not([disabled])');
+      await rp.fill('[data-testid="tc-locate"]', "01:02:03:04");
+      await rp.press('[data-testid="tc-locate"]', "Enter");
+      await rp.tap('[data-testid="tc-locate-go"]');
+      await rp.waitForFunction(() => document.querySelector('[data-testid="tc-position"]')?.textContent?.startsWith("01:02:03"));
+      await rp.screenshot({ path: join(SHOTS, "real-remote-tc.png") });
+      await rp.tap('[data-testid="tc-stop"]');
+      await rp.tap('[data-testid="tab-cues"]');
+      await rp.waitForSelector('[data-testid="remote-app"] [data-cue]');
+    });
     await step("the desktop sees what the remote did", async () => {
       const a = await nextNumber(page);
       const b = await nextNumber(rp);

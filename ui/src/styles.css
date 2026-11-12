@@ -721,6 +721,14 @@ button.lrow-gutter:hover { box-shadow: inset 6px 0 0 var(--green-deep); }
 .r-body { flex: 1 1 auto; min-height: 0; }
 .r-body .notes { padding: 8px; }
 .r-body .notes .notes-text { font-size: 17px; }
+.r-tc { display: flex; flex-direction: column; gap: 14px; padding: 14px; align-items: stretch; }
+.r-tc-pos { font-size: clamp(34px, 9vw, 64px); font-weight: 800; text-align: center; letter-spacing: 0.04em; }
+.r-tc-pos.running { color: var(--green, #22c55e); }
+.r-tc-state { text-align: center; font-size: 14px; }
+.r-tc-buttons { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.r-tc-locate { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.r-tc-locate .field-wrap { flex: 1 1 160px; }
+.r-tc-locate input { min-height: 48px; font-size: 20px; }
 .r-mix { display: flex; flex-direction: column; gap: 10px; height: 100%; padding: 10px; }
 .r-mix .meters { flex: 1 1 auto; height: auto; }
 .r-mix .clip-led { height: 22px; }

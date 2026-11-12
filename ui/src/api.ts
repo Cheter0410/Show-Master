@@ -218,6 +218,8 @@ export type TcRate = "23.976" | "24" | "25" | "29.97df" | "29.97" | "30";
 export const TC_RATES: TcRate[] = ["23.976", "24", "25", "29.97df", "29.97", "30"];
 
 export interface TimecodeSettings {
+  /** "generator" (built-in) or "external" (chase MTC/LTC). */
+  source?: "generator" | "external";
   rate: TcRate;
   start: string;
   mode: "freerun" | "transport";

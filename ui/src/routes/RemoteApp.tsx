@@ -6,13 +6,14 @@ import { CueList } from "../components/CueList";
 import { MasterFader, Meters } from "../components/Meters";
 import { NextPanel } from "../components/NextPanel";
 import { ConnDot, Notes } from "../components/Panels";
+import { TimecodePanel } from "../components/TimecodePanel";
 import { Transport } from "../components/Transport";
 import { cueLabel, findCue } from "../cues";
 import { IconChevronDown, IconUp } from "../components/icons";
 import { keepScreenAwake, loadFlag, saveFlag } from "../platform";
 import { currentListId, useApp } from "../store";
 
-type Tab = "cues" | "mix" | "notes";
+type Tab = "cues" | "mix" | "tc" | "notes";
 
 export function RemoteApp() {
   const [tab, setTab] = useState<Tab>("cues");
@@ -54,9 +55,9 @@ export function RemoteApp() {
       </div>
       <div className="r-main">
         <nav className="r-tabs" role="tablist">
-          {(["cues", "mix", "notes"] as Tab[]).map((t) => (
+          {(["cues", "mix", "tc", "notes"] as Tab[]).map((t) => (
             <button key={t} role="tab" aria-selected={tab === t} className={`r-tab${tab === t ? " on" : ""}`} onClick={() => setTab(t)} data-testid={`tab-${t}`}>
-              {t === "cues" ? "Cues" : t === "mix" ? "Meters" : "Notes"}
+              {t === "cues" ? "Cues" : t === "mix" ? "Meters" : t === "tc" ? "Timecode" : "Notes"}
             </button>
           ))}
           {tab === "cues" ? (
@@ -73,6 +74,7 @@ export function RemoteApp() {
               <MasterFader canControl touch />
             </div>
           ) : null}
+          {tab === "tc" ? <TimecodePanel /> : null}
           {tab === "notes" ? <Notes editable /> : null}
         </div>
         {tab === "cues" ? (
