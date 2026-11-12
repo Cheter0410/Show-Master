@@ -222,7 +222,7 @@ fn choose_an_external_ltc_timecode_source() {
     });
     let tc: TcInfo = serde_json::from_value(env.handle.tick()["tc"].clone()).unwrap();
     let (text, _, _) = sm_desktop::live::clocks::tc_source_badge(&tc).unwrap();
-    assert_eq!(text, "EXT LTC NO SIGNAL");
+    assert_eq!(text, "LTC NO SIGNAL");
     assert!(sm_desktop::live::clocks::tc_source_badge(&TcInfo::default()).is_none());
 
     // Back to the generator.

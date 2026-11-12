@@ -157,7 +157,7 @@ pub fn tc_source_badge(tc: &TcInfo) -> Option<(String, Color32, bool)> {
         "held" => ("HELD", theme::WARN, false),
         other => (other, theme::MUTED, false),
     };
-    Some((format!("EXT {src} {state}"), color, on))
+    Some((format!("{src} {state}"), color, on))
 }
 
 /// What the user asked for in the clock strip.
@@ -277,7 +277,8 @@ pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> StripAction {
         right = badge(ui, right, cy, &tc.rate, false, theme::MUTED);
     }
     if let Some((text, color, on)) = &external {
-        if free.width() > 200.0 {
+        // Only when it fits next to the caption (about 6.5 px per character).
+        if right - (text.len() as f32 * 6.5 + 12.0) > free.left() {
             right = badge(ui, right, cy, text, *on, *color);
         }
     }

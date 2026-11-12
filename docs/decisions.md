@@ -179,8 +179,10 @@ revidieren lassen.
 - **Dateien öffnen im Hintergrund.** Audiodateien werden von zwei eigenen Threads geöffnet, nie von der
   Engine. Durch Standby passiert das vor dem GO; ein Cue ohne Standby (Vorschau, Chase, Control-Cue)
   beginnt, sobald die Datei offen ist – eine Verspätung über 10 ms steht im Log.
-- **rtp-midi:** kein Bonjour/mDNS (Verbindung per IP:Port), kein empfangsseitiges Recovery, Journal
-  (Kapitel P/C/N) standardmäßig aus, bis es gegen echte Gegenstellen geprüft ist.
+- **rtp-midi:** Senden mit Journal (Kapitel P/C/N) standardmäßig aus, bis es gegen echte Gegenstellen
+  geprüft ist. Empfangsseitiges Recovery stellt nur Programm, Controller und Noten wieder her (kein Pitch
+  Bend, Aftertouch, SysEx, System-Journal); das Journal des ersten Pakets einer Verbindung wird nicht
+  ausgewertet. Gegen Apple/rtpMIDI noch nicht geprüft.
 - **MIDI-Timing** ist nicht samplegenau, sondern über die Audio-Clock terminiert (siehe Architektur).
 - **Timecode-Eingang:** keine automatische Erkennung der Framerate (die Show-Rate muss zur Quelle
   passen; abweichende MTC-Rate oder LTC-Drop-Frame-Flag wird einmal im Log gemeldet), keine
@@ -188,4 +190,8 @@ revidieren lassen.
   keine Latenzkompensation für das Eingangsgerät.
 - **AAC/M4A:** Encoder-Vorlauf wird nicht abgeschnitten (ca. 1024 Frames). Für framegenaue Einsätze
   WAV/AIFF/FLAC verwenden.
-- **mDNS** für die Remote-URL gibt es nicht; Zugriff per IP/QR-Code.
+- **mDNS/Bonjour:** nur IPv4-Erkennung; Android-Tablets lösen `.local`-Namen oft nicht auf, und
+  WLANs mit Client-Isolation blockieren Multicast – dann gilt die IP-Adresse bzw. der QR-Code.
+- **Systemweite Hotkeys:** unter Linux nur mit X11 (nicht Wayland); Tastendruck kommt dort mit bis zu
+  50 ms Verzögerung an. Eine per Programm-Update aktualisierte, Developer-ID-signierte Mac-App wird ad hoc
+  neu signiert (läuft weiter, verliert aber die Developer-ID-Signatur; das DMG-Update behält sie).
