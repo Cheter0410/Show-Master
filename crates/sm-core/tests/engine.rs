@@ -1178,3 +1178,51 @@ fn seek_moves_a_playing_cue_and_loads_a_stopped_one() {
     let a = &e.snapshot().active[0];
     assert!((a.elapsed - 5.0).abs() < 0.01 && a.cue == c);
 }
+
+#[test]
+fn list_group_cues_each_take_their_own_go() {
+    let mut b = B::new();
+    let first = b.cue(midi(1));
+    let k1 = b.child(midi(2));
+    let k2 = b.child(midi(3));
+    let (k1_id, k2_id) = (k1.id, k2.id);
+    let g = b.cue(CueKind::Group(GroupCue {
+        mode: GroupMode::List,
+        children: vec![k1, k2],
+    }));
+    let last = b.cue(midi(4));
+    let mut e = b.engine();
+    let head = |e: &Engine| e.snapshot().lists[0].playhead;
+    let fired = |e: &mut Engine| -> Vec<CueId> {
+        e.drain_events()
+            .iter()
+            .filter_map(|ev| match ev.kind {
+                EventKind::CueStarted { cue } => Some(cue),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(head(&e), Some(first));
+    e.command(Command::Go { list: None }).unwrap();
+    assert_eq!(fired(&mut e), vec![first]);
+    // The playhead steps into the list group: one cue per GO.
+    assert_eq!(head(&e), Some(k1_id));
+    e.command(Command::Go { list: None }).unwrap();
+    assert_eq!(fired(&mut e), vec![k1_id]);
+    assert_eq!(head(&e), Some(k2_id));
+    e.command(Command::Go { list: None }).unwrap();
+    assert_eq!(fired(&mut e), vec![k2_id]);
+    assert_eq!(head(&e), Some(last));
+    // Previous / setting the playhead on the group lands on its first cue.
+    e.command(Command::Previous { list: None }).unwrap();
+    assert_eq!(head(&e), Some(k2_id));
+    e.command(Command::SetPlayhead {
+        list: None,
+        cue: Some(g),
+    })
+    .unwrap();
+    assert_eq!(head(&e), Some(k1_id));
+    // Firing the group itself starts nothing inside it.
+    e.command(Command::StartCue { cue: g }).unwrap();
+    assert!(fired(&mut e).iter().all(|c| *c == g));
+}

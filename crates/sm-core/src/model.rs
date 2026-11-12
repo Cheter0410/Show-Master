@@ -921,6 +921,10 @@ pub enum GroupMode {
     Playlist,
     /// Play one randomly chosen child.
     Random,
+    /// Just a list: nothing fires by itself. The playhead steps into the
+    /// group, and every cue in it takes its own GO, as if it were in the
+    /// cue list directly (the group only bundles and labels them).
+    List,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -980,6 +984,62 @@ impl CueList {
     /// Index of a top-level cue.
     pub fn index_of(&self, id: CueId) -> Option<usize> {
         self.cues.iter().position(|c| c.id == id)
+    }
+
+    /// The cues GO steps through, in order: the top-level cues, with every
+    /// list-mode group replaced by its cues (the group itself is no step).
+    pub fn steps(&self) -> Vec<&Cue> {
+        fn walk<'a>(cues: &'a [Cue], out: &mut Vec<&'a Cue>) {
+            for c in cues {
+                match &c.kind {
+                    CueKind::Group(g) if g.mode == GroupMode::List => walk(&g.children, out),
+                    _ => out.push(c),
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.cues, &mut out);
+        out
+    }
+
+    /// Position of a cue among [`Self::steps`].
+    pub fn step_index(&self, id: CueId) -> Option<usize> {
+        self.steps().iter().position(|c| c.id == id)
+    }
+
+    /// Whether `id` can take the playhead: a step, or a list-mode group
+    /// (which stands for its first cue).
+    pub fn first_step_of(&self, id: CueId) -> Option<CueId> {
+        let steps = self.steps();
+        if steps.iter().any(|c| c.id == id) {
+            return Some(id);
+        }
+        // A list-mode group: its first step (found by position in the tree).
+        fn find(cues: &[Cue], id: CueId) -> Option<&Cue> {
+            cues.iter().find_map(|c| {
+                if c.id == id {
+                    Some(c)
+                } else {
+                    find(c.children(), id)
+                }
+            })
+        }
+        let g = find(&self.cues, id)?;
+        let inner: Vec<CueId> = {
+            let mut v = Vec::new();
+            fn ids(c: &Cue, v: &mut Vec<CueId>) {
+                v.push(c.id);
+                c.children().iter().for_each(|k| ids(k, v));
+            }
+            ids(g, &mut v);
+            v
+        };
+        match &g.kind {
+            CueKind::Group(gr) if gr.mode == GroupMode::List => {
+                steps.iter().find(|c| inner.contains(&c.id)).map(|c| c.id)
+            }
+            _ => None,
+        }
     }
 }
 

@@ -4,6 +4,10 @@
 
 - Groups: a group's colour tints every cue inside it, and a bracket in its colour shows what belongs
   to the group.
+- Group mode "List": a group that only bundles cues - nothing fires by itself, the playhead steps
+  through its cues and each takes its own GO.
+- Waveform zoom: Ctrl / Cmd + wheel or pinch, Shift + wheel or sideways scrolling to move,
+  + / − / Fit buttons and an overview bar; the view follows the play cursor.
 - Waveform: a click sets the cue's playhead (a playing cue jumps there); the in / out points move by
   their handles; the loop is drawn, moved and resized by dragging in the strip below the wave.
 - A loop can take the timecode with it: the timecode jumps back with every pass.

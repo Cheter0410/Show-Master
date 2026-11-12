@@ -213,7 +213,8 @@ Cue:
   //      plain HTTP/1.1 (no https), sent from a worker thread; failures are logged
   // { "type": "timecode", "tc": { "action": "start" | "stop" | "pause" | "resume" } | { "action": "start_from", "from": "…" } | { "action": "relocate", "to": "…" } }
   // { "type": "control", "action": "start"|"stop"|"pause"|"resume"|"load_to_time"|"arm"|"disarm"|"go_to"|"release_loop"|"reset", "target": 5, "time": 0.0 }
-  // { "type": "group", "mode": "parallel"|"playlist"|"random", "children": [ /* Cue */ ] }
+  // { "type": "group", "mode": "parallel"|"playlist"|"random"|"list", "children": [ /* Cue */ ] }
+  //      list: nothing fires by itself; the playhead steps through its cues, one GO each
   // { "type": "memo" }
 }
 ```

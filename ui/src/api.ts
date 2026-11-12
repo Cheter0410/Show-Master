@@ -122,7 +122,7 @@ export interface ControlKind {
   time: number;
 }
 
-export type GroupMode = "parallel" | "playlist" | "random";
+export type GroupMode = "parallel" | "playlist" | "random" | "list";
 
 export interface GroupKind {
   type: "group";

@@ -31,6 +31,8 @@ pub struct InspectorState {
     pub slider: Option<(Id, f32)>,
     /// Waveform marker being dragged.
     pub wave_drag: Option<audio::WaveDrag>,
+    /// Zoomed waveform: (cue, first second, last second shown).
+    pub wave_view: Option<(u64, f64, f64)>,
     renumber_start: String,
     renumber_step: String,
     /// The inspector can be folded away (short / compact screens).
@@ -1588,10 +1590,11 @@ fn control_tab(ui: &mut Ui, show: &Show, cue: &Cue, edit: &mut EditState, out: &
     });
 }
 
-const GROUP_MODES: [(GroupMode, &str); 3] = [
+const GROUP_MODES: [(GroupMode, &str); 4] = [
     (GroupMode::Parallel, "Parallel – fire all children together"),
     (GroupMode::Playlist, "Playlist – children one after another"),
     (GroupMode::Random, "Random – one random child"),
+    (GroupMode::List, "List – each cue takes its own GO"),
 ];
 
 pub fn group_mode_label(m: GroupMode) -> &'static str {
@@ -1599,6 +1602,7 @@ pub fn group_mode_label(m: GroupMode) -> &'static str {
         GroupMode::Parallel => "parallel",
         GroupMode::Playlist => "playlist",
         GroupMode::Random => "random",
+        GroupMode::List => "list",
     }
 }
 

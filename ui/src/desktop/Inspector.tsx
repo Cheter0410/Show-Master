@@ -428,6 +428,7 @@ function GroupTab({ cue, kind }: { cue: Cue; kind: GroupKind }) {
     { value: "parallel", label: "Parallel – fire all children together" },
     { value: "playlist", label: "Playlist – children one after another" },
     { value: "random", label: "Random – one random child per GO" },
+    { value: "list", label: "List – each cue takes its own GO" },
   ];
   return (
     <div className="insp-col">

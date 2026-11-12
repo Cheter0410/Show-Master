@@ -717,3 +717,43 @@ fn waveform_click_sets_the_playhead_and_the_strip_draws_a_loop() {
             .is_some_and(|x| (x - 0.2).abs() < 0.03)
     });
 }
+
+#[test]
+fn waveform_zoom_in_and_out() {
+    let env = Env::demo();
+    let mut h = harness(&env);
+    let id = id_of(&env, "1");
+    h.get_by_label("Cue 1 Intro").click();
+    settle(&mut h);
+    h.get_by_label("Audio tab").click();
+    for _ in 0..10 {
+        settle(&mut h);
+    }
+    assert!(
+        h.query_by_label("Waveform overview").is_none(),
+        "not zoomed yet"
+    );
+    // Two steps in: a quarter of the 2 s file, centred (0.75 .. 1.25 s).
+    h.get_by_label("Zoom in").click();
+    settle(&mut h);
+    h.get_by_label("Zoom in").click();
+    settle(&mut h);
+    h.get_by_label("Waveform overview");
+    let w = h.get_by_label("Waveform").rect();
+    let at = |f: f32| egui::pos2(w.left() + w.width() * f, w.center().y - 10.0);
+    // A click at the left edge of the zoomed view is 0.75 s into the file.
+    pointer_drag(&mut h, at(0.02), at(0.02));
+    env.wait(&mut h, "loaded near 0.76 s", |s| {
+        s["loaded"][id.to_string()]
+            .as_f64()
+            .is_some_and(|t| (t - 0.76).abs() < 0.02)
+    });
+    h.get_by_label("Zoom out").click();
+    settle(&mut h);
+    h.get_by_label("Fit").click();
+    settle(&mut h);
+    assert!(
+        h.query_by_label("Waveform overview").is_none(),
+        "whole file again"
+    );
+}

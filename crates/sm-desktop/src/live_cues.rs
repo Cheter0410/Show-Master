@@ -64,6 +64,25 @@ pub fn row_state(active: Option<&Active>, error: bool, loaded: bool) -> RowState
     }
 }
 
+/// Cues that can take the playhead: the steps GO walks through (top-level
+/// cues and the cues of list-mode groups) and list-mode groups themselves
+/// (they stand for their first cue).
+pub fn playhead_targets(list: &sm_core::model::CueList) -> std::collections::HashSet<u64> {
+    fn lists(cues: &[Cue], out: &mut std::collections::HashSet<u64>) {
+        for c in cues {
+            if let CueKind::Group(g) = &c.kind {
+                if g.mode == GroupMode::List {
+                    out.insert(c.id);
+                }
+                lists(&g.children, out);
+            }
+        }
+    }
+    let mut out: std::collections::HashSet<u64> = list.steps().iter().map(|c| c.id).collect();
+    lists(&list.cues, &mut out);
+    out
+}
+
 /// Flatten a cue tree into (cue, depth) rows.
 pub fn flatten<'a>(cues: &'a [Cue], depth: u8, out: &mut Vec<(&'a Cue, u8)>) {
     for c in cues {
@@ -167,6 +186,7 @@ pub fn cue_target(cue: &Cue, show: &Show) -> String {
                 GroupMode::Parallel => "parallel",
                 GroupMode::Playlist => "playlist",
                 GroupMode::Random => "random",
+                GroupMode::List => "list",
             };
             let n = g.children.len();
             format!("{mode} · {n} cue{}", if n == 1 { "" } else { "s" })
@@ -320,6 +340,7 @@ pub fn cue_window(
     let mut flat: Vec<(&Cue, u8)> = Vec::with_capacity(list.cues.len());
     flatten(&list.cues, 0, &mut flat);
     let groups = theme::group_places(&list.cues);
+    let heads = playhead_targets(list);
     let playhead = input.state.playhead(list.id);
     let ph_index = playhead.and_then(|p| flat.iter().position(|(c, _)| c.id == p));
 
@@ -387,6 +408,7 @@ pub fn cue_window(
                 cue,
                 depth,
                 place,
+                heads.contains(&cue.id),
                 playhead == Some(cue.id),
                 input,
             ) {
@@ -407,6 +429,7 @@ fn draw_row(
     cue: &Cue,
     depth: u8,
     place: Option<&theme::GroupPlace>,
+    can_head: bool,
     is_playhead: bool,
     input: &CueWindowInput<'_>,
 ) -> Option<CueAction> {
@@ -734,7 +757,7 @@ fn draw_row(
     // No tooltip: a mouse resting on the list during a show must not cover rows.
     if release {
         Some(CueAction::ReleaseLoop(cue.id))
-    } else if resp.double_clicked() && depth == 0 {
+    } else if resp.double_clicked() && can_head {
         Some(CueAction::SetPlayhead(cue.id))
     } else if resp.clicked() {
         Some(CueAction::Select(cue.id))

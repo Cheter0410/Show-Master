@@ -659,9 +659,9 @@ impl Engine {
         for l in &self.show.cue_lists {
             let prev = self.playheads.get(&l.id).copied();
             let head = match prev {
-                Some(Some(c)) if l.index_of(c).is_some() => Some(c),
+                Some(Some(c)) if l.step_index(c).is_some() => Some(c),
                 Some(None) if !self.insts.is_empty() || self.show_start.is_some() => None,
-                _ => l.cues.first().map(|c| c.id),
+                _ => l.steps().first().map(|c| c.id),
             };
             heads.insert(l.id, head);
         }
@@ -822,9 +822,10 @@ impl Engine {
         let mut mode = ContinueMode::DoNotContinue;
         if opts.parent.is_none() {
             if let Some(l) = self.show.list(list) {
-                if let Some(i) = l.index_of(cue_id) {
+                let steps = l.steps();
+                if let Some(i) = steps.iter().position(|c| c.id == cue_id) {
                     mode = cue.continue_mode;
-                    next = l.cues.get(i + 1).map(|c| c.id);
+                    next = steps.get(i + 1).map(|c| c.id);
                 }
             }
         }
@@ -1474,8 +1475,13 @@ impl Engine {
                     self.insts[ix].action_done = true;
                     return;
                 }
+                if g.mode == GroupMode::List {
+                    // A list fires nothing by itself (its cues take their own GO).
+                    self.insts[ix].action_done = true;
+                    return;
+                }
                 let order = match g.mode {
-                    GroupMode::Parallel | GroupMode::Playlist => children,
+                    GroupMode::Parallel | GroupMode::Playlist | GroupMode::List => children,
                     GroupMode::Random => {
                         let pick = (self.rand() % children.len() as u64) as usize;
                         vec![children[pick]]
@@ -1670,7 +1676,7 @@ impl Engine {
             Some(c) => self
                 .show
                 .list(list)
-                .is_some_and(|l| l.index_of(c).is_some()),
+                .is_some_and(|l| l.step_index(c).is_some()),
         };
         if !valid {
             return;
@@ -1683,15 +1689,14 @@ impl Engine {
 
     /// The cue after the continue-chain starting at index `i`.
     fn after_chain(&self, list: ListId, mut i: usize) -> Option<CueId> {
-        let l = self.show.list(list)?;
-        while l
-            .cues
+        let steps = self.show.list(list)?.steps();
+        while steps
             .get(i)
             .is_some_and(|c| c.continue_mode != ContinueMode::DoNotContinue)
         {
             i += 1;
         }
-        l.cues.get(i + 1).map(|c| c.id)
+        steps.get(i + 1).map(|c| c.id)
     }
 
     // ------------------------------------------------------------------
@@ -1722,10 +1727,11 @@ impl Engine {
             let Some(Some(head)) = self.playheads.get(&l.id) else {
                 continue;
             };
-            let Some(mut i) = l.index_of(*head) else {
+            let steps = l.steps();
+            let Some(mut i) = steps.iter().position(|c| c.id == *head) else {
                 continue;
             };
-            while let Some(cue) = l.cues.get(i) {
+            while let Some(cue) = steps.get(i).copied() {
                 collect(cue, &mut want);
                 // Control cues that start another cue make that cue part of the GO.
                 if let CueKind::Control(c) = &cue.kind {
@@ -2397,11 +2403,18 @@ impl Engine {
                         .ok_or_else(|| format!("cue {c} does not exist"))?,
                     None => self.default_list(list).ok_or("no cue list")?,
                 };
-                if let Some(c) = cue {
-                    if self.show.list(list).and_then(|l| l.index_of(c)).is_none() {
-                        return Err("cues inside groups cannot take the playhead".into());
-                    }
-                }
+                // A list-mode group stands for its first cue.
+                let cue = match cue {
+                    Some(c) => Some(
+                        self.show
+                            .list(list)
+                            .and_then(|l| l.first_step_of(c))
+                            .ok_or(
+                            "cues inside groups cannot take the playhead (except in list groups)",
+                        )?,
+                    ),
+                    None => None,
+                };
                 self.set_playhead(list, cue, t);
                 Ok(())
             }
@@ -2411,9 +2424,9 @@ impl Engine {
                     .find_by_number(&number)
                     .map(|(l, c)| (l, c.id))
                     .ok_or_else(|| format!("no cue with number {number}"))?;
-                if self.show.list(list).and_then(|l| l.index_of(id)).is_none() {
+                let Some(id) = self.show.list(list).and_then(|l| l.first_step_of(id)) else {
                     return Err(format!("cue {number} is inside a group"));
-                }
+                };
                 self.set_playhead(list, Some(id), t);
                 Ok(())
             }
@@ -2480,7 +2493,7 @@ impl Engine {
                     .show
                     .cue_lists
                     .iter()
-                    .map(|l| (l.id, l.cues.first().map(|c| c.id)))
+                    .map(|l| (l.id, l.steps().first().map(|c| c.id)))
                     .collect();
                 for (list, head) in heads {
                     self.set_playhead(list, head, t);
@@ -2568,7 +2581,7 @@ impl Engine {
             );
             return Ok(());
         };
-        let Some(ix) = self.show.list(list).and_then(|l| l.index_of(head)) else {
+        let Some(ix) = self.show.list(list).and_then(|l| l.step_index(head)) else {
             return Err("playhead cue no longer exists".into());
         };
         self.last_go = Some(t);
@@ -2590,14 +2603,18 @@ impl Engine {
 
     fn step(&mut self, list: Option<ListId>, delta: i64, t: u64) -> Result<(), String> {
         let list = self.default_list(list).ok_or("no cue list")?;
-        let l = self.show.list(list).ok_or("no cue list")?;
-        let len = l.cues.len() as i64;
+        let steps = self.show.list(list).ok_or("no cue list")?.steps();
+        let len = steps.len() as i64;
         let cur = match self.playheads.get(&list).copied().flatten() {
-            Some(c) => l.index_of(c).map(|i| i as i64).unwrap_or(len),
+            Some(c) => steps
+                .iter()
+                .position(|s| s.id == c)
+                .map(|i| i as i64)
+                .unwrap_or(len),
             None => len,
         };
         let new = (cur + delta).clamp(0, len);
-        let cue = l.cues.get(new as usize).map(|c| c.id);
+        let cue = steps.get(new as usize).map(|c| c.id);
         self.set_playhead(list, cue, t);
         Ok(())
     }

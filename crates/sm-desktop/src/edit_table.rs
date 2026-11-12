@@ -447,6 +447,7 @@ pub(crate) fn show(
         let first = (viewport.top() / row_h).floor().max(0.0) as usize;
         let last = ((viewport.bottom() / row_h).ceil() as usize + 1).min(rows.len());
         let groups = theme::group_places(&list.cues);
+        let heads = crate::live::cues::playhead_targets(list);
         let ctx = RowCtx {
             state,
             tick,
@@ -456,6 +457,7 @@ pub(crate) fn show(
             order: &order,
             touch,
             groups: &groups,
+            heads: &heads,
         };
         for (i, row) in rows.iter().enumerate().take(last).skip(first) {
             let rect = Rect::from_min_size(
@@ -582,6 +584,8 @@ struct RowCtx<'a> {
     order: &'a [u64],
     touch: bool,
     groups: &'a HashMap<u64, theme::GroupPlace>,
+    /// Cues that can take the playhead.
+    heads: &'a HashSet<u64>,
 }
 
 /// What the row shows about the cue's runtime state.
@@ -629,7 +633,7 @@ fn draw_row(
     let error = ctx.state.error(id);
     let loaded = ctx.state.loaded(id);
     let rs = run_state(active, error.is_some(), loaded.is_some());
-    let is_playhead = row.depth == 0 && ctx.playhead == Some(id);
+    let is_playhead = ctx.playhead == Some(id);
     let is_group = matches!(cue.kind, CueKind::Group(_));
     let label = format!("Cue {}", cue_label(cue));
 
@@ -930,7 +934,7 @@ fn draw_row(
                 field: InlineField::Name,
                 opened: false,
             });
-        } else if row.depth == 0 {
+        } else if ctx.heads.contains(&id) {
             // Anywhere else on the row: make it the next cue, as in Live.
             out.push(Out::Cmd(
                 json!({ "cmd": "set_playhead", "cue": id, "list": ctx.list_id }),
@@ -1026,8 +1030,8 @@ fn draw_row(
         }
     }
 
-    // Gutter: set the playhead (top-level cues only).
-    if row.depth == 0 {
+    // Gutter: set the playhead (top-level cues and cues in list groups).
+    if ctx.heads.contains(&id) {
         let g = ui.interact(gutter, Id::unique(("edit_gutter", id)), Sense::click());
         if g.hovered() && !is_playhead {
             next_tag(
@@ -1319,8 +1323,8 @@ fn context_menu(
     }
     ui.separator();
     if ui
-        .add_enabled(row.depth == 0, egui::Button::new("Set as next"))
-        .on_disabled_hover_text("Only top-level cues can be the playhead")
+        .add_enabled(ctx.heads.contains(&id), egui::Button::new("Set as next"))
+        .on_disabled_hover_text("Only top-level cues and cues in list groups can be the playhead")
         .clicked()
     {
         out.push(Out::Cmd(

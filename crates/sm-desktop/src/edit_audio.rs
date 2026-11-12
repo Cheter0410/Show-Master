@@ -14,7 +14,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 
-const BUCKETS: usize = 1200;
+/// Waveform resolution: one peak per 5 ms (zooming in stays sharp), at
+/// least 1200 and at most 200 000 per file.
+const BUCKETS_PER_SECOND: f64 = 200.0;
+const BUCKETS_MIN: usize = 1200;
+const BUCKETS_MAX: usize = 200_000;
+/// Narrowest waveform view in seconds.
+const MIN_VIEW: f64 = 0.1;
 const DB_FLOOR: f32 = -120.0;
 
 type Peaks = Arc<Vec<(f32, f32)>>;
@@ -50,7 +56,13 @@ impl Waves {
             let spawned = std::thread::Builder::new()
                 .name("waveform".into())
                 .spawn(move || {
-                    let r = sm_audio::waveform_peaks(&p, BUCKETS).map_err(|e| e.to_string());
+                    let buckets = sm_audio::probe(&p)
+                        .ok()
+                        .and_then(|i| i.duration_seconds)
+                        .map_or(BUCKETS_MIN, |d| {
+                            ((d * BUCKETS_PER_SECOND) as usize).clamp(BUCKETS_MIN, BUCKETS_MAX)
+                        });
+                    let r = sm_audio::waveform_peaks(&p, buckets).map_err(|e| e.to_string());
                     let _ = tx.send(r);
                     repaint.request_repaint();
                 });
@@ -375,9 +387,19 @@ fn waveform(
         }
         _ => a.active_vamp().map(|v| (v.start, v.end)),
     };
+    // The part of the file shown (zoom): whole file unless zoomed in.
+    let (v0, v1) = match edit.insp.wave_view {
+        Some((c, a, b)) if c == id && duration > 0.0 => {
+            let span = (b - a).clamp(MIN_VIEW.min(duration), duration);
+            let a = a.clamp(0.0, duration - span);
+            (a, a + span)
+        }
+        _ => (0.0, duration),
+    };
+    let span = (v1 - v0).max(1e-9);
     let x_of = |t: f64| {
         if duration > 0.0 {
-            rect.left() + (t / duration) as f32 * rect.width()
+            rect.left() + ((t - v0) / span) as f32 * rect.width()
         } else {
             rect.left()
         }
@@ -390,9 +412,12 @@ fn waveform(
             let mut mesh = Mesh::default();
             let n = peaks.len();
             let cols = rect.width().floor().max(1.0) as usize;
+            let bucket = |t: f64| ((t / duration.max(1e-9)) * n as f64).max(0.0) as usize;
             for px in 0..cols {
-                let b0 = px * n / cols;
-                let b1 = ((px + 1) * n / cols).max(b0 + 1).min(n);
+                let ta = v0 + span * px as f64 / cols as f64;
+                let tb = v0 + span * (px + 1) as f64 / cols as f64;
+                let b0 = bucket(ta).min(n - 1);
+                let b1 = bucket(tb).max(b0 + 1).min(n);
                 let (mut lo, mut hi) = (0.0f32, 0.0f32);
                 for (l, h) in &peaks[b0..b1] {
                     lo = lo.min(*l);
@@ -555,7 +580,7 @@ fn waveform(
     // Pointer: a click (anywhere but a marker handle or the loop strip)
     // sets the playhead; marker handles and the loop strip are dragged.
     let time_at =
-        |x: f32| (((x - rect.left()) / rect.width()) as f64 * duration).clamp(0.0, duration);
+        |x: f32| (v0 + ((x - rect.left()) / rect.width()) as f64 * span).clamp(0.0, duration);
     let min_len = 0.01;
     let min_loop = 0.05;
     let r2 = |t: f64| (t * 1000.0).round() / 1000.0;
@@ -706,6 +731,84 @@ fn waveform(
             }
         });
     }
+    // Zoom: Ctrl / Cmd + wheel or pinch zooms around the pointer;
+    // horizontal scrolling (or Shift + wheel) moves the view.
+    let mut wanted = (v0, v1);
+    if duration > 0.0 {
+        if let Some(p) = resp.hover_pos() {
+            let (zoom, dx) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta.x));
+            if (zoom - 1.0).abs() > 1e-4 {
+                let at = time_at(p.x);
+                let new_span = (span / f64::from(zoom)).clamp(MIN_VIEW.min(duration), duration);
+                let f = (at - v0) / span;
+                wanted = (at - f * new_span, at - f * new_span + new_span);
+            } else if dx.abs() > 0.0 && span < duration {
+                let shift = -f64::from(dx) / f64::from(rect.width()) * span;
+                wanted = (v0 + shift, v1 + shift);
+                ui.input_mut(|i| i.smooth_scroll_delta.x = 0.0);
+            }
+        }
+        // While playing zoomed in, the view pages along with the play cursor.
+        if edit.insp.wave_drag.is_none() && span < duration {
+            if let Some(act) = tick
+                .active(id)
+                .filter(|t| t.phase == Phase::Running && !t.paused)
+            {
+                let pos = match a.active_vamp() {
+                    Some(v) if act.vamping => {
+                        let intro = v.end - start;
+                        Some(if act.elapsed < intro {
+                            start + act.elapsed
+                        } else {
+                            v.start + (act.elapsed - intro) % (v.end - v.start)
+                        })
+                    }
+                    Some(_) => None,
+                    None => Some(start + act.elapsed % (end - start).max(1e-9)),
+                };
+                if let Some(pos) = pos.filter(|p| *p < v0 || *p > v1) {
+                    wanted = (pos - span * 0.1, pos + span * 0.9);
+                }
+            }
+        }
+    }
+    let set_view = |edit: &mut EditState, (a, b): (f64, f64)| {
+        let span = (b - a).clamp(MIN_VIEW.min(duration), duration);
+        edit.insp.wave_view = if span >= duration - 1e-9 {
+            None
+        } else {
+            let a = a.clamp(0.0, duration - span);
+            Some((id, a, a + span))
+        };
+    };
+    if wanted != (v0, v1) {
+        set_view(edit, wanted);
+        ui.ctx().request_repaint();
+    }
+
+    // Overview bar while zoomed in: where the view is; drag or click to move it.
+    if duration > 0.0 && span < duration - 1e-9 {
+        let (bar, bresp) = ui.allocate_exact_size(vec2(width, 10.0), Sense::click_and_drag());
+        let bresp = bresp.accessible_name("Waveform overview");
+        let p = ui.painter_at(bar);
+        p.rect_filled(bar, 3.0, ui.visuals().extreme_bg_color);
+        let bx = |t: f64| bar.left() + (t / duration) as f32 * bar.width();
+        p.rect_filled(
+            Rect::from_x_y_ranges(bx(start)..=bx(end), bar.y_range()),
+            3.0,
+            theme::RUNNING.gamma_multiply(0.25),
+        );
+        p.rect_filled(
+            Rect::from_x_y_ranges(bx(v0)..=bx(v1).max(bx(v0) + 3.0), bar.y_range()),
+            3.0,
+            Color32::from_gray(170),
+        );
+        if let Some(q) = bresp.interact_pointer_pos() {
+            let c = f64::from((q.x - bar.left()) / bar.width()) * duration;
+            set_view(edit, (c - span / 2.0, c + span / 2.0));
+        }
+    }
+
     // Info line under the waveform
     ui.horizontal(|ui| {
         let small = |t: String| RichText::new(t).small().monospace();
@@ -724,6 +827,42 @@ fn waveform(
         ui.label(RichText::new(info).small().color(theme::MUTED));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(small(format!("end {}", util::fmt_time(end))).color(theme::ERROR));
+            if duration > 0.0 {
+                ui.add_space(8.0);
+                let zoomed = span < duration - 1e-9;
+                if ui
+                    .add_enabled(zoomed, egui::Button::new("Fit").small())
+                    .on_hover_text("Show the whole file")
+                    .clicked()
+                {
+                    edit.insp.wave_view = None;
+                }
+                let centre = (v0 + v1) / 2.0;
+                if ui
+                    .add_enabled(span > MIN_VIEW, egui::Button::new("+").small())
+                    .accessible_name("Zoom in")
+                    .on_hover_text("Zoom in (or Ctrl / Cmd + wheel, pinch)")
+                    .clicked()
+                {
+                    set_view(edit, (centre - span / 4.0, centre + span / 4.0));
+                }
+                if ui
+                    .add_enabled(zoomed, egui::Button::new("−").small())
+                    .accessible_name("Zoom out")
+                    .on_hover_text("Zoom out")
+                    .clicked()
+                {
+                    set_view(edit, (centre - span, centre + span));
+                }
+                if zoomed {
+                    ui.label(
+                        RichText::new(format!("{}–{}", util::fmt_time(v0), util::fmt_time(v1)))
+                            .small()
+                            .monospace()
+                            .color(theme::MUTED),
+                    );
+                }
+            }
         });
     });
 }
