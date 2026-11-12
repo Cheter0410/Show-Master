@@ -10,6 +10,8 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 blake3 = "1"
+# Show packages (.smpack): show + media in one file.
+zip = { version = "=9.5.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 sm-timecode.workspace = true
 
 [dev-dependencies]

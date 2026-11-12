@@ -21,6 +21,12 @@
             <key>CFBundleTypeExtensions</key><array><string>smshow</string></array>
             <key>LSHandlerRank</key><string>Owner</string>
         </dict>
+        <dict>
+            <key>CFBundleTypeName</key><string>Show Master package</string>
+            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>CFBundleTypeExtensions</key><array><string>smpack</string></array>
+            <key>LSHandlerRank</key><string>Owner</string>
+        </dict>
     </array>
     <key>NSMicrophoneUsageDescription</key><string>Show Master reads LTC timecode from an audio input when you choose one in Setup.</string>
     <key>NSLocalNetworkUsageDescription</key><string>Show Master serves its remote control to tablets and sends MIDI and timecode to devices on your network.</string>

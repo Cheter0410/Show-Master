@@ -75,7 +75,16 @@ struct Toast {
     until: Instant,
 }
 
+/// Result of work done on a background thread (show packages).
+pub enum JobDone {
+    Toast(String),
+    Error(String),
+    Open(PathBuf),
+}
+
 pub struct App {
+    /// Background jobs (show packages) the window waits for.
+    jobs: Vec<std::sync::mpsc::Receiver<JobDone>>,
     pub client: Client,
     pub view: View,
     pub edit: crate::edit::EditState,
@@ -126,6 +135,7 @@ impl App {
             last_go: None,
             panic_tap: None,
             allow_close: false,
+            jobs: Vec::new(),
             style_key: None,
             prefs: crate::prefs::Prefs::default(),
             global_hotkeys: Default::default(),
@@ -544,6 +554,106 @@ impl App {
         }
     }
 
+    /// Run `work` on a background thread; its result is handled in `logic`.
+    fn spawn_job(&mut self, what: &str, work: impl FnOnce() -> JobDone + Send + 'static) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        match std::thread::Builder::new()
+            .name("sm-job".into())
+            .spawn(move || {
+                let _ = tx.send(work());
+            }) {
+            Ok(_) => {
+                self.jobs.push(rx);
+                self.toast(format!("{what}..."));
+            }
+            Err(e) => self.toast_error(format!("{what} failed: {e}")),
+        }
+    }
+
+    fn poll_jobs(&mut self) {
+        let mut done = Vec::new();
+        self.jobs.retain(|rx| match rx.try_recv() {
+            Ok(r) => {
+                done.push(r);
+                false
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => true,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
+        });
+        for r in done {
+            match r {
+                JobDone::Toast(t) => self.toast(t),
+                JobDone::Error(e) => self.toast_error(e),
+                JobDone::Open(p) => self.open_show(p),
+            }
+        }
+    }
+
+    /// Save the show and all its audio as one `.smpack` file.
+    pub fn export_package(&mut self) {
+        let show = self.client.state.show.clone();
+        let dir = self
+            .client
+            .state
+            .show_path
+            .as_deref()
+            .and_then(|p| Path::new(p).parent())
+            .map(Path::to_path_buf);
+        let name = if show.name.trim().is_empty() { "Show".to_string() } else { show.name.trim().to_string() };
+        let Some(out) = rfd::FileDialog::new()
+            .set_title("Export show package")
+            .add_filter("Show Master package", &[sm_core::package::EXTENSION])
+            .set_file_name(format!("{name}.{}", sm_core::package::EXTENSION))
+            .save_file()
+        else {
+            return;
+        };
+        self.spawn_job("Packing the show", move || {
+            match sm_core::package::export(&show, dir.as_deref(), &out) {
+                Ok(r) if r.missing.is_empty() => JobDone::Toast(format!(
+                    "Show package saved: {} audio files, {:.1} MB",
+                    r.files,
+                    r.bytes as f64 / 1e6
+                )),
+                Ok(r) => JobDone::Error(format!(
+                    "Package saved, but {} file(s) were missing: {}",
+                    r.missing.len(),
+                    r.missing.join(", ")
+                )),
+                Err(e) => JobDone::Error(format!("Could not save the package: {e}")),
+            }
+        });
+    }
+
+    /// Unpack a `.smpack` into a folder and open the show.
+    pub fn import_package(&mut self, package: Option<PathBuf>) {
+        let package = match package {
+            Some(p) => p,
+            None => {
+                let Some(p) = rfd::FileDialog::new()
+                    .set_title("Open show package")
+                    .add_filter("Show Master package", &[sm_core::package::EXTENSION])
+                    .pick_file()
+                else {
+                    return;
+                };
+                p
+            }
+        };
+        let Some(dest) = rfd::FileDialog::new()
+            .set_title("Unpack the show into which folder?")
+            .pick_folder()
+        else {
+            return;
+        };
+        self.spawn_job("Unpacking the show", move || {
+            match sm_core::package::import(&package, &dest) {
+                Ok(show) => JobDone::Open(show),
+                Err(e) => JobDone::Error(format!("Could not open the package: {e}")),
+            }
+        });
+    }
+
     fn handle_dropped_files(&mut self, ctx: &egui::Context) {
         let files: Vec<PathBuf> = ctx.input(|i| {
             i.raw
@@ -565,12 +675,16 @@ impl App {
             self.open_show(show.clone());
             return;
         }
+        if let Some(pkg) = files.iter().find(|p| ext(p) == sm_core::package::EXTENSION) {
+            self.import_package(Some(pkg.clone()));
+            return;
+        }
         let audio: Vec<PathBuf> = files
             .into_iter()
             .filter(|p| AUDIO_EXTENSIONS.contains(&ext(p).as_str()))
             .collect();
         if audio.is_empty() {
-            self.toast_error("Only audio files and .smshow files can be dropped here.");
+            self.toast_error("Only audio files, .smshow and .smpack files can be dropped here.");
         } else {
             self.add_audio_cues(audio);
         }
@@ -854,6 +968,8 @@ impl App {
             };
             if let Some(show) = requested.iter().find(|p| ext(p) == SHOW_EXTENSION) {
                 self.open_show(show.clone());
+            } else if let Some(pkg) = requested.iter().find(|p| ext(p) == sm_core::package::EXTENSION) {
+                self.import_package(Some(pkg.clone()));
             } else {
                 let audio: Vec<PathBuf> = requested
                     .into_iter()
@@ -869,6 +985,7 @@ impl App {
             self.modal = Some(Modal::Recovery);
         }
         self.handle_close_request(ctx);
+        self.poll_jobs();
         self.handle_dropped_files(ctx);
         crate::setup::capture_keys(self, ctx);
         let hidden = ctx.input(|i| {
@@ -1032,6 +1149,21 @@ impl App {
         }
         if ui.button("Save as…").clicked() {
             self.save_as(None);
+        }
+        ui.separator();
+        if ui
+            .button("Export show package…")
+            .on_hover_text("The show and all its audio in one file, to move it to another computer")
+            .clicked()
+        {
+            self.export_package();
+        }
+        if ui
+            .button("Open show package…")
+            .on_hover_text("Unpack a .smpack file into a folder and open it")
+            .clicked()
+        {
+            self.import_package(None);
         }
         ui.separator();
         if ui
