@@ -1,14 +1,18 @@
 #!/bin/bash
-# Show Master veröffentlichen - ein Befehl, auf jedem Rechner derselbe.
+# Show Master veröffentlichen - ein Befehl, auf jedem Rechner derselbe:
 #
-#   ./release.sh            baut, was dieser Rechner bauen kann, und lädt es hoch
-#                           (Arch-PC: Linux + Windows, Mac: das DMG)
-#   ./release.sh status     zeigt, welche Teile der aktuellen Version schon oben sind
-#   ./release.sh version    erhöht die Versionsnummer (danach bauen beide neu)
+#   ./release.sh          baut, was dieser Rechner bauen kann, und lädt es hoch
+#                         (Arch-PC: Linux + Windows, Mac: das DMG)
+#   ./release.sh status   zeigt, welche Teile schon oben sind
 #
-# Hochgeladen wird in einen Entwurf. Sobald Mac, Windows und Linux drin sind,
-# wird das Release automatisch veröffentlicht - erst dann bieten installierte
-# Show Master das Update an. Fehlende Werkzeuge richtet das Skript selbst ein.
+# Die Versionsnummer ist automatisch:
+#   * Gibt es einen Entwurf, baut dieser Rechner genau dessen Stand (Git-Tag
+#     vX.Y.Z) und ersetzt seine Teile darin.
+#   * Ist die aktuelle Version schon veröffentlicht, wird sie um eins erhöht,
+#     "was ist neu" aus den Commits seitdem eingetragen, alles gepusht und ein
+#     neuer Entwurf angelegt.
+# Sobald Mac, Windows und Linux im Entwurf sind, wird er veröffentlicht -
+# erst dann bieten installierte Programme das Update an.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -99,40 +103,9 @@ show_status() {
   return $missing
 }
 
-notes_file() {
-  local v=$1 f
-  f=$(mktemp)
-  awk -v v="$v" '$0 ~ "^## " v "$" {on=1; next} /^## / {on=0} on' CHANGELOG.md > "$f" 2>/dev/null || true
-  [ -s "$f" ] || echo "$APP $v" > "$f"
-  echo "$f"
-}
-
-# --- Befehle ----------------------------------------------------------------
 cmd_status() {
   need_gh
   show_status "$(version)" || true
-}
-
-cmd_version() {
-  local cur new
-  cur=$(version)
-  IFS=. read -r a b c <<<"$cur"
-  new=${1:-$a.$b.$((c + 1))}
-  [ -n "$(git status --porcelain --untracked-files=no)" ] && fail "Erst die offenen Änderungen committen (git status)."
-  git pull --ff-only || true
-  echo "Version $cur -> $new"
-  set_version "$new"
-  if ! grep -q "^## $new\$" CHANGELOG.md; then
-    awk -v v="$new" 'NR==1{print; print ""; print "## " v; print ""; print "- (was ist neu? hier eintragen)"; next} {print}' CHANGELOG.md > CHANGELOG.md.new
-    mv CHANGELOG.md.new CHANGELOG.md
-  fi
-  if [ -t 0 ]; then
-    echo "Jetzt kurz in CHANGELOG.md eintragen, was neu ist (das sehen die Nutzer im Update-Dialog)."
-    "${EDITOR:-nano}" CHANGELOG.md || true
-  fi
-  cargo update -w >/dev/null 2>&1 || true
-  git add -A && git commit -qm "Version $new" && git push -q
-  bold "Version $new ist eingetragen und gepusht. Jetzt auf jedem Rechner: ./release.sh"
 }
 
 setup_linux() {
@@ -168,19 +141,88 @@ setup_mac() {
   [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 }
 
-cmd_release() {
-  if [ -d .git ]; then
-    [ -n "$(git status --porcelain --untracked-files=no)" ] && fail "Es gibt lokale Änderungen (git status). Ein Release wird nur aus dem Stand auf GitHub gebaut."
-    step "Neuesten Stand holen"
-    git pull --ff-only || fail "Konnte den neuesten Stand nicht holen."
+# Was neu ist: die Commits seit dem letzten veröffentlichten Stand.
+changes_since() {
+  local from=$1
+  if git rev-parse -q --verify "refs/tags/$from" >/dev/null; then
+    git log --no-merges --format='- %s' "$from..HEAD" | grep -v '^- Version [0-9]' || true
   fi
+}
+
+# Version erhöhen, "was ist neu" eintragen, committen, taggen, pushen.
+# Ist ein anderer Rechner schneller gewesen, fängt das Skript von vorn an.
+bump_version() {
+  local cur=$1 new changes
+  IFS=. read -r a b c <<<"$cur"
+  new="$a.$b.$((c + 1))"
+  changes=$(changes_since "v$cur")
+  [ -n "$changes" ] || changes="- Kleinere Verbesserungen"
+  step "Neue Version $new"
+  printf '%s\n' "$changes"
+  set_version "$new"
+  awk -v v="$new" -v c="$changes" 'NR==1{print; print ""; print "## " v; print ""; print c; next} {print}' CHANGELOG.md > CHANGELOG.md.new
+  mv CHANGELOG.md.new CHANGELOG.md
+  cargo update -w >/dev/null 2>&1 || true
+  git add -A
+  git commit -qm "Version $new"
+  git tag "v$new"
+  if ! git push -q origin HEAD 2>/dev/null || ! git push -q origin "v$new" 2>/dev/null; then
+    # Jemand anderes hat gleichzeitig eine Version angelegt: eigene zurücknehmen, neu starten.
+    git tag -d "v$new" >/dev/null 2>&1 || true
+    git reset -q --hard HEAD~1
+    echo "Ein anderer Rechner war gerade schneller - nehme dessen Version."
+    git pull -q --ff-only
+    exec bash "$0" "$@"
+  fi
+}
+
+notes_for() {
+  local v=$1 f
+  f=$(mktemp)
+  awk -v v="$v" '$0 ~ "^## " v "$" {on=1; next} /^## / {on=0} on' CHANGELOG.md > "$f" 2>/dev/null || true
+  [ -s "$f" ] || echo "$APP $v" > "$f"
+  echo "$f"
+}
+
+BACK=""
+back_to_branch() { [ -n "$BACK" ] && git checkout -q "$BACK" 2>/dev/null || true; }
+
+cmd_release() {
+  [ -d .git ] || fail "Das geht nur in einem Git-Checkout (git clone ...)."
+  [ -n "$(git status --porcelain --untracked-files=no)" ] && fail "Es gibt lokale Änderungen (git status). Ein Release wird nur aus dem Stand auf GitHub gebaut."
+  step "Neuesten Stand holen"
+  git pull -q --ff-only || fail "Konnte den neuesten Stand nicht holen."
+  git fetch -q --tags --force
   need_gh
+
   local v state
   v=$(version)
   state=$(release_state "$v")
-  if [ "$state" = "published" ]; then
-    show_status "$v" || true
-    fail "$APP $v ist schon veröffentlicht. Für ein neues Release erst die Version erhöhen: ./release.sh version"
+  case "$state" in
+    published)
+      if [ -z "$(changes_since "v$v")" ] && git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
+        show_status "$v" || true
+        bold "Seit $v hat sich nichts geändert - kein neues Release nötig."
+        exit 0
+      fi
+      bump_version "$v" "$@"
+      v=$(version)
+      ;;
+    none | draft)
+      # Erste Veröffentlichung dieser Version, oder ein Entwurf wartet: Tag setzen, falls er fehlt.
+      if ! git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
+        git tag "v$v"
+        git push -q origin "v$v" || fail "Konnte den Tag v$v nicht pushen."
+      fi
+      ;;
+  esac
+
+  # Genau den Stand dieser Version bauen (beide Rechner bauen denselben Code).
+  BACK=$(git symbolic-ref -q --short HEAD || git rev-parse HEAD)
+  trap back_to_branch EXIT
+  if [ "$(git rev-parse HEAD)" != "$(git rev-parse "v$v^{commit}")" ]; then
+    echo "Baue den Stand von v$v (nicht die neueren Änderungen danach)."
+    git checkout -q "v$v"
   fi
 
   if [ -n "$MAC" ]; then
@@ -193,7 +235,6 @@ cmd_release() {
     build_linux
   fi
 
-  # Die Dateien dieses Baus (neuer als die Startmarke des Bauskripts)
   local files=()
   while IFS= read -r f; do files+=("$f"); done < <(find dist -maxdepth 1 -type f -newer dist/.build-start ! -name '.*' | sort)
   [ ${#files[@]} -gt 0 ] || fail "Der Bau hat keine Dateien in dist/ erzeugt."
@@ -201,8 +242,9 @@ cmd_release() {
   step "Hochladen"
   if [ "$(release_state "$v")" = "none" ]; then
     local notes
-    notes=$(notes_file "$v")
-    gh release create "v$v" -R "$RELEASES" --draft --title "$APP $v" --notes-file "$notes" "${files[@]}"
+    notes=$(notes_for "$v")
+    gh release create "v$v" -R "$RELEASES" --draft --title "$APP $v" --notes-file "$notes" "${files[@]}" \
+      || gh release upload "v$v" -R "$RELEASES" --clobber "${files[@]}"
     rm -f "$notes"
   else
     gh release upload "v$v" -R "$RELEASES" --clobber "${files[@]}"
@@ -218,9 +260,8 @@ cmd_release() {
 }
 
 case "${1:-}" in
-  "") cmd_release ;;
+  "") cmd_release "$@" ;;
   status) cmd_status ;;
-  version) shift; cmd_version "${1:-}" ;;
-  -h|--help|help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
-  *) fail "Unbekannt: $1 (./release.sh, ./release.sh status, ./release.sh version)" ;;
+  -h|--help|help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) fail "Unbekannt: $1 (./release.sh oder ./release.sh status)" ;;
 esac

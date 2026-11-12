@@ -7,38 +7,33 @@ Ein Befehl, auf beiden Rechnern derselbe:
 ```
 
 - **Arch-PC** baut Linux und Windows, **Mac** baut das DMG. Jeder lädt seinen Teil hoch.
+- **Die Versionsnummer ist automatisch:**
+  - Gibt es schon einen Entwurf, baut der Rechner genau dessen Stand und ersetzt darin seine Teile.
+  - Ist die aktuelle Version schon veröffentlicht, wird sie um eins erhöht (0.4.0 → 0.4.1). „Was ist neu“
+    kommt aus den Commit-Nachrichten seitdem (in `CHANGELOG.md` und im Update-Dialog), dann wird gepusht
+    und ein neuer Entwurf angelegt.
+  - Hat sich seit der letzten Version nichts geändert, passiert nichts.
 - Hochgeladen wird in einen **Entwurf** (für Nutzer unsichtbar). Sobald Mac, Windows und Linux drin
-  sind, veröffentlicht das Skript das Release automatisch – egal wer als Letzter fertig ist. Erst dann
-  bieten installierte Show Master (und Stagehand) das Update an.
+  sind, veröffentlicht das Skript ihn automatisch – egal wer als Letzter fertig ist.
+- Beide Rechner bauen garantiert **denselben Code**: jede Version bekommt im Code-Repo einen Git-Tag
+  (`v0.4.1`), und gebaut wird immer dieser Stand, auch wenn danach schon weiter gearbeitet wurde.
 - Beim ersten Mal richtet das Skript alles Fehlende selbst ein: GitHub-Anmeldung (Browser öffnet sich),
   Rust, auf dem Arch-PC die Werkzeuge für den Windows-Installer (MinGW, Wine, Inno Setup).
 
-## Ablauf einer neuen Version
+Was schon oben ist:
 
-1. **Einer** erhöht die Version (schreibt auch, was neu ist):
+```bash
+./release.sh status
+```
 
-   ```bash
-   ./release.sh version
-   ```
+```
+Show Master 0.4.1: Entwurf (noch nicht für Nutzer sichtbar)
+  · Mac      fehlt noch - baut der Mac mit ./release.sh
+  ✓ Windows  ShowMaster-Setup-0.4.1.exe
+  ✓ Linux    showmaster-0.4.1-linux-x86_64.tar.gz
+```
 
-   Es öffnet sich `CHANGELOG.md`: unter der neuen Version kurz eintragen, was neu ist (das steht später
-   im Update-Dialog), speichern, schließen. Das Skript committet und pusht.
-2. **Beide** auf ihrem Rechner: `./release.sh` (holt vorher selbst den neuesten Stand).
-3. Nachsehen, was schon oben ist:
-
-   ```bash
-   ./release.sh status
-   ```
-
-   ```
-   Show Master 0.4.1: Entwurf (noch nicht für Nutzer sichtbar)
-     · Mac      fehlt noch - baut der Mac mit ./release.sh
-     ✓ Windows  ShowMaster-Setup-0.4.1.exe
-     ✓ Linux    showmaster-0.4.1-linux-x86_64.tar.gz
-   ```
-
-Eine schon veröffentlichte Version wird nie überschrieben – dann sagt das Skript, dass zuerst
-`./release.sh version` nötig ist.
+Tipp: Commit-Nachrichten so schreiben, dass sie als „Was ist neu“ taugen (z. B. „Waveform zoom“).
 
 ## Einmalig: Zugang für den zweiten Rechner
 
