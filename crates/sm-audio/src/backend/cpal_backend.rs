@@ -274,6 +274,7 @@ impl AudioBackend for CpalBackend {
                             .ok_or_else(|| AudioError::DeviceNotFound(id.clone()))?,
                     };
                     let device_name = device.name().unwrap_or_else(|_| "unknown".to_string());
+                    let note = device_rate_note(req.device_id.as_deref(), req.sample_rate);
                     let (stream, channels, buffer_frames) =
                         build_stream(&device, &req, driver, status2)?;
                     let info = StreamInfo {
@@ -282,6 +283,7 @@ impl AudioBackend for CpalBackend {
                         sample_rate: req.sample_rate,
                         channels,
                         buffer_frames,
+                        note,
                     };
                     Ok::<_, AudioError>((stream, info))
                 })();
@@ -319,6 +321,30 @@ impl AudioBackend for CpalBackend {
             }
         }
     }
+}
+
+/// macOS: make the device run at the stream's rate (otherwise CoreAudio
+/// converts in the audio callback), or say why it does not. Elsewhere the
+/// stream itself opens the device at its rate.
+#[cfg(target_os = "macos")]
+fn device_rate_note(name: Option<&str>, rate: u32) -> Option<String> {
+    use super::macos_rate::{match_rate, RateChange};
+    match match_rate(name, rate) {
+        RateChange::Already | RateChange::Unknown => None,
+        RateChange::Switched(from) => Some(format!(
+            "Audio device switched from {from} Hz to {rate} Hz (the show's sample rate)"
+        )),
+        RateChange::Failed(at) => Some(format!(
+            "The audio device runs at {at} Hz and could not be switched to {rate} Hz: macOS \
+             converts in real time, which can crackle. Set the sample rate to {at} Hz in \
+             Setup > Audio, or set the device to {rate} Hz in Audio MIDI Setup."
+        )),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn device_rate_note(_name: Option<&str>, _rate: u32) -> Option<String> {
+    None
 }
 
 struct CpalStream {

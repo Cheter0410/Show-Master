@@ -76,6 +76,7 @@ impl AudioBackend for NullBackend {
             sample_rate: req.sample_rate,
             channels: req.channels,
             buffer_frames: Some(buffer),
+            note: None,
         };
         let status = Arc::new(StreamStatus::new());
         let stop = Arc::new(AtomicBool::new(false));

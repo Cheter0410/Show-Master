@@ -21,6 +21,8 @@ use crate::types::AudioError;
 
 #[cfg(feature = "cpal-backend")]
 mod cpal_backend;
+#[cfg(all(feature = "cpal-backend", target_os = "macos"))]
+mod macos_rate;
 mod null;
 
 #[cfg(feature = "cpal-backend")]
@@ -73,6 +75,9 @@ pub struct StreamInfo {
     pub channels: usize,
     /// Buffer size in frames, when known.
     pub buffer_frames: Option<u32>,
+    /// Something worth telling the user about the device set-up (e.g. it
+    /// runs at another rate than the stream, so the system converts).
+    pub note: Option<String>,
 }
 
 /// A family of output devices (one audio host API).

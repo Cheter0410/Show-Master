@@ -637,6 +637,16 @@ impl Runtime {
                 status.backend, status.device, status.sample_rate, status.channels
             ),
         );
+        if let Some(n) = &status.note {
+            rt.note(
+                if n.contains("could not") {
+                    "warn"
+                } else {
+                    "info"
+                },
+                n.clone(),
+            );
+        }
         rt
     }
 
@@ -937,6 +947,14 @@ impl Runtime {
         );
         if let Some(e) = status.error {
             self.note("warn", format!("Audio: {e}"));
+        }
+        if let Some(n) = status.note {
+            let level = if n.contains("could not") {
+                "warn"
+            } else {
+                "info"
+            };
+            self.note(level, n);
         }
     }
 

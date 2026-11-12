@@ -85,6 +85,8 @@ pub struct AudioStatus {
     /// True when running on the silent null output.
     pub is_null: bool,
     pub error: Option<String>,
+    /// About the device set-up (e.g. its sample rate was switched).
+    pub note: Option<String>,
     pub devices: Vec<DeviceEntry>,
 }
 
@@ -187,6 +189,7 @@ impl AudioSystem {
                         buffer_frames: info.buffer_frames,
                         is_null: null,
                         error: first_error,
+                        note: info.note,
                         devices: list_devices(),
                     };
                     tracing::info!(backend = %status.backend, device = %status.device, rate = status.sample_rate, channels = status.channels, "audio stream open");
@@ -221,6 +224,7 @@ impl AudioSystem {
             buffer_frames: None,
             is_null: true,
             error: first_error.or(Some("no audio backend".into())),
+            note: None,
             devices: Vec::new(),
         };
         Self {
@@ -256,6 +260,7 @@ impl AudioSystem {
             buffer_frames: None,
             is_null: true,
             error: None,
+            note: None,
             devices: Vec::new(),
         };
         let system = Self {
@@ -301,6 +306,7 @@ impl OutputStream for Dead {
             sample_rate: 0,
             channels: 0,
             buffer_frames: None,
+            note: None,
         }
     }
     fn cpu_load(&self) -> f32 {
@@ -320,6 +326,7 @@ impl OutputStream for Offline {
             sample_rate: 0,
             channels: 0,
             buffer_frames: None,
+            note: None,
         }
     }
     fn cpu_load(&self) -> f32 {
@@ -433,6 +440,7 @@ mod tests {
             buffer_frames: None,
             is_null,
             error: None,
+            note: None,
             devices: vec![],
         }
     }
