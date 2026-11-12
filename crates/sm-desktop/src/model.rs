@@ -189,6 +189,18 @@ pub struct Client {
     pub addr: String,
     pub since_ms: u64,
     pub agent: String,
+    /// Paired device name ("" = logged in with a PIN / this computer).
+    pub device: String,
+}
+
+/// A device paired by QR code (no token: that is only shown once).
+#[derive(Deserialize, Clone, Debug, Default)]
+#[serde(default)]
+pub struct PairingInfo {
+    pub id: u64,
+    pub role: String,
+    pub name: String,
+    pub created_ms: u64,
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]
@@ -197,6 +209,7 @@ pub struct RemoteInfo {
     pub urls: Vec<String>,
     pub port: u16,
     pub clients: Vec<Client>,
+    pub pairings: Vec<PairingInfo>,
     /// `None` when the binary runs without mDNS (tests).
     pub mdns: Option<MdnsInfo>,
 }

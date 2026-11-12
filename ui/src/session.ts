@@ -20,6 +20,45 @@ const wantedRole: "control" | "view" = route === "view" || route === "stage" ? "
 // One stored login per page: going from /view to /remote must ask for the
 // control PIN instead of reusing the view token (and must not log /view out).
 const KEY = `sm.session.${wantedRole}`;
+/** Token of a QR-code pairing; kept across browser restarts. */
+const PAIR_KEY = "sm.pair";
+let pairInMemory: string | null = null;
+
+// `?pair=TOKEN` from a pairing QR code: remember it, then drop it from the
+// address bar (so it is not bookmarked or shown).
+if (typeof location !== "undefined") {
+  const params = new URLSearchParams(location.search);
+  const pair = params.get("pair");
+  if (pair) {
+    try {
+      localStorage.setItem(PAIR_KEY, pair);
+    } catch {
+      /* private mode: the pairing then only lasts this visit */
+      pairInMemory = pair;
+    }
+    params.delete("pair");
+    const rest = params.toString();
+    history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
+  }
+}
+
+
+function pairToken(): string | null {
+  try {
+    return localStorage.getItem(PAIR_KEY) ?? pairInMemory ?? null;
+  } catch {
+    return pairInMemory ?? null;
+  }
+}
+
+function forgetPair(): void {
+  pairInMemory = null;
+  try {
+    localStorage.removeItem(PAIR_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 interface Stored {
   token: string;
@@ -65,6 +104,16 @@ async function establish(): Promise<boolean> {
   if (usable(info.role)) {
     ready(info.token, info.role);
     return true;
+  }
+  // A paired device (QR code) logs in with its pairing token.
+  const pair = pairToken();
+  if (pair && pair !== stored?.token) {
+    const p = await fetchSession(pair);
+    if (usable(p.role)) {
+      ready(p.token, p.role);
+      return true;
+    }
+    if (p.role == null) forgetPair(); // revoked
   }
   if (wantedRole === "view" && !info.view_needs_pin) {
     try {

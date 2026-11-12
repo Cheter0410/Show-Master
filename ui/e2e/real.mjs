@@ -270,6 +270,30 @@ try {
       await pp.waitForSelector('[data-testid="view-app"]');
       await pp.screenshot({ path: join(SHOTS, "real-phone-view.png") });
     });
+    await step("pairing: QR link logs in without PIN, revoking logs out", async () => {
+      const res = await fetch(`${LOCAL}/api/v1/command`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cmd: "create_pairing", role: "control", name: "Test iPad" }) });
+      const body = await res.json();
+      const token = body.result?.token ?? body.token;
+      if (!token) throw new Error(JSON.stringify(body));
+      const ctx = await browser.newContext({ viewport: { width: 1024, height: 768 }, deviceScaleFactor: 1, hasTouch: true });
+      const tp = await ctx.newPage();
+      watch(tp);
+      await tp.goto(`${LAN}/remote?pair=${token}`);
+      await tp.waitForSelector('[data-testid="remote-app"]', { timeout: 8000 });
+      if (tp.url().includes("pair=")) throw new Error("token left in the address bar");
+      // A new visit (closed tab) still works: the pairing is remembered.
+      const tp2 = await ctx.newPage();
+      await tp2.goto(`${LAN}/remote`);
+      await tp2.waitForSelector('[data-testid="remote-app"]', { timeout: 8000 });
+      const s = await api("/api/v1/state");
+      const p = s.remote.pairings.find((x) => x.name === "Test iPad");
+      if (!p || JSON.stringify(s).includes(token)) throw new Error("pairing list wrong or leaks the token");
+      await fetch(`${LOCAL}/api/v1/command`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cmd: "revoke_pairing", id: p.id }) });
+      const tp3 = await ctx.newPage();
+      await tp3.goto(`${LAN}/remote`);
+      await tp3.waitForSelector('[data-testid="pinpad"]', { timeout: 8000 });
+      await ctx.close();
+    });
     await step("stage manager view: big NEXT, cue sheet PDF downloadable", async () => {
       await pp.tap('[data-testid="to-stage"]');
       await pp.waitForSelector('[data-testid="stage-next"]', { timeout: 8000 }).catch(async (e) => {

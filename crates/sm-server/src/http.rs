@@ -32,7 +32,7 @@ pub struct AppState {
 
 type App = Arc<AppState>;
 
-fn random_token() -> String {
+pub(crate) fn random_token() -> String {
     let mut buf = [0u8; 16];
     if getrandom::fill(&mut buf).is_err() {
         // Extremely unlikely; fall back to time-derived bits rather than failing.
@@ -130,6 +130,11 @@ fn pins(app: &AppState) -> (String, String) {
     )
 }
 
+/// Token comparison without early exit.
+pub(crate) fn token_eq(a: &str, b: &str) -> bool {
+    pin_eq(a, b)
+}
+
 /// Constant-time-ish comparison; PINs are short, this just avoids early exit.
 fn pin_eq(a: &str, b: &str) -> bool {
     a.len() == b.len()
@@ -154,7 +159,11 @@ fn role_for(app: &AppState, addr: &SocketAddr, token: Option<&str>) -> Option<Ro
             }
             return None;
         }
-        return app.tokens.lock().ok().and_then(|t| t.get(token).copied());
+        if let Some(role) = app.tokens.lock().ok().and_then(|t| t.get(token).copied()) {
+            return Some(role);
+        }
+        // A paired device (QR code with token).
+        return app.handle.pairings.lock().ok().and_then(|p| p.role_of(token));
     }
     // The machine running the show is trusted: its own UI needs no login.
     addr.ip().is_loopback().then_some(Role::Admin)
@@ -648,12 +657,22 @@ async fn client(
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
     if let Ok(mut c) = app.handle.clients.lock() {
+        let token = token.clone().unwrap_or_default();
+        let device = app
+            .handle
+            .pairings
+            .lock()
+            .ok()
+            .and_then(|p| p.name_of(&token))
+            .unwrap_or_default();
         c.push(ClientInfo {
             id,
             role,
             addr: addr.ip().to_string(),
             since_ms,
             agent,
+            device,
+            token,
         });
     }
     let origin = format!("ws#{id} {}", addr.ip());

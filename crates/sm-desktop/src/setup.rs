@@ -64,6 +64,8 @@ pub(super) enum Out {
     OpenLogFolder,
     /// Per-machine touch-friendly controls setting (not in the show).
     SetTouch(crate::prefs::TouchPref),
+    /// Pair a new device with this role and show its QR code.
+    Pair(&'static str),
 }
 
 #[derive(Default)]
@@ -89,6 +91,8 @@ pub struct SetupState {
     touch_pref: crate::prefs::TouchPref,
     /// Touch mode is on right now (for the hint next to the setting).
     touch_active: bool,
+    /// Just paired: (QR URL, device name), shown until dismissed.
+    pub pair_shown: Option<(String, String)>,
 }
 
 impl SetupState {
@@ -275,6 +279,26 @@ fn flush(app: &mut App) {
             Out::ExportDiagnostics => app.export_diagnostics(),
             Out::OpenLogFolder => app.open_log_folder(),
             Out::SetTouch(t) => app.prefs.set_touch(t),
+            Out::Pair(role) => {
+                let page = if role == "view" { "view" } else { "remote" };
+                app.cmd_then(
+                    json!({ "cmd": "create_pairing", "role": role }),
+                    move |app, r| match r {
+                        Ok(v) => {
+                            let base = app.client.state.remote.urls.first().cloned();
+                            match (base, v["token"].as_str()) {
+                                (Some(base), Some(token)) => {
+                                    let name = v["name"].as_str().unwrap_or("Device").to_string();
+                                    app.setup.pair_shown =
+                                        Some((format!("{base}/{page}?pair={token}"), name));
+                                }
+                                _ => app.toast_error("No network address to pair with"),
+                            }
+                        }
+                        Err(e) => app.toast_error(App::error_text(&e)),
+                    },
+                );
+            }
         }
     }
 }

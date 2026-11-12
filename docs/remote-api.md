@@ -306,6 +306,9 @@ Every command is `{ "cmd": "<name>", …fields }`.
 | `collect_media` | | copy media into `<show dir>/media`, store hashes |
 | `recover` | `accept`: bool | load or discard the autosave |
 | `kick_client` | `id` | disconnect a remote client |
+| `create_pairing` | `role` (`control`/`view`), `name?` | pair a device; result `{ id, token, role, name }`. Open `/<page>?pair=<token>` on the device (QR code): it stores the token and is logged in without a PIN. Never `admin`. Kept per machine in `pairings.json`. |
+| `revoke_pairing` | `id` | revoke one pairing (its clients are disconnected) |
+| `revoke_all_pairings` | – | revoke every pairing |
 | `rtp_connect` | `addr` | invite an RTP-MIDI peer now (`ip:port`, e.g. from `midi.rtp.discovered`) |
 | `clear_log` | | |
 

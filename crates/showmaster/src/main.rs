@@ -332,6 +332,7 @@ fn main() -> std::process::ExitCode {
         update_check: args.update_check,
         log_file: Some(log_path.clone()),
         net_status: Some(net.status_fn()),
+        data_dir: sm_desktop::recent::config_dir(),
         ..Config::default()
     });
     let state = handle.state();

@@ -278,6 +278,73 @@ pub(super) fn remote_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
         });
     }
 
+    heading(ui, "Paired devices");
+    hint(
+        ui,
+        "Pair a tablet once: it scans the code and is logged in from then on, without a PIN. \
+         Stored on this computer; revoke a device to log it out for good.",
+    );
+    if let Some((url, name)) = st.pair_shown.clone() {
+        ui.horizontal_top(|ui| {
+            qr_card(ui, st, &url, &format!("Scan with \"{name}\""));
+            ui.vertical(|ui| {
+                ui.label("Open the camera on the tablet and scan the code.");
+                ui.label(
+                    RichText::new("Anyone who scans it gets access - close it when done.")
+                        .small()
+                        .color(theme::WARN),
+                );
+                if ui.button("Done").clicked() {
+                    st.pair_shown = None;
+                }
+            });
+        });
+    } else if r.enabled && !s.remote.urls.is_empty() {
+        ui.horizontal(|ui| {
+            if ui
+                .button("Pair a control device")
+                .on_hover_text("GO, Stop, PANIC ... without typing the control PIN")
+                .clicked()
+            {
+                st.outbox_push(super::Out::Pair("control"));
+            }
+            if ui
+                .button("Pair a view-only device")
+                .on_hover_text("Display / stage manager view")
+                .clicked()
+            {
+                st.outbox_push(super::Out::Pair("view"));
+            }
+        });
+    }
+    if !s.remote.pairings.is_empty() {
+        egui::Grid::new("remote_pairings")
+            .num_columns(4)
+            .striped(true)
+            .spacing([18.0, 6.0])
+            .show(ui, |ui| {
+                for p in &s.remote.pairings {
+                    ui.label(RichText::new(&p.name).strong());
+                    ui.label(&p.role);
+                    ui.label(fmt_since(p.created_ms));
+                    if ui
+                        .button("Revoke")
+                        .on_hover_text(format!("Log {} out for good", p.name))
+                        .clicked()
+                    {
+                        st.send_toast(
+                            json!({ "cmd": "revoke_pairing", "id": p.id }),
+                            format!("{} revoked", p.name),
+                        );
+                    }
+                    ui.end_row();
+                }
+            });
+        if s.remote.pairings.len() > 1 && ui.button("Revoke all").clicked() {
+            st.send_toast(json!({ "cmd": "revoke_all_pairings" }), "All paired devices revoked");
+        }
+    }
+
     heading(ui, "Connected clients");
     let clients = &s.remote.clients;
     if clients.is_empty() {
@@ -302,7 +369,11 @@ pub(super) fn remote_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
                 ui.label(RichText::new(&c.role).strong().color(color));
                 ui.monospace(&c.addr);
                 ui.label(fmt_since(c.since_ms));
-                ui.label(short_agent(&c.agent)).on_hover_text(&c.agent);
+                if c.device.is_empty() {
+                    ui.label(short_agent(&c.agent)).on_hover_text(&c.agent);
+                } else {
+                    ui.label(&c.device).on_hover_text(&c.agent);
+                }
                 if ui
                     .button("Disconnect")
                     .on_hover_text(format!("Disconnect {}", c.addr))

@@ -62,6 +62,16 @@ pub enum SysCommand {
     Recover {
         accept: bool,
     },
+    /// Pair a device by QR code; the result carries the token.
+    CreatePairing {
+        role: Role,
+        #[serde(default)]
+        name: String,
+    },
+    RevokePairing {
+        id: u64,
+    },
+    RevokeAllPairings,
     KickClient {
         id: u64,
     },
@@ -145,6 +155,12 @@ pub struct ClientInfo {
     pub addr: String,
     pub since_ms: u64,
     pub agent: String,
+    /// Name of the paired device this client logged in as ("" = PIN / local).
+    #[serde(default)]
+    pub device: String,
+    /// The token the client uses (never published).
+    #[serde(skip)]
+    pub token: String,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -194,6 +210,8 @@ pub struct Handle {
     /// unknown, use the configured port). 80 when the standard web port could
     /// be opened, so addresses need no `:port`.
     pub web_port: Arc<std::sync::atomic::AtomicU16>,
+    /// Devices paired by QR code (per machine, see `pairing.rs`).
+    pub pairings: Arc<Mutex<crate::pairing::Pairings>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -329,6 +347,8 @@ pub struct Config {
     /// mDNS/Bonjour status (sm-mdns, run by the binary): returns
     /// `{ "mdns": {...}, "discovered": [...] }` for the state document. Must not block.
     pub net_status: Option<NetStatusFn>,
+    /// Per-machine data (paired devices); `None` = kept in memory only.
+    pub data_dir: Option<PathBuf>,
 }
 
 /// See [`Config::net_status`].
@@ -465,6 +485,9 @@ pub fn spawn(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         quit_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         raise: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         web_port: Arc::new(std::sync::atomic::AtomicU16::new(0)),
+        pairings: Arc::new(Mutex::new(crate::pairing::Pairings::load(
+            config.data_dir.as_ref().map(|d| d.join("pairings.json")),
+        ))),
         stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
     let h = handle.clone();
@@ -580,6 +603,19 @@ impl Runtime {
         let sr = u64::from(status.sample_rate.max(1));
         // One device buffer plus scheduling slack for this thread.
         self.lookahead = u64::from(status.buffer_frames.unwrap_or(512)) + sr * 12 / 1000;
+    }
+
+    /// Disconnect every client that logged in with `token` (revoked pairing).
+    fn kick_token(&mut self, token: &str) {
+        let ids: Vec<u64> = self
+            .handle
+            .clients
+            .lock()
+            .map(|c| c.iter().filter(|c| c.token == token).map(|c| c.id).collect())
+            .unwrap_or_default();
+        for id in ids {
+            let _ = self.handle.events.send(Outbound::Kick(id));
+        }
     }
 
     fn note(&mut self, level: &'static str, message: String) {
@@ -1061,6 +1097,39 @@ impl Runtime {
                 let _ = self.handle.events.send(Outbound::Kick(id));
                 Ok(Value::Null)
             }
+            SysCommand::CreatePairing { role, name } => {
+                let p = self
+                    .handle
+                    .pairings
+                    .lock()
+                    .map_err(|_| "pairings unavailable".to_string())?
+                    .create(role, &name);
+                self.note("info", format!("device paired: {} ({:?})", p.name, p.role));
+                Ok(json!({ "id": p.id, "token": p.token, "role": p.role, "name": p.name }))
+            }
+            SysCommand::RevokePairing { id } => {
+                let token = self
+                    .handle
+                    .pairings
+                    .lock()
+                    .map_err(|_| "pairings unavailable".to_string())?
+                    .revoke(id)
+                    .ok_or("no such paired device")?;
+                self.kick_token(&token);
+                Ok(Value::Null)
+            }
+            SysCommand::RevokeAllPairings => {
+                let tokens = self
+                    .handle
+                    .pairings
+                    .lock()
+                    .map_err(|_| "pairings unavailable".to_string())?
+                    .revoke_all();
+                for t in tokens {
+                    self.kick_token(&t);
+                }
+                Ok(Value::Null)
+            }
             SysCommand::RtpConnect { addr } => {
                 self.io.midi.rtp_connect(&addr)?;
                 Ok(Value::Null)
@@ -1200,7 +1269,8 @@ impl Runtime {
                 "ports": self.io.midi.ports(),
                 "rtp": { "enabled": rtp.enabled, "name": rtp.session_name, "port": self.io.midi.rtp_local_port().unwrap_or(rtp.port), "peers": peers, "discovered": net.get("discovered").cloned().unwrap_or_else(|| json!([])) },
             },
-            "remote": { "urls": self.urls.1, "port": port, "clients": clients, "mdns": net.get("mdns").cloned().unwrap_or(Value::Null) },
+            "remote": { "urls": self.urls.1, "port": port, "clients": clients,
+                        "pairings": self.handle.pairings.lock().map(|p| p.public()).unwrap_or(Value::Null), "mdns": net.get("mdns").cloned().unwrap_or(Value::Null) },
             "inputs": self.inputs.json(self.io.input_status(), snap.tc_status, snap.tc_speed),
             "preflight": self.preflight,
             "layouts": LAYOUTS,
