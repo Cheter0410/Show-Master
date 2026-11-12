@@ -1,5 +1,7 @@
 #!/bin/bash
-# Builds ShowMaster-x.y.z.dmg (universal: Apple Silicon + Intel) on a Mac.
+# Builds ShowMaster-x.y.z.dmg on a Mac: universal (Apple Silicon + Intel, two
+# compiles) by default; ARCHS="x86_64" or ARCHS="arm64" builds one only (half
+# the time; an Intel build also runs on Apple Silicon through Rosetta).
 # Needs: Xcode command line tools and Rust (rustup). Node.js only with REBUILD_UI=1.
 #   ./packaging/macos/build-dmg.sh
 # The result is in dist/. Used by the `build` workflow and for building by hand.
@@ -54,15 +56,25 @@ fi
 if [ ! -f ui/dist/index.html ] || [ -n "${REBUILD_UI:-}" ]; then
   (cd ui && npm ci && npm run build)
 fi
-rustup target add aarch64-apple-darwin x86_64-apple-darwin
-cargo build --release --locked -p showmaster --target aarch64-apple-darwin
-cargo build --release --locked -p showmaster --target x86_64-apple-darwin
+ARCHS="${ARCHS:-arm64 x86_64}"
+BINS=()
+for a in $ARCHS; do
+  case "$a" in
+    arm64|aarch64) t=aarch64-apple-darwin ;;
+    x86_64|intel) t=x86_64-apple-darwin ;;
+    *) echo "Unknown architecture in ARCHS: $a (use arm64 and/or x86_64)"; exit 1 ;;
+  esac
+  echo "== Building for $t"
+  rustup target add "$t"
+  cargo build --release --locked -p showmaster --target "$t"
+  BINS+=("target/$t/release/showmaster")
+done
 
 V=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print([p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="showmaster"][0])')
 WORK=$(mktemp -d)
 APP="$WORK/dmg/ShowMaster.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" dist
-lipo -create -output "$APP/Contents/MacOS/showmaster" target/aarch64-apple-darwin/release/showmaster target/x86_64-apple-darwin/release/showmaster
+lipo -create -output "$APP/Contents/MacOS/showmaster" "${BINS[@]}"
 sed "s/APP_VERSION/$V/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
 cp README.md "$APP/Contents/Resources/"
 ICONSET="$WORK/ShowMaster.iconset"
@@ -122,8 +134,12 @@ if [ -n "${SIGN_IDENTITY:-}" ]; then
   fi
 fi
 # Program-only downloads for the in-app updater.
-gzip -9 -c target/aarch64-apple-darwin/release/showmaster > dist/showmaster-macos-arm64.gz
-gzip -9 -c target/x86_64-apple-darwin/release/showmaster > dist/showmaster-macos-x86_64.gz
+for b in "${BINS[@]}"; do
+  case "$b" in
+    *aarch64*) gzip -9 -c "$b" > dist/showmaster-macos-arm64.gz ;;
+    *) gzip -9 -c "$b" > dist/showmaster-macos-x86_64.gz ;;
+  esac
+done
 rm -rf "$WORK"
 ls -la dist
 echo "Built dist/ShowMaster-$V.dmg"

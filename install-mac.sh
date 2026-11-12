@@ -8,7 +8,7 @@
 #
 # Run it again later to update (it pulls the newest version first). Missing
 # tools (Xcode command line tools, Rust) are installed. The result:
-#   dist/ShowMaster-x.y.z.dmg   installer for other Macs (Intel + Apple Silicon)
+#   dist/ShowMaster-x.y.z.dmg   installer (this Mac's type; UNIVERSAL=1 for Intel + Apple Silicon)
 #   /Applications/ShowMaster.app   installed on this Mac (skip with NO_INSTALL=1)
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -36,7 +36,17 @@ fi
 # shellcheck disable=SC1091
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 
-say "Building the DMG (takes a few minutes the first time)"
+# This Mac's architecture only (one compile instead of two). UNIVERSAL=1 builds
+# the DMG for Intel and Apple Silicon Macs (for publishing a release).
+if [ -n "${UNIVERSAL:-}" ]; then
+  export ARCHS="arm64 x86_64"
+else
+  case "$(uname -m)" in
+    arm64) export ARCHS="arm64" ;;
+    *) export ARCHS="x86_64" ;;
+  esac
+fi
+say "Building the DMG for $ARCHS (takes a few minutes the first time)"
 ./packaging/macos/build-dmg.sh
 DMG=$(ls -t dist/ShowMaster-*.dmg | head -n 1)
 

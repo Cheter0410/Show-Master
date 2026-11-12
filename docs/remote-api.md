@@ -20,7 +20,7 @@ Roles are enforced on the server for every command, never only in the UI.
 | Method & path | Role | Purpose |
 |---|---|---|
 | `GET /`, `/remote`, `/view` | – | the web UI (single-page app, all assets embedded in the binary) |
-| `GET /api/session` | – | `{ "role": "admin"|null, "token": "...", "view_needs_pin": bool, "version": "0.1.0" }`; loopback callers get an admin token |
+| `GET /api/session` | – | `{ "role": "admin"|null, "token": "...", "view_needs_pin": bool, "version": "0.2.0" }`; loopback callers get an admin token |
 | `POST /api/login` body `{ "pin": "1234", "role": "control"|"view" }` | – | `{ "token": "...", "role": "control" }` or `401` |
 | `GET /ws?token=T` | any | WebSocket, see below |
 | `GET /api/v1/state?token=T` | any | full state document (same as WS `state.state`, plus `tick`) – button feedback for Stream Deck/Companion |
@@ -43,7 +43,7 @@ Text frames, one JSON object each, discriminated by `t`.
 ### Server → client
 
 ```jsonc
-{ "t": "hello", "role": "admin", "client_id": 3, "version": "0.1.0" }
+{ "t": "hello", "role": "admin", "client_id": 3, "version": "0.2.0" }
 { "t": "state", "rev": 12, "state": { /* State */ } }          // full document; sent first and on resync
 { "t": "patch", "rev": 13, "ops": [ { "p": ["show","name"], "v": "New" }, { "p": ["errors","17"], "d": true } ] }
 { "t": "tick", /* Tick, ~20 Hz */ }
@@ -69,7 +69,7 @@ that sees a `rev` gap must reconnect (the server then sends a fresh `state`).
 
 ```jsonc
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "mode": "edit" | "live",
   "show": { /* the showfile document, see below */ },
   "show_path": "/path/show.smshow" | null,

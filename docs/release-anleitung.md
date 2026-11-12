@@ -56,11 +56,14 @@ Mit AppImage (lädt `appimagetool` beim ersten Mal herunter, falls es nicht inst
 APPIMAGE=1 ./packaging/build-on-linux.sh
 ```
 
-**Mac** (DMG):
+**Mac** (DMG). Für ein Release universal bauen (Intel + Apple Silicon, zwei Durchläufe):
 
 ```bash
-cd ~/Desktop/dev/show-master && git pull && bash packaging/macos/setup-and-build.sh
+cd ~/Desktop/dev/show-master && UNIVERSAL=1 NO_INSTALL=1 bash install-mac.sh
 ```
+
+Nur für den eigenen Mac (ein Durchlauf, halbe Zeit) reicht `bash install-mac.sh`. Eine Intel-Version läuft
+auf Apple-Silicon-Macs über Rosetta, eine Apple-Silicon-Version auf Intel-Macs aber nicht.
 
 ## Signieren (optional)
 
