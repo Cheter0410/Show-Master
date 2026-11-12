@@ -3,7 +3,7 @@ import { useState } from "react";
 import {
   CONTROL_ACTIONS, CUE_COLORS, FADE_CURVES, MIDI_MSG_TYPES, MSC_COMMANDS,
   type ContinueMode, type ControlKind, type Cue, type CuePatch, type FadeKind, type GroupKind, type GroupMode,
-  type MidiKind, type MidiMessage, type MidiMsgType, type OscKind, type RoutePoint, type Show, type TimecodeKind,
+  type MidiKind, type MidiMessage, type MidiMsgType, type OscKind, type HttpKind, type RoutePoint, type Show, type TimecodeKind,
 } from "../api";
 import { formatOscArgs, parseOscArgs, validateOscAddress } from "../osc";
 import { run } from "../commands";
@@ -359,6 +359,39 @@ function ControlTab({ cue, kind, show }: { cue: Cue; kind: ControlKind; show: Sh
   );
 }
 
+function HttpTab({ cue, kind }: { cue: Cue; kind: HttpKind }) {
+  const methods = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+  return (
+    <div className="insp-col">
+      <Row label="Method">
+        <Select value={kind.method} options={methods.map((m) => ({ value: m, label: m }))} onChange={(v) => patchKind(cue, { method: v })} testId="http-method" width={110} />
+      </Row>
+      <Row label="URL" hint="plain http:// on the show network">
+        <DraftField<string>
+          value={kind.url}
+          format={(v) => v}
+          parse={(t) => (/^http:\/\/[^\s/?#@]+/.test(t.trim()) ? { ok: true, value: t.trim() } : { ok: false, error: "URL must start with http://" })}
+          onCommit={(v) => patchKind(cue, { url: v })}
+          ariaLabel="Request URL"
+          testId="http-url"
+          mono
+          width={320}
+        />
+      </Row>
+      {kind.method !== "GET" || kind.body ? (
+        <>
+          <Row label="Body">
+            <TextField value={kind.body} ariaLabel="Request body" testId="http-body" width={320} onCommit={(v) => patchKind(cue, { body: v })} />
+          </Row>
+          <Row label="Content type">
+            <TextField value={kind.content_type} ariaLabel="Content type" testId="http-ct" width={200} onCommit={(v) => patchKind(cue, { content_type: v.trim() })} />
+          </Row>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function OscTab({ cue, kind }: { cue: Cue; kind: OscKind }) {
   return (
     <div className="insp-col">
@@ -585,6 +618,7 @@ export function Inspector() {
         {cur === "kind" && k.type === "fade" ? <FadeTab cue={cue} kind={k} show={show} /> : null}
         {cur === "kind" && k.type === "midi" ? <MidiTab cue={cue} kind={k} show={show} /> : null}
         {cur === "kind" && k.type === "osc" ? <OscTab cue={cue} kind={k} /> : null}
+        {cur === "kind" && k.type === "http" ? <HttpTab cue={cue} kind={k} /> : null}
         {cur === "kind" && k.type === "timecode" ? <TimecodeTab cue={cue} kind={k} rate={rate} start={show.timecode.start} /> : null}
         {cur === "kind" && k.type === "control" ? <ControlTab cue={cue} kind={k} show={show} /> : null}
         {cur === "kind" && k.type === "group" ? <GroupTab cue={cue} kind={k} /> : null}

@@ -824,3 +824,38 @@ fn panic_sends_the_extra_messages_after_all_notes_off() {
     let midi = pos(&|a| matches!(a, Action::Midi { port, bytes, .. } if port == "desk" && bytes == &vec![0xC0, 99])).unwrap();
     assert!(notes_off < osc && osc < midi);
 }
+
+#[test]
+fn http_cue_sends_its_request() {
+    use sm_core::http_cue::HttpRequest;
+    let mut b = B::new();
+    b.cue(CueKind::Http(HttpRequest {
+        method: "POST".into(),
+        url: "http://10.0.0.7:8080/scene".into(),
+        body: "3".into(),
+        content_type: "text/plain".into(),
+    }));
+    let bad = b.cue(CueKind::Http(HttpRequest {
+        url: "https://secure/".into(),
+        ..HttpRequest::default()
+    }));
+    let mut e = b.engine();
+    e.drain_actions();
+    e.command(Command::Go { list: None }).unwrap();
+    let sent: Vec<_> = e
+        .drain_actions()
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Http { addr, bytes, .. } => Some((addr, bytes)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, "10.0.0.7:8080");
+    assert!(sent[0].1.starts_with(b"POST /scene HTTP/1.1\r\n"));
+    e.command(Command::Go { list: None }).unwrap();
+    assert!(e
+        .drain_events()
+        .iter()
+        .any(|ev| matches!(&ev.kind, EventKind::CueError { cue, .. } if *cue == bad)));
+}

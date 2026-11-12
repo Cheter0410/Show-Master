@@ -206,6 +206,8 @@ Cue:
   //      msc command: go stop resume timed_go load set fire all_off restore reset go_off
   // { "type": "osc", "host": "10.0.0.5", "port": 53000, "address": "/cue/1/start", "args": [1, 0.5, true, "text"] }
   //      UDP, OSC 1.0 message; args: integer -> i, number with fraction -> f, true/false -> T/F, string -> s
+  // { "type": "http", "method": "GET"|"POST"|"PUT"|"PATCH"|"DELETE", "url": "http://10.0.0.5/api/x", "body": "", "content_type": "application/json" }
+  //      plain HTTP/1.1 (no https), sent from a worker thread; failures are logged
   // { "type": "timecode", "tc": { "action": "start" | "stop" | "pause" | "resume" } | { "action": "start_from", "from": "…" } | { "action": "relocate", "to": "…" } }
   // { "type": "control", "action": "start"|"stop"|"pause"|"resume"|"load_to_time"|"arm"|"disarm"|"go_to"|"reset", "target": 5, "time": 0.0 }
   // { "type": "group", "mode": "parallel"|"playlist"|"random", "children": [ /* Cue */ ] }

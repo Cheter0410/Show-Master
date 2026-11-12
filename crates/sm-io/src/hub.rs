@@ -39,6 +39,7 @@ pub struct Io {
     /// Grows while reconnect attempts keep landing on the silent fallback.
     reconnect_backoff: std::time::Duration,
     pub midi: MidiHub,
+    http: crate::http_out::HttpOut,
     mtc: MtcGenerator,
     mtc_port: Option<String>,
     clock: ClockMap,
@@ -92,6 +93,7 @@ impl Io {
             last_reconnect: None,
             reconnect_backoff: std::time::Duration::from_secs(5),
             midi: MidiHub::new(midi),
+            http: crate::http_out::HttpOut::new(),
             mtc: MtcGenerator::new(sr),
             mtc_port: None,
             clock: ClockMap::new(sr),
@@ -474,6 +476,16 @@ impl Io {
                     self.midi.send_at(due, &port, bytes);
                     Ok(())
                 }
+                Action::Http {
+                    at,
+                    addr,
+                    bytes,
+                    summary,
+                } => {
+                    let due = self.clock.instant_of(self.local(at));
+                    self.http.send_at(due, addr, bytes, summary);
+                    Ok(())
+                }
                 Action::Osc { at, target, bytes } => {
                     let due = self.clock.instant_of(self.local(at));
                     self.midi
@@ -535,6 +547,7 @@ impl Io {
             self.underruns_before = underruns;
         }
         log.extend(self.midi.take_errors());
+        log.extend(self.http.take_errors());
         // MTC runs on the same clock as everything else.
         let until = self.local(logical_now);
         let (mtc, midi, clock, port) = (&mut self.mtc, &mut self.midi, &self.clock, &self.mtc_port);

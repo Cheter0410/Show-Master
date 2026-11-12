@@ -197,6 +197,12 @@ const TYPE_PATHS: Record<CueType, ReactNode> = {
       <path d="M4 7.5a4 4 0 0 1 4 4M4 3.5a8 8 0 0 1 8 8" />
     </>
   ),
+  http: (
+    <>
+      <circle cx="8" cy="8" r="5.8" />
+      <path d="M2.2 8h11.6M8 2.2c2 1.8 2 9.8 0 11.6M8 2.2c-2 1.8-2 9.8 0 11.6" />
+    </>
+  ),
   timecode: (
     <>
       <circle cx="8" cy="8.6" r="5.2" />

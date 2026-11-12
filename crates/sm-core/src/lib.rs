@@ -5,6 +5,7 @@
 
 pub mod chase;
 pub mod engine;
+pub mod http_cue;
 pub mod midi;
 pub mod midi_in;
 pub mod model;

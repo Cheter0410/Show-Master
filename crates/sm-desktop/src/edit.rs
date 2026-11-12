@@ -22,12 +22,13 @@ use serde_json::{json, Value};
 use sm_core::model::{ControlAction, Cue, CueKind, Show, TcAction};
 
 /// Cue types offered in the add row (command name, button text).
-pub const ADD_TYPES: [(&str, &str); 8] = [
+pub const ADD_TYPES: [(&str, &str); 9] = [
     ("audio", "Audio…"),
     ("memo", "Memo"),
     ("fade", "Fade"),
     ("midi", "MIDI"),
     ("osc", "OSC"),
+    ("http", "HTTP"),
     ("timecode", "Timecode"),
     ("control", "Control"),
     ("group", "Group"),
@@ -594,6 +595,7 @@ pub fn type_label_of(kind: &str) -> &'static str {
         "fade" => "Fade",
         "midi" => "MIDI",
         "osc" => "OSC",
+        "http" => "HTTP",
         "timecode" => "Timecode",
         "control" => "Control",
         "group" => "Group",
@@ -650,6 +652,7 @@ pub fn target_text(cue: &Cue, show: &Show) -> String {
             format!("{port} · {}", inspector::midi_summary(&m.message))
         }
         CueKind::Osc(m) => m.summary(),
+        CueKind::Http(r) => r.summary(),
         CueKind::Timecode(t) => match &t.tc {
             TcAction::Start => "TC start".into(),
             TcAction::StartFrom { from } => format!("TC start from {from}"),

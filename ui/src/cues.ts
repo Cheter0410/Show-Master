@@ -68,6 +68,7 @@ export const TYPE_LABELS: Record<CueType, string> = {
   fade: "Fade",
   midi: "MIDI",
   osc: "OSC",
+  http: "HTTP",
   timecode: "Timecode",
   control: "Control",
   group: "Group",
@@ -94,6 +95,8 @@ export function cueTarget(cue: Cue, show: Show): string {
       const args = formatOscArgs(k.args);
       return `${k.address}${args ? ` ${args}` : ""} → ${k.host}:${k.port}`;
     }
+    case "http":
+      return `${k.method} ${k.url}`;
     case "timecode": {
       const tc = k.tc;
       if (tc.action === "start_from") return `TC start from ${tc.from}`;

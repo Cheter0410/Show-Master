@@ -645,6 +645,7 @@ impl Cue {
             CueKind::Fade(_) => "fade",
             CueKind::Midi(_) => "midi",
             CueKind::Osc(_) => "osc",
+            CueKind::Http(_) => "http",
             CueKind::Timecode(_) => "timecode",
             CueKind::Control(_) => "control",
             CueKind::Group(_) => "group",
@@ -661,6 +662,8 @@ pub enum CueKind {
     Midi(MidiCue),
     /// Send one OSC message over UDP.
     Osc(crate::osc::OscMessage),
+    /// Send one plain HTTP request.
+    Http(crate::http_cue::HttpRequest),
     Timecode(TimecodeCue),
     Control(ControlCue),
     Group(GroupCue),

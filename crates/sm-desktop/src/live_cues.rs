@@ -78,6 +78,7 @@ pub fn type_label(cue: &Cue) -> &'static str {
         CueKind::Fade(_) => "Fade",
         CueKind::Midi(_) => "MIDI",
         CueKind::Osc(_) => "OSC",
+        CueKind::Http(_) => "HTTP",
         CueKind::Timecode(_) => "Timecode",
         CueKind::Control(_) => "Control",
         CueKind::Group(_) => "Group",
@@ -135,6 +136,7 @@ pub fn cue_target(cue: &Cue, show: &Show) -> String {
             format!("{port} · {what}")
         }
         CueKind::Osc(m) => m.summary(),
+        CueKind::Http(r) => r.summary(),
         CueKind::Timecode(t) => match &t.tc {
             TcAction::Start => "TC start".into(),
             TcAction::StartFrom { from } => format!("TC start from {from}"),

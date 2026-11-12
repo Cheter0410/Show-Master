@@ -161,6 +161,14 @@ pub enum Action {
         port: String,
         bytes: Vec<u8>,
     },
+    /// One HTTP request (complete bytes) to `addr` (`host:port`).
+    Http {
+        at: u64,
+        addr: String,
+        bytes: Vec<u8>,
+        /// For the log: `POST http://...`.
+        summary: String,
+    },
     /// One OSC message (UDP payload) to `target` (`host:port`).
     Osc {
         at: u64,
@@ -941,6 +949,21 @@ impl Engine {
                         at: t,
                         target: m.target(),
                         bytes,
+                    }),
+                    Err(e) => {
+                        self.cue_error(id, t, e);
+                        return;
+                    }
+                }
+                self.insts[ix].action_done = true;
+            }
+            CueKind::Http(r) => {
+                match r.encode() {
+                    Ok((target, bytes)) => self.actions.push(Action::Http {
+                        at: t,
+                        addr: target.addr(),
+                        bytes,
+                        summary: r.summary(),
                     }),
                     Err(e) => {
                         self.cue_error(id, t, e);

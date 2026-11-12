@@ -167,6 +167,11 @@ pub fn check(show: &Show, env: &Environment<'_>) -> Vec<Issue> {
                     push(Severity::Error, Some(cue.id), format!("{who}: {e}"));
                 }
             }
+            CueKind::Http(r) => {
+                if let Err(e) = r.validate() {
+                    push(Severity::Error, Some(cue.id), format!("{who}: {e}"));
+                }
+            }
             CueKind::Osc(m) => {
                 if let Err(e) = m.validate() {
                     push(Severity::Error, Some(cue.id), format!("{who}: {e}"));

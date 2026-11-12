@@ -6,6 +6,7 @@
 
 pub mod audio;
 pub mod clock;
+pub mod http_out;
 pub mod inputs;
 pub mod midi;
 pub mod midi_in;

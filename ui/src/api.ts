@@ -87,6 +87,14 @@ export interface OscKind {
   args: (number | boolean | string)[];
 }
 
+export interface HttpKind {
+  type: "http";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  url: string;
+  body: string;
+  content_type: string;
+}
+
 export type TcAction =
   | { action: "start" | "stop" | "pause" | "resume" }
   | { action: "start_from"; from: string }
@@ -122,9 +130,9 @@ export interface MemoKind {
   type: "memo";
 }
 
-export type CueKind = AudioKind | FadeKind | MidiKind | OscKind | TimecodeKind | ControlKind | GroupKind | MemoKind;
+export type CueKind = AudioKind | FadeKind | MidiKind | OscKind | HttpKind | TimecodeKind | ControlKind | GroupKind | MemoKind;
 export type CueType = CueKind["type"];
-export const CUE_TYPES: CueType[] = ["audio", "fade", "midi", "osc", "timecode", "control", "group", "memo"];
+export const CUE_TYPES: CueType[] = ["audio", "fade", "midi", "osc", "http", "timecode", "control", "group", "memo"];
 
 export interface Cue {
   id: number;

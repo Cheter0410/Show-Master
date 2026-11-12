@@ -47,6 +47,10 @@ revidieren lassen.
 - **Zusätzliche PANIC-Nachrichten** (*Setup → General → Also send on PANIC*): beliebig viele MIDI- oder
   OSC-Nachrichten, gesendet direkt nach All Notes Off – z. B. Blackout ans Lichtpult. Show Master weiß
   sonst nichts von DMX, Video oder anderen Geräten; nur was hier steht, wird mitgestoppt.
+- **HTTP-Cues** senden eine einfache HTTP/1.1-Anfrage (GET/POST/PUT/PATCH/DELETE) über eine eigene
+  TCP-Verbindung (kein HTTP-Client-Crate; der bleibt dem Updater vorbehalten). Nur `http://`: Show-Netze
+  sind lokal, Geräte haben selten gültige Zertifikate. Jede Anfrage läuft auf einem eigenen kurzen Thread,
+  ein hängendes Gerät bremst nichts; Fehler stehen im Log.
 - **OSC-Cues** senden eine OSC-1.0-Nachricht per UDP (keine Bundles, kein TCP), über denselben
   Sender-Thread wie MIDI und damit genauso auf die Audio-Clock terminiert. Hostnamen werden einmal
   aufgelöst und gemerkt; Zieladressen sind Sache des Nutzers (das ist bewusster Netzwerkverkehr, für das

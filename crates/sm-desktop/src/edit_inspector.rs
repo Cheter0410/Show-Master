@@ -208,6 +208,7 @@ fn single(
                 CueKind::Audio(_) => audio::audio_tab(ui, state, tick, cue, edit, out),
                 CueKind::Fade(_) => fade_tab(ui, show, cue, edit, out),
                 CueKind::Midi(_) => midi_tab(ui, state, cue, edit, out),
+                CueKind::Http(r) => http_tab(ui, cue.id, r, edit, out),
                 CueKind::Osc(m) => {
                     let id = cue.id;
                     grid(("insp_osc", id)).show(ui, |ui| {
@@ -1327,6 +1328,85 @@ fn timecode_tab(ui: &mut Ui, show: &Show, cue: &Cue, edit: &mut EditState, out: 
             );
             ui.end_row();
         }
+    });
+}
+
+fn http_tab(
+    ui: &mut Ui,
+    id: u64,
+    r: &sm_core::http_cue::HttpRequest,
+    edit: &mut EditState,
+    out: &mut Vec<Out>,
+) {
+    grid(("insp_http", id)).show(ui, |ui| {
+        label(ui, "Method");
+        let mut picked = None;
+        egui::ComboBox::from_id_salt(("http_method", id))
+            .selected_text(r.method.as_str())
+            .width(110.0)
+            .show_ui(ui, |ui| {
+                for m in sm_core::http_cue::METHODS {
+                    if ui.selectable_label(r.method == m, m).clicked() && r.method != m {
+                        picked = Some(m);
+                    }
+                }
+            });
+        if let Some(m) = picked {
+            out.push(Out::Cmd(kind_patch(id, json!({ "method": m }))));
+        }
+        ui.end_row();
+        label(ui, "URL");
+        fields::field(
+            ui,
+            &mut edit.drafts,
+            Id::unique(("http_url", id)),
+            &r.url,
+            Opts::new("Request URL", 320.0)
+                .mono()
+                .hint("http://192.168.1.50/api/..."),
+            out,
+            move |t| {
+                let t = t.trim();
+                sm_core::http_cue::parse_url(t)?;
+                Ok(Some(kind_patch(id, json!({ "url": t }))))
+            },
+        );
+        ui.end_row();
+        if r.method != "GET" || !r.body.is_empty() {
+            label(ui, "Body");
+            fields::field(
+                ui,
+                &mut edit.drafts,
+                Id::unique(("http_body", id)),
+                &r.body,
+                Opts::new("Request body", 320.0).mono().multiline(),
+                out,
+                move |t| Ok(Some(kind_patch(id, json!({ "body": t })))),
+            );
+            ui.end_row();
+            label(ui, "Content type");
+            fields::field(
+                ui,
+                &mut edit.drafts,
+                Id::unique(("http_ct", id)),
+                &r.content_type,
+                Opts::new("Content type", 200.0).mono(),
+                out,
+                move |t| Ok(Some(kind_patch(id, json!({ "content_type": t.trim() })))),
+            );
+            ui.end_row();
+        }
+        ui.label("");
+        let ok = r.validate();
+        ui.label(
+            RichText::new(match &ok {
+                Ok(_) => "Plain HTTP on the show network; the answer's status goes to the log.".to_string(),
+                Err(e) => e.clone(),
+            })
+            .small()
+            .color(if ok.is_ok() { theme::MUTED } else { theme::WARN }),
+        );
+        ui.end_row();
     });
 }
 
