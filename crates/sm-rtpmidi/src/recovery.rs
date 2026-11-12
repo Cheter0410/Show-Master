@@ -812,7 +812,10 @@ mod tests {
         // Single SysEx in the lost packet.
         let mut h = JournalHistory::new();
         h.record(20, &msc_go(0x35));
-        assert_eq!(recover(&mut rx, &encode(&h, 20, 21), true), vec![msc_go(0x35)]);
+        assert_eq!(
+            recover(&mut rx, &encode(&h, 20, 21), true),
+            vec![msc_go(0x35)]
+        );
         // ... and not when it was in an older packet.
         assert!(recover(&mut rx, &encode(&h, 20, 22), false).is_empty());
         let j = parse_journal(&encode(&h, 20, 21)).unwrap();
@@ -846,7 +849,10 @@ mod tests {
             }]
         );
         let mut rx = ReceiverState::new();
-        assert_eq!(recover(&mut rx, &bytes, false), vec![vec![0xF0, 0x41, 0x42, 0xF7]]);
+        assert_eq!(
+            recover(&mut rx, &bytes, false),
+            vec![vec![0xF0, 0x41, 0x42, 0xF7]]
+        );
     }
 
     #[test]

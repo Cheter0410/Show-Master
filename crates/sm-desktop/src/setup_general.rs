@@ -114,8 +114,6 @@ pub(super) fn general_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
         });
     });
 
-    panic_messages(ui, st, s);
-
     heading(ui, "This computer");
     hint(ui, "Stored on this machine only, not in the show file.");
     form(ui, "general_machine", |ui| {
@@ -138,6 +136,8 @@ pub(super) fn general_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
             );
         });
     });
+
+    panic_messages(ui, st, s);
 
     heading(ui, "Show timer alarms");
     hint(

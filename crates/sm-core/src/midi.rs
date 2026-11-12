@@ -385,9 +385,11 @@ impl MidiMessage {
                     q_path: q(5),
                 }
             }
-            other => return Err(format!(
+            other => {
+                return Err(format!(
                 "unknown MIDI message \"{other}\" (note_on, note_off, cc, pc, bend, sysex, msc)"
-            )),
+            ))
+            }
         };
         msg.to_bytes()?;
         Ok(msg)

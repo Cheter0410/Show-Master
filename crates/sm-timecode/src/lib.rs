@@ -15,4 +15,4 @@ pub use ltc::{encode_frame_bits, DecodedLtcFrame, LtcDecoder, LtcEncoder};
 pub use mtc::{full_frame_message, MtcGenerator};
 pub use mtc_in::{MtcEvent, MtcReceiver};
 pub use queue::PENDING_CAPACITY;
-pub use types::{FrameRate, TcTransport, Timecode, TimecodeParseError};
+pub use types::{convert_frame, FrameRate, TcTransport, Timecode, TimecodeParseError};

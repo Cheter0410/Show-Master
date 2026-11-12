@@ -390,6 +390,9 @@ pub struct TcInputSettings {
     /// How long the timecode keeps running on its own after the input
     /// stops before it is reported lost and stops (milliseconds).
     pub freewheel_ms: u32,
+    /// Delay of the input path (converter, interface) in ms: frames are
+    /// taken as having started this much earlier. Negative = later.
+    pub latency_ms: i32,
 }
 
 impl Default for TcInputSettings {
@@ -401,6 +404,7 @@ impl Default for TcInputSettings {
             ltc_channel: 0,
             lock_frames: 4,
             freewheel_ms: 2000,
+            latency_ms: 0,
         }
     }
 }

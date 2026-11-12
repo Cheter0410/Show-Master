@@ -219,10 +219,14 @@ revidieren lassen.
   ausgewertet: Kapitel M (RPN/NRPN), E und die System-Kapitel D/V/Q/F; das Journal des ersten Pakets
   einer Verbindung wird nicht ausgewertet. Gegen Apple/rtpMIDI noch nicht geprüft.
 - **MIDI-Timing** ist nicht samplegenau, sondern über die Audio-Clock terminiert (siehe Architektur).
-- **Timecode-Eingang:** keine automatische Erkennung der Framerate (die Show-Rate muss zur Quelle
-  passen; abweichende MTC-Rate oder LTC-Drop-Frame-Flag wird einmal im Log gemeldet), keine
-  Varispeed-Verfolgung (Drift wird nur durch Neuverankern ab 1 Frame korrigiert), kein Rückwärtslauf,
-  keine Latenzkompensation für das Eingangsgerät.
+- **Timecode-Eingang:** Die Rate der Quelle wird erkannt (MTC: Rate-Code; LTC: Abstand der Frames plus
+  Drop-Frame-Flag) und nach Timecode-*Wert* auf die Show-Rate umgerechnet (01:00:10:15 bei 30 fps =
+  01:00:10:12 bei 25 fps) – so verhalten sich übliche Chase-Systeme; 29,97 ND und 30 bzw. 23,976 und 24
+  lassen sich an den Labels nicht unterscheiden und werden gleich behandelt. Varispeed: Ausgleichsgerade
+  über die letzten Frames, Abweichung > ¼ Frame wird nachgezogen (getestet ±3 %), die gemessene
+  Geschwindigkeit steht in Setup. Rückwärtslauf (LTC rückwärts dekodiert, MTC mit fallenden Frames):
+  Uhr steht und folgt der Position, nichts feuert; vorwärts wird neu gelockt (Sprung-Regeln gelten).
+  Latenz des Eingangswegs einstellbar (`latency_ms`); der Wert muss am echten Gerät gemessen werden.
 - **AAC/M4A:** Encoder-Vorlauf und Auffüllung am Ende werden anhand von `iTunSMPB` (Apple/iTunes) bzw.
   der Edit-List der Tonspur (ffmpeg u. a.) abgeschnitten, damit startet der Ton framegenau. Dateien ohne
   beide Angaben (rohe `.aac`-ADTS-Streams) behalten den Vorlauf (~1024 Frames) – für framegenaue

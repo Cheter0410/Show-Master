@@ -304,6 +304,7 @@ fn chase_show(kind: TcInputKind) -> Show {
         ltc_channel: 1,
         lock_frames: 4,
         freewheel_ms: 500,
+        latency_ms: 0,
     };
     show.midi_ports.push(MidiPortAlias {
         name: "DAW".into(),

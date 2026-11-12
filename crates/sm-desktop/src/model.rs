@@ -82,6 +82,10 @@ pub struct InputsInfo {
     pub ltc_open: bool,
     pub ltc_level_db: Option<f32>,
     pub mtc_rate: Option<String>,
+    /// Rate detected on the LTC input.
+    pub ltc_rate: Option<String>,
+    /// Speed of the chased source (1.0 = nominal), while locked.
+    pub tc_speed: Option<f64>,
     /// Same values as tick `tc.status`.
     pub tc_status: String,
 }

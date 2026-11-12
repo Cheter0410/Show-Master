@@ -528,7 +528,11 @@ mod tests {
             address: "/cue/7/start".into(),
             args: vec![sm_core::osc::OscArg::Int(1)],
         };
-        hub.send_at(due, &format!("{OSC_PREFIX}{}", msg.target()), msg.encode().unwrap());
+        hub.send_at(
+            due,
+            &format!("{OSC_PREFIX}{}", msg.target()),
+            msg.encode().unwrap(),
+        );
         let mut buf = [0u8; 256];
         let (n, _) = rx.recv_from(&mut buf).unwrap();
         // Never early (the sender spins up to the due instant).

@@ -78,6 +78,67 @@ pub struct LtcInput {
     peak: f32,
     dropped_reported: u64,
     df_warned: bool,
+    rate: LtcRateDetector,
+}
+
+/// Works out the frame rate of incoming LTC from the spacing of its frames
+/// (sample-exact in the capture stream) and the drop-frame flag: LTC itself
+/// does not say whether it runs at 24, 25 or 30 fps.
+#[derive(Default)]
+pub struct LtcRateDetector {
+    last_end: Option<u64>,
+    deltas: std::collections::VecDeque<u64>,
+    detected: Option<FrameRate>,
+}
+
+impl LtcRateDetector {
+    const KEEP: usize = 32;
+    const NEED: usize = 8;
+
+    /// One decoded frame ending at `end_sample` (capture samples).
+    pub fn push(
+        &mut self,
+        end_sample: u64,
+        drop_frame: bool,
+        sample_rate: u32,
+    ) -> Option<FrameRate> {
+        let sr = f64::from(sample_rate.max(1));
+        if let Some(prev) = self.last_end {
+            let d = end_sample.saturating_sub(prev);
+            // Only neighbouring frames (between ~20 and ~36 fps).
+            if (d as f64) > sr / 36.0 && (d as f64) < sr / 20.0 {
+                self.deltas.push_back(d);
+                if self.deltas.len() > Self::KEEP {
+                    self.deltas.pop_front();
+                }
+            } else {
+                self.deltas.clear();
+            }
+        }
+        self.last_end = Some(end_sample);
+        if self.deltas.len() >= Self::NEED {
+            let mean = self.deltas.iter().sum::<u64>() as f64 / self.deltas.len() as f64;
+            let fps = sr / mean;
+            let nominal = [24.0, 25.0, 30.0]
+                .into_iter()
+                .min_by(|a: &f64, b: &f64| (a - fps).abs().total_cmp(&(b - fps).abs()))
+                .unwrap_or(25.0);
+            self.detected = Some(if drop_frame && nominal > 27.0 {
+                FrameRate::F2997Df
+            } else if nominal < 24.5 {
+                FrameRate::F24
+            } else if nominal < 27.0 {
+                FrameRate::F25
+            } else {
+                FrameRate::F30
+            });
+        }
+        self.detected
+    }
+
+    pub fn detected(&self) -> Option<FrameRate> {
+        self.detected
+    }
 }
 
 impl LtcInput {
@@ -92,6 +153,7 @@ impl LtcInput {
             peak: 0.0,
             dropped_reported: 0,
             df_warned: false,
+            rate: LtcRateDetector::default(),
         }
     }
 
@@ -100,6 +162,7 @@ impl LtcInput {
     pub fn poll(
         &mut self,
         rate: FrameRate,
+        engine_rate: f64,
         to_engine: impl Fn(Instant) -> u64,
     ) -> (Vec<TcObservation>, Vec<String>) {
         let mut log = Vec::new();
@@ -123,25 +186,49 @@ impl LtcInput {
             return (Vec::new(), log);
         }
         let day = rate.frames_per_day();
+        let in_rate = self.reader.sample_rate();
         let mut out = Vec::with_capacity(self.frames.len());
         for f in &self.frames {
-            if f.drop_frame != rate.drop_frame() && !self.df_warned {
+            let detected = self.rate.push(f.end_sample, f.drop_frame, in_rate);
+            // Until the rate is known, frames that fit the show's rate are used as they are.
+            let src = match detected {
+                Some(d) if d.nominal() != rate.nominal() || d.drop_frame() != rate.drop_frame() => {
+                    d
+                }
+                _ => rate,
+            };
+            if u32::from(f.timecode.frames) >= src.nominal() {
+                continue; // not known yet / not this rate
+            }
+            if src != rate && !self.df_warned {
                 self.df_warned = true;
                 log.push(format!(
-                    "LTC input: drop-frame flag is {} but the show runs at {}",
-                    if f.drop_frame { "set" } else { "not set" },
+                    "LTC input runs at {}, the show at {}: converting by timecode value",
+                    src.label(),
                     rate.label()
                 ));
             }
-            if u32::from(f.timecode.frames) >= rate.nominal() {
-                continue; // not this rate
-            }
+            // Forward: the frame *after* the decoded one starts at `end_sample`.
+            // Backwards: the source is back at the start of the decoded frame.
+            let label = f.timecode.to_frame_number(src);
+            let next = if f.reverse {
+                label
+            } else {
+                (label + 1) % src.frames_per_day()
+            };
+            let (frame, offset) = sm_timecode::convert_frame(next, src, rate);
+            let at = to_engine(self.clock.instant_of(f.end_sample));
             out.push(TcObservation {
-                frame: (f.timecode.to_frame_number(rate) + 1) % day,
-                at: to_engine(self.clock.instant_of(f.end_sample)),
+                frame: frame % day,
+                at: at.saturating_sub((offset * engine_rate) as u64),
             });
         }
         (out, log)
+    }
+
+    /// The rate the incoming LTC was found to run at.
+    pub fn detected_rate(&self) -> Option<FrameRate> {
+        self.rate.detected()
     }
 
     /// Peak level since the last call (linear) and reset.
@@ -316,6 +403,28 @@ mod tests {
     use sm_timecode::{LtcEncoder, TcTransport, Timecode};
 
     #[test]
+    fn ltc_rate_is_detected_from_frame_spacing() {
+        let detect = |spacing: f64, df: bool| {
+            let mut d = LtcRateDetector::default();
+            let mut r = None;
+            for i in 0..20u64 {
+                r = d.push((1000.0 + i as f64 * spacing) as u64, df, 48_000);
+            }
+            r
+        };
+        assert_eq!(detect(2000.0, false), Some(FrameRate::F24));
+        assert_eq!(detect(1920.0, false), Some(FrameRate::F25));
+        assert_eq!(detect(1600.0, false), Some(FrameRate::F30));
+        assert_eq!(detect(1601.6, true), Some(FrameRate::F2997Df));
+        // 25 fps played 3 % fast is still 25.
+        assert_eq!(detect(1920.0 / 1.03, false), Some(FrameRate::F25));
+        // Not enough frames yet / a gap restarts the measurement.
+        let mut d = LtcRateDetector::default();
+        assert_eq!(d.push(0, false, 48_000), None);
+        assert_eq!(d.push(1920, false, 48_000), None);
+    }
+
+    #[test]
     fn input_clock_takes_the_least_delayed_stamp() {
         let mut c = InputClock::new(48_000);
         let t0 = c.base + Duration::from_millis(50);
@@ -367,7 +476,7 @@ mod tests {
                 // The callback for samples ..pos runs at the instant of sample pos.
                 let at = t0 + Duration::from_secs_f64(pos as f64 / f64::from(sr));
                 tap.push_at(&stereo, 2, at);
-                let (o, log) = ltc.poll(rate, to_engine);
+                let (o, log) = ltc.poll(rate, 48_000.0, to_engine);
                 assert!(log.is_empty(), "{log:?}");
                 obs.extend(o);
             }

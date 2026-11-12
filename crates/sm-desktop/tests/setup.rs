@@ -199,6 +199,8 @@ fn panic_messages_are_added_edited_and_removed() {
     settle(&mut h);
     h.get_by_label("General").click();
     settle(&mut h);
+    h.get_by_label("Add OSC message").scroll_to_me();
+    settle(&mut h);
     h.get_by_label("Add OSC message").click();
     env.wait(&mut h, "osc panic message", |s| {
         s["show"]["settings"]["panic_send"][0]["address"] == "/blackout"
@@ -209,6 +211,8 @@ fn panic_messages_are_added_edited_and_removed() {
     });
     settle(&mut h);
     // Edit the MIDI message as text.
+    h.get_all_by_value("pc 1 0").next().unwrap().scroll_to_me();
+    settle(&mut h);
     h.get_all_by_value("pc 1 0").next().unwrap().click();
     settle(&mut h);
     h.key_press_modifiers(Modifiers::COMMAND, Key::A);
@@ -221,6 +225,8 @@ fn panic_messages_are_added_edited_and_removed() {
     env.wait(&mut h, "midi message edited", |s| {
         s["show"]["settings"]["panic_send"][1]["message"]["msg"] == "control_change"
     });
+    h.get_all_by_label("Remove").next().unwrap().scroll_to_me();
+    settle(&mut h);
     h.get_all_by_label("Remove").next().unwrap().click();
     env.wait(&mut h, "first removed", |s| {
         s["show"]["settings"]["panic_send"]

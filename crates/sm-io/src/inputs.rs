@@ -10,7 +10,7 @@ use sm_audio::input::{AudioInputBackend, InputDeviceInfo, InputRequest};
 use sm_core::chase::TcObservation;
 use sm_core::model::{MidiInputMode, Show, TcInputKind, TcSource};
 use sm_rtpmidi::Session;
-use sm_timecode::mtc_in::{mtc_rate_label, mtc_rate_matches};
+use sm_timecode::mtc_in::{mtc_rate_label, mtc_rate_matches, mtc_rate_of};
 use sm_timecode::{FrameRate, MtcEvent, MtcReceiver};
 use std::sync::Arc;
 use std::time::Instant;
@@ -63,6 +63,8 @@ pub struct InputStatus {
     pub ltc_level_db: Option<f32>,
     /// Rate announced by the incoming MTC.
     pub mtc_rate: Option<String>,
+    /// Rate the incoming LTC was found to run at.
+    pub ltc_rate: Option<String>,
 }
 
 pub struct Inputs {
@@ -268,25 +270,37 @@ impl Inputs {
             if !mtc_rate_matches(code, rate) && !self.mtc_rate_warned {
                 self.mtc_rate_warned = true;
                 batch.log.push((
-                    "warn",
+                    "info",
                     format!(
-                        "Incoming MTC is {} but the show's timecode rate is {}",
+                        "Incoming MTC is {}, the show runs at {}: converting by timecode value",
                         mtc_rate_label(code),
                         rate.label()
                     ),
                 ));
             }
-            if u32::from(tc.frames) >= rate.nominal() {
-                continue;
-            }
-            let n = tc.to_frame_number(rate) % day;
+            // The source's own rate (from the MTC rate code), mapped onto the show's.
+            let src = if mtc_rate_matches(code, rate) {
+                rate
+            } else {
+                mtc_rate_of(code)
+            };
+            let (n, offset) = sm_timecode::convert_frame(
+                tc.to_frame_number(src) % src.frames_per_day(),
+                src,
+                rate,
+            );
+            let n = n % day;
+            let back = (offset * clock.sample_rate()) as u64;
             batch.tc.push(match stopped {
-                Some(at) => TcInEvent::Frame(TcObservation { frame: n, at }),
+                Some(at) => TcInEvent::Frame(TcObservation {
+                    frame: n,
+                    at: at.saturating_sub(back),
+                }),
                 None => TcInEvent::Stopped(n),
             });
         }
         if let Some(ltc) = self.ltc.as_mut() {
-            let (obs, log) = ltc.poll(rate, to_engine);
+            let (obs, log) = ltc.poll(rate, clock.sample_rate(), to_engine);
             batch.tc.extend(obs.into_iter().map(TcInEvent::Frame));
             batch.log.extend(log.into_iter().map(|m| ("warn", m)));
             self.ltc_peak = self.ltc_peak.max(ltc.take_peak());
@@ -336,6 +350,11 @@ impl Inputs {
             ltc_open: self.ltc.is_some(),
             ltc_level_db: self.ltc_level,
             mtc_rate: self.mtc_rate.map(|c| mtc_rate_label(c).to_string()),
+            ltc_rate: self
+                .ltc
+                .as_ref()
+                .and_then(LtcInput::detected_rate)
+                .map(|r| r.label().to_string()),
         }
     }
 }

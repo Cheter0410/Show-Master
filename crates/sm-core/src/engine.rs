@@ -253,6 +253,8 @@ pub struct Snapshot {
     pub tc_position: String,
     /// Generator, or the state of the external timecode being chased.
     pub tc_status: TcStatus,
+    /// Speed of the chased source relative to nominal (1.0 = exact), while locked.
+    pub tc_speed: Option<f64>,
     /// Seconds until the next automatically fired cue (auto-continue,
     /// auto-follow with known duration, or timecode trigger).
     pub next_auto: Option<f64>,
@@ -1615,6 +1617,13 @@ impl Engine {
     /// `obs.at` is engine time; values in the future count as "now".
     pub fn external_tc(&mut self, mut obs: TcObservation) {
         let t = self.now;
+        // Input latency (converters, MIDI interfaces): the frame started earlier.
+        let latency = i64::from(self.show.timecode.input.latency_ms) * i64::from(self.sr) / 1000;
+        obs.at = if latency >= 0 {
+            obs.at.saturating_sub(latency as u64)
+        } else {
+            obs.at.saturating_add(latency.unsigned_abs())
+        };
         obs.at = obs.at.min(t);
         let Some(chase) = self.chase.as_mut() else {
             return;
@@ -1689,6 +1698,14 @@ impl Engine {
                 self.ext_stop(frame, t);
                 if moved {
                     self.tc_event(t, "ext stopped", frame);
+                }
+            }
+            ChaseStep::Reverse(frame) => {
+                // Follow the position quietly; one event when it starts.
+                let started = self.tc.running;
+                self.ext_stop(frame, t);
+                if started {
+                    self.tc_event(t, "ext running backwards - stopped, nothing fires", frame);
                 }
             }
         }
@@ -2176,6 +2193,7 @@ impl Engine {
             tc: self.tc,
             tc_position: self.tc.timecode_at(t, self.sr).format(self.tc.rate),
             tc_status: self.tc_status(),
+            tc_speed: self.chase.as_ref().and_then(Chaser::speed),
             next_auto: next_auto.map(|g| self.secs(g.saturating_sub(t))),
         }
     }

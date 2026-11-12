@@ -155,6 +155,7 @@ pub fn tc_source_badge(tc: &TcInfo) -> Option<(String, Color32, bool)> {
         "no_signal" => ("NO SIGNAL", theme::ERROR, true),
         "stopped" => ("STOPPED", theme::MUTED, false),
         "held" => ("HELD", theme::WARN, false),
+        "reverse" => ("REVERSE", theme::WARN, false),
         other => (other, theme::MUTED, false),
     };
     Some((format!("{src} {state}"), color, on))

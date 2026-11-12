@@ -20,6 +20,15 @@
 //! * An MTC Full Frame (sent by a stopped or relocating source) stops the
 //!   transport at that position immediately. An LTC source that repeats a
 //!   still frame is treated the same way.
+//! * **Varispeed:** while locked, a straight line is fitted through the
+//!   recent observations (least squares, which removes the arrival jitter).
+//!   When the running transport is more than [`FINE_FRAMES`] away from the
+//!   fitted line it is re-anchored on it, so a source that runs a few
+//!   percent fast or slow is followed within a quarter frame. The fitted
+//!   speed is reported ([`Chaser::speed`]).
+//! * **Reverse:** a source running backwards stops the transport and moves
+//!   its (stopped) position along; nothing fires. When it runs forward again
+//!   the chaser locks anew and the jump policies apply.
 
 use serde::Serialize;
 use sm_timecode::{FrameRate, TcTransport};
@@ -53,6 +62,8 @@ pub enum TcStatus {
     Stopped,
     /// Following was suspended by PANIC or a timecode stop/pause command.
     Held,
+    /// The source runs backwards: stopped, the position follows, nothing fires.
+    Reverse,
 }
 
 impl TcStatus {
@@ -66,6 +77,7 @@ impl TcStatus {
             TcStatus::Lost => "lost",
             TcStatus::Stopped => "stopped",
             TcStatus::Held => "held",
+            TcStatus::Reverse => "reverse",
         }
     }
 }
@@ -77,6 +89,11 @@ pub const JUMP_FRAMES: f64 = 4.0;
 pub const REANCHOR_FRAMES: f64 = 1.0;
 /// Two observations are consistent when they agree within this many frames.
 const CONSISTENT_FRAMES: f64 = 0.5;
+/// The running transport is re-anchored on the fitted line beyond this.
+pub const FINE_FRAMES: f64 = 0.25;
+/// Observations in the varispeed fit (and the minimum to use it).
+const FIT_MAX: usize = 48;
+const FIT_MIN: usize = 8;
 
 /// What the engine has to do after feeding the chaser.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -92,6 +109,8 @@ pub enum ChaseStep {
     Relocked,
     /// The input stopped at `frame` (stop the transport there).
     Stop(u64),
+    /// The input runs backwards and is at `frame` (stopped there, quietly).
+    Reverse(u64),
     /// Input interrupted; the transport keeps running.
     Freewheel,
     /// Freewheel time is over: stop the transport where it is.
@@ -115,6 +134,12 @@ pub struct Chaser {
     /// Previous observation and how often its frame repeated.
     prev: Option<TcObservation>,
     still: u32,
+    /// Consecutive backward steps.
+    back: u32,
+    /// Recent consistent observations while locked (varispeed fit).
+    fit: std::collections::VecDeque<TcObservation>,
+    /// Fitted speed (1.0 = nominal).
+    speed: Option<f64>,
 }
 
 impl Chaser {
@@ -132,7 +157,15 @@ impl Chaser {
             last_good: None,
             prev: None,
             still: 0,
+            back: 0,
+            fit: std::collections::VecDeque::new(),
+            speed: None,
         }
+    }
+
+    /// Speed of the source relative to nominal (1.02 = 2 % fast), while locked.
+    pub fn speed(&self) -> Option<f64> {
+        self.transport.and(self.speed)
     }
 
     pub fn status(&self) -> TcStatus {
@@ -181,6 +214,44 @@ impl Chaser {
         self.transport = None;
         self.cand = None;
         self.pending = None;
+        self.reset_fit();
+    }
+
+    fn reset_fit(&mut self) {
+        self.fit.clear();
+        self.speed = None;
+    }
+
+    /// Least-squares line through the fit window: (position in frames
+    /// relative to the window's first frame at sample `at`, frames per sample).
+    fn fitted(&self, at: u64) -> Option<(f64, f64)> {
+        let first = *self.fit.front()?;
+        if self.fit.len() < FIT_MIN {
+            return None;
+        }
+        let n = self.fit.len() as f64;
+        let pts: Vec<(f64, f64)> = self
+            .fit
+            .iter()
+            .map(|o| {
+                (
+                    (o.at as f64 - first.at as f64),
+                    self.rel(o.frame, first.frame) as f64,
+                )
+            })
+            .collect();
+        let (mx, my) = pts
+            .iter()
+            .fold((0.0, 0.0), |(a, b), (x, y)| (a + x / n, b + y / n));
+        let (sxy, sxx) = pts.iter().fold((0.0, 0.0), |(a, b), (x, y)| {
+            (a + (x - mx) * (y - my), b + (x - mx) * (x - mx))
+        });
+        if sxx <= 0.0 {
+            return None;
+        }
+        let slope = sxy / sxx;
+        let x = at as f64 - first.at as f64;
+        Some((my + slope * (x - mx), slope))
     }
 
     /// Resume following after [`Chaser::hold`].
@@ -212,6 +283,9 @@ impl Chaser {
         }
         // A frame label that repeats is a still frame (stopped source).
         let repeat = self.prev.is_some_and(|p| p.frame == obs.frame);
+        let backwards = self
+            .prev
+            .is_some_and(|p| (-8..0).contains(&self.rel(obs.frame, p.frame)));
         self.prev = Some(obs);
         if repeat {
             self.still += 1;
@@ -221,6 +295,19 @@ impl Chaser {
             return ChaseStep::Nothing;
         }
         self.still = 0;
+        if backwards {
+            self.back += 1;
+            if self.back >= 2 || self.status == TcStatus::Reverse {
+                self.transport = None;
+                self.cand = None;
+                self.pending = None;
+                self.reset_fit();
+                self.status = TcStatus::Reverse;
+                return ChaseStep::Reverse(obs.frame % self.rate.frames_per_day());
+            }
+            return ChaseStep::Nothing;
+        }
+        self.back = 0;
         match self.transport {
             Some(t) => self.observe_running(obs, t),
             None => self.observe_locking(obs),
@@ -232,11 +319,15 @@ impl Chaser {
         if dev.abs() <= REANCHOR_FRAMES {
             self.pending = None;
             self.last_good = Some(obs.at);
+            self.fit.push_back(obs);
+            if self.fit.len() > FIT_MAX {
+                self.fit.pop_front();
+            }
             if self.status == TcStatus::Freewheel {
                 self.status = TcStatus::Locked;
                 return ChaseStep::Relocked;
             }
-            return ChaseStep::Nothing;
+            return self.follow_fit(obs, t);
         }
         let confirmed = self.pending.is_some_and(|p| {
             self.rel(obs.frame, p.frame) > 0
@@ -248,6 +339,7 @@ impl Chaser {
         }
         self.pending = None;
         self.last_good = Some(obs.at);
+        self.reset_fit();
         let new = self.running(obs);
         self.transport = Some(new);
         self.status = TcStatus::Locked;
@@ -256,6 +348,37 @@ impl Chaser {
         } else {
             ChaseStep::Jump(new)
         }
+    }
+
+    /// Varispeed: keep the transport on the fitted line.
+    fn follow_fit(&mut self, obs: TcObservation, t: TcTransport) -> ChaseStep {
+        let Some(first) = self.fit.front().copied() else {
+            return ChaseStep::Nothing;
+        };
+        let Some((pos, slope)) = self.fitted(obs.at) else {
+            return ChaseStep::Nothing;
+        };
+        let len = self.frame_len();
+        self.speed = Some(slope * len);
+        // Where the running transport is at `obs.at`, on the same scale.
+        let running = self.rel(t.anchor_frame, first.frame) as f64
+            + (obs.at as f64 - t.anchor_sample as f64) / len;
+        let off = pos - running;
+        if off.abs() <= FINE_FRAMES {
+            return ChaseStep::Nothing;
+        }
+        let whole = pos.floor();
+        let day = self.rate.frames_per_day() as i64;
+        let frame = (first.frame as i64 + whole as i64).rem_euclid(day) as u64;
+        let back = ((pos - whole) * len) as u64;
+        let new = TcTransport {
+            rate: self.rate,
+            running: true,
+            anchor_sample: obs.at.saturating_sub(back),
+            anchor_frame: frame,
+        };
+        self.transport = Some(new);
+        ChaseStep::Reanchor(new, off)
     }
 
     fn observe_locking(&mut self, obs: TcObservation) -> ChaseStep {
@@ -275,6 +398,8 @@ impl Chaser {
             self.transport = Some(t);
             self.last_good = Some(obs.at);
             self.status = TcStatus::Locked;
+            self.reset_fit();
+            self.fit.push_back(obs);
             return ChaseStep::Lock(t);
         }
         self.cand = Some((obs, count));
@@ -293,6 +418,7 @@ impl Chaser {
     }
 
     fn stop(&mut self, frame: u64) -> ChaseStep {
+        self.reset_fit();
         self.transport = None;
         self.cand = None;
         self.pending = None;
@@ -308,6 +434,7 @@ impl Chaser {
         let gap = now.saturating_sub(last);
         if self.transport.is_some() {
             if gap >= self.freewheel {
+                self.reset_fit();
                 self.transport = None;
                 self.pending = None;
                 self.status = TcStatus::Lost;
@@ -460,5 +587,103 @@ mod tests {
         c.observe(obs(day - 1, at(1)));
         assert!(matches!(c.observe(obs(0, at(2))), ChaseStep::Lock(_)));
         assert_eq!(c.observe(obs(1, at(3))), ChaseStep::Nothing);
+    }
+}
+
+#[cfg(test)]
+mod varispeed_tests {
+    use super::*;
+
+    const SR: u32 = 48_000;
+
+    /// Feed `n` frames of a 25 fps source running at `speed`, with +-`jitter`
+    /// samples of arrival noise; returns the chaser and the worst error of
+    /// the running transport against the true position after warm-up.
+    fn run(speed: f64, jitter: i64, n: u64) -> (Chaser, f64) {
+        let mut c = Chaser::new(FrameRate::F25, SR, 4, 2000);
+        let len = f64::from(SR) / 25.0 / speed;
+        let mut worst: f64 = 0.0;
+        for i in 0..n {
+            let true_at = 10_000.0 + i as f64 * len;
+            let noise = ((i * 7919) % (2 * jitter as u64 + 1)) as i64 - jitter;
+            let at = (true_at as i64 + noise) as u64;
+            c.observe(TcObservation {
+                frame: 1000 + i,
+                at,
+            });
+            if i > 60 {
+                if let Some(t) = c.running_transport() {
+                    // Transport position at the true start of frame i.
+                    let pos = t.anchor_frame as f64
+                        + (true_at - t.anchor_sample as f64) / (f64::from(SR) / 25.0);
+                    worst = worst.max((pos - (1000 + i) as f64).abs());
+                }
+            }
+        }
+        (c, worst)
+    }
+
+    #[test]
+    fn follows_a_source_running_two_percent_fast_within_a_quarter_frame() {
+        let (c, worst) = run(1.02, 40, 400);
+        assert_eq!(c.status(), TcStatus::Locked);
+        assert!(worst < FINE_FRAMES + 0.1, "worst error {worst:.3} frames");
+        let speed = c.speed().unwrap();
+        assert!((speed - 1.02).abs() < 0.002, "speed {speed}");
+        let (c, worst) = run(0.97, 40, 400);
+        assert!(worst < FINE_FRAMES + 0.1, "slow source: {worst:.3}");
+        assert!((c.speed().unwrap() - 0.97).abs() < 0.002);
+    }
+
+    #[test]
+    fn nominal_speed_with_jitter_is_not_re_anchored_all_the_time() {
+        let mut c = Chaser::new(FrameRate::F25, SR, 4, 2000);
+        let len = f64::from(SR) / 25.0;
+        let mut reanchors = 0;
+        for i in 0..500u64 {
+            let noise = ((i * 7919) % 81) as i64 - 40; // +-40 samples (< 1 ms)
+            let at = (10_000.0 + i as f64 * len) as i64 + noise;
+            if matches!(
+                c.observe(TcObservation {
+                    frame: 1000 + i,
+                    at: at as u64
+                }),
+                ChaseStep::Reanchor(..)
+            ) {
+                reanchors += 1;
+            }
+        }
+        assert!(reanchors <= 2, "{reanchors} re-anchors on a steady source");
+    }
+
+    #[test]
+    fn reverse_stops_quietly_and_forward_locks_again() {
+        let mut c = Chaser::new(FrameRate::F25, SR, 3, 2000);
+        let len = 1920u64;
+        let mut at = 0;
+        for f in 100..110u64 {
+            at += len;
+            c.observe(TcObservation { frame: f, at });
+        }
+        assert_eq!(c.status(), TcStatus::Locked);
+        let mut steps = Vec::new();
+        for f in (100..109u64).rev() {
+            at += len;
+            steps.push(c.observe(TcObservation { frame: f, at }));
+        }
+        assert_eq!(c.status(), TcStatus::Reverse);
+        assert!(c.running_transport().is_none());
+        assert_eq!(steps.last(), Some(&ChaseStep::Reverse(100)));
+        // Forward again: locks after lock_frames, as after a jump.
+        let mut locked = false;
+        for f in 101..110u64 {
+            at += len;
+            locked |= matches!(
+                c.observe(TcObservation { frame: f, at }),
+                ChaseStep::Lock(_)
+            );
+        }
+        assert!(locked);
+        assert_eq!(c.status(), TcStatus::Locked);
     }
 }

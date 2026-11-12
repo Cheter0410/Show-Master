@@ -1201,7 +1201,7 @@ impl Runtime {
                 "rtp": { "enabled": rtp.enabled, "name": rtp.session_name, "port": self.io.midi.rtp_local_port().unwrap_or(rtp.port), "peers": peers, "discovered": net.get("discovered").cloned().unwrap_or_else(|| json!([])) },
             },
             "remote": { "urls": self.urls.1, "port": port, "clients": clients, "mdns": net.get("mdns").cloned().unwrap_or(Value::Null) },
-            "inputs": self.inputs.json(self.io.input_status(), snap.tc_status),
+            "inputs": self.inputs.json(self.io.input_status(), snap.tc_status, snap.tc_speed),
             "preflight": self.preflight,
             "layouts": LAYOUTS,
             "update": self.updater.as_ref().map(|u| u.json()).unwrap_or_else(|| crate::update::disabled_json(VERSION)),

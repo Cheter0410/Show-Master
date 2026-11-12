@@ -128,6 +128,8 @@ mDNS/Bonjour fields (optional comfort, see `decisions.md`):
   "audio_inputs": [ { "id": "…", "name": "…", "channels": 2, "is_default": true } ] | null,  // scanned only while LTC input is selected
   "ltc_open": false, "ltc_level_db": -18.5 | null,            // LTC capture stream, peak of the last second
   "mtc_rate": "25 fps" | null,                                // rate announced by the incoming MTC
+  "ltc_rate": "25" | null,                                    // rate detected on the LTC input
+  "tc_speed": 1.0 | null,                                     // chased source speed (1.02 = 2 % fast), while locked
   "tc_status": "generator"                                    // same values as tick tc.status
 }
 ```
@@ -173,7 +175,7 @@ mDNS/Bonjour fields (optional comfort, see `decisions.md`):
                 "source": "generator"|"external",
                 "input": { "kind": "mtc"|"ltc", "mtc_port": "",            // alias / device / "rtp:…"; "" = any listened port
                            "ltc_device": null, "ltc_channel": 0,           // audio input id (null = default), zero-based channel
-                           "lock_frames": 4, "freewheel_ms": 2000 } },
+                           "lock_frames": 4, "freewheel_ms": 2000, "latency_ms": 0 } },
   "midi_input": { "mode": "none"|"all"|"selected", "ports": ["Desk", "rtp:Show Master"],
                   "mappings": [ { "port": "", "kind": "note_on"|"control_change"|"program_change", "channel": 0 /* 0 = any */,
                                   "number": 60, "min_value": 1,
@@ -236,11 +238,15 @@ when a device comes back. Incoming messages are handled on the engine thread:
 
 **Timecode input / chase.** With `timecode.source: "external"` the engine's timecode follows MTC (from
 `input.mtc_port`) or LTC (audio input `input.ltc_device`, channel `input.ltc_channel`; the frame rate
-is `timecode.rate`). It locks after `lock_frames` consistent frames, keeps running on its own for
+is detected and converted to `timecode.rate`). It locks after `lock_frames` consistent frames, keeps running on its own for
 `freewheel_ms` when the input stops and then stops (`lost`); an MTC Full Frame or a repeated LTC frame
 stops it at that position. Jumps of the source apply each list's `tc_jump` policy. While chasing,
 `tc_start`/`tc_resume` and `tc_stop`/`tc_pause` (and timecode cues) only resume or suspend following
 (`held`; PANIC also holds), `tc_relocate` is ignored, and LTC/MTC outputs send the chased timecode.
+A source at another rate is converted by timecode value; speed deviations are followed within a quarter
+frame (`inputs.tc_speed`); a source running backwards puts the status to `reverse` (clock stopped at the
+source position, nothing fires) until it runs forward and locks again. `input.latency_ms` (-500..500)
+shifts incoming frames earlier to compensate the input path.
 
 ## Commands
 

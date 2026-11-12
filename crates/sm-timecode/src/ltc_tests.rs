@@ -521,3 +521,29 @@ fn no_drift_1_hour_2997df() {
 fn no_drift_1_hour_25() {
     assert_no_drift(FrameRate::F25, 3600);
 }
+
+#[test]
+fn backwards_ltc_is_decoded_as_reverse() {
+    let rate = FrameRate::F25;
+    let t = running(rate, 0, Timecode::new(1, 0, 0, 0).to_frame_number(rate));
+    let mut enc = LtcEncoder::new(48_000);
+    enc.set_transport(t);
+    let mut signal = render_all(&mut enc, 48_000, &BLOCKS, 0.7);
+    // Forward decoding knows the direction too.
+    let fwd = decode_all(48_000, &signal);
+    assert!(fwd.len() > 20 && fwd.iter().all(|f| !f.reverse));
+    // Played backwards: frames arrive in descending order, flagged reverse.
+    signal.reverse();
+    let back = decode_all(48_000, &signal);
+    assert!(back.len() > 20, "decoded {} reverse frames", back.len());
+    assert!(back.iter().all(|f| f.reverse));
+    for w in back.windows(2) {
+        assert_eq!(
+            w[1].timecode.to_frame_number(rate) + 1,
+            w[0].timecode.to_frame_number(rate),
+            "{} then {}",
+            w[0].timecode,
+            w[1].timecode
+        );
+    }
+}

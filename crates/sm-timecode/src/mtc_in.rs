@@ -54,6 +54,17 @@ pub fn mtc_rate_matches(code: u8, rate: FrameRate) -> bool {
     rate.mtc_rate_code() == (code & 3)
 }
 
+/// The frame rate an MTC rate code stands for (30 fps non-drop is reported
+/// as 30; 29.97 non-drop uses the same code and the same labels).
+pub fn mtc_rate_of(code: u8) -> FrameRate {
+    match code & 3 {
+        0 => FrameRate::F24,
+        1 => FrameRate::F25,
+        2 => FrameRate::F2997Df,
+        _ => FrameRate::F30,
+    }
+}
+
 /// A readable name of an MTC rate code.
 pub fn mtc_rate_label(code: u8) -> &'static str {
     match code & 3 {

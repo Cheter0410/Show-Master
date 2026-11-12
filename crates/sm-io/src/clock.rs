@@ -19,6 +19,11 @@ pub struct ClockMap {
 const WINDOW: Duration = Duration::from_secs(2);
 
 impl ClockMap {
+    /// Engine samples per second.
+    pub fn sample_rate(&self) -> f64 {
+        self.sample_rate
+    }
+
     pub fn new(sample_rate: u32) -> Self {
         Self {
             base: Instant::now(),

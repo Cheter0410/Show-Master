@@ -132,9 +132,11 @@ impl InputState {
     }
 
     /// `state.inputs`.
-    pub fn json(&self, status: InputStatus, tc_status: TcStatus) -> Value {
+    pub fn json(&self, status: InputStatus, tc_status: TcStatus, tc_speed: Option<f64>) -> Value {
         json!({
             "tc_status": tc_status,
+            "tc_speed": tc_speed.map(|s| (s * 10_000.0).round() / 10_000.0),
+            "ltc_rate": status.ltc_rate,
             "midi_ports": status.midi_ports,
             "midi_open": status.midi_open,
             "midi_count": self.count,

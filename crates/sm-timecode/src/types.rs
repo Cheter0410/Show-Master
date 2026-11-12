@@ -225,6 +225,34 @@ pub struct TcTransport {
     pub anchor_frame: u64,
 }
 
+/// Map frame `frame` of a source running at `from` onto the timecode of
+/// rate `to`, by its *label* (HH:MM:SS plus the fraction of a second the
+/// frame number stands for) - the way chase systems convert between rates:
+/// 01:00:10:15 at 30 fps is 01:00:10.5 and becomes 01:00:10:12 at 25 fps.
+///
+/// Returns the frame number at `to` and how many seconds after that
+/// frame's start the source frame starts (0 <= offset < one `to` frame).
+pub fn convert_frame(frame: u64, from: FrameRate, to: FrameRate) -> (u64, f64) {
+    let tc = Timecode::from_frame_number(frame % from.frames_per_day(), from);
+    if from.nominal() == to.nominal() && from.drop_frame() == to.drop_frame() {
+        return (tc.to_frame_number(to) % to.frames_per_day(), 0.0);
+    }
+    let (fs, ts) = (u64::from(from.nominal()), u64::from(to.nominal()));
+    let f = u64::from(tc.frames);
+    let mut ff = f * ts / fs;
+    // Labels that drop-frame counting skips (;00 and ;01 at most minute
+    // starts) do not exist: use the first real one.
+    if to.drop_frame() && tc.seconds == 0 && tc.minutes % 10 != 0 && ff < 2 {
+        ff = 2;
+    }
+    let offset = f as f64 / fs as f64 - ff as f64 / ts as f64;
+    let label = Timecode::new(tc.hours, tc.minutes, tc.seconds, ff as u8);
+    (
+        label.to_frame_number(to) % to.frames_per_day(),
+        offset.max(0.0),
+    )
+}
+
 impl TcTransport {
     pub fn stopped(rate: FrameRate) -> Self {
         Self {
@@ -282,6 +310,39 @@ mod tests {
             }
             let last = Timecode::from_frame_number(day - 1, rate);
             assert_eq!((last.hours, last.minutes, last.seconds), (23, 59, 59));
+        }
+    }
+
+    #[test]
+    fn converts_between_rates_by_label() {
+        let n30 = Timecode::new(1, 0, 10, 15).to_frame_number(FrameRate::F30);
+        let (n25, off) = convert_frame(n30, FrameRate::F30, FrameRate::F25);
+        assert_eq!(
+            Timecode::from_frame_number(n25, FrameRate::F25),
+            Timecode::new(1, 0, 10, 12)
+        );
+        assert!((off - (0.5 - 0.48)).abs() < 1e-9);
+        // Same labelling: identity, no offset.
+        let n = Timecode::new(2, 3, 4, 5).to_frame_number(FrameRate::F24);
+        assert_eq!(
+            convert_frame(n, FrameRate::F24, FrameRate::F23976),
+            (n, 0.0)
+        );
+        // Into drop-frame: a skipped label maps to ;02.
+        let n = Timecode::new(0, 1, 0, 0).to_frame_number(FrameRate::F25);
+        let (d, _) = convert_frame(n, FrameRate::F25, FrameRate::F2997Df);
+        assert_eq!(
+            Timecode::from_frame_number(d, FrameRate::F2997Df),
+            Timecode::new(0, 1, 0, 2)
+        );
+        // Every frame of a second maps forward monotonically.
+        let mut last = None;
+        for f in 0..30u8 {
+            let n = Timecode::new(0, 0, 1, f).to_frame_number(FrameRate::F30);
+            let (k, off) = convert_frame(n, FrameRate::F30, FrameRate::F25);
+            assert!(off < 1.0 / 25.0 + 1e-9);
+            assert!(last.is_none_or(|l| k >= l));
+            last = Some(k);
         }
     }
 

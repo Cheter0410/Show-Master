@@ -442,6 +442,10 @@ fn status_text(status: &str) -> (&'static str, egui::Color32) {
         "no_signal" => ("No signal", theme::ERROR),
         "stopped" => ("Source stopped", theme::MUTED),
         "held" => ("Held (PANIC / stop) - not following", theme::WARN),
+        "reverse" => (
+            "Source runs backwards - stopped, nothing fires",
+            theme::WARN,
+        ),
         _ => ("Internal generator", theme::MUTED),
     }
 }
@@ -477,6 +481,9 @@ pub(super) fn timecode_source_section(ui: &mut egui::Ui, st: &mut SetupState, s:
         row(ui, "Status", |ui| {
             let (text, color) = status_text(&inp.tc_status);
             ui.label(RichText::new(text).color(color).strong());
+            if let Some(speed) = inp.tc_speed.filter(|s| (s - 1.0).abs() >= 0.0005) {
+                unit(ui, &format!("source speed {:+.1} %", (speed - 1.0) * 100.0));
+            }
         });
         row(ui, "Input", |ui| {
             let mut kind = input.kind;
@@ -595,6 +602,9 @@ pub(super) fn timecode_source_section(ui: &mut egui::Ui, st: &mut SetupState, s:
                         (true, _) => RichText::new("silence").color(theme::WARN),
                     };
                     ui.label(text);
+                    if let Some(r) = &inp.ltc_rate {
+                        unit(ui, &format!("receiving {r}"));
+                    }
                 });
             }
         }
@@ -611,6 +621,23 @@ pub(super) fn timecode_source_section(ui: &mut egui::Ui, st: &mut SetupState, s:
                 st.update_show(json!({ "timecode": { "input": { "lock_frames": v } } }));
             }
             unit(ui, "valid frames in a row");
+        });
+        row(ui, "Input latency", |ui| {
+            if let Some(v) = num_field(
+                ui,
+                &mut st.drafts,
+                "tc_latency",
+                input.latency_ms,
+                -500,
+                500,
+                60.0,
+            ) {
+                st.update_show(json!({ "timecode": { "input": { "latency_ms": v } } }));
+            }
+            unit(
+                ui,
+                "ms the input path delays the timecode (interface, converter)",
+            );
         });
         row(ui, "Freewheel", |ui| {
             if let Some(v) = num_field(
@@ -630,9 +657,11 @@ pub(super) fn timecode_source_section(ui: &mut egui::Ui, st: &mut SetupState, s:
     if tc.source == TcSource::External {
         hint(
             ui,
-            "The frame rate below must match the source. Timecode cues and generator \
-             commands do not move the clock while chasing; LTC / MTC outputs send the \
-             chased timecode.",
+            "A source at another frame rate is converted by timecode value (01:00:10:15 at \
+             30 fps = 01:00:10:12 at 25 fps); the show's rate below is what cues use. Speed \
+             changes of the source are followed, a source running backwards stops the clock \
+             without firing anything. Timecode cues and generator commands do not move the \
+             clock while chasing; LTC / MTC outputs send the chased timecode.",
         );
     }
 }

@@ -419,3 +419,54 @@ fn switching_the_source_stops_the_timecode() {
         show.timecode.start.to_frame_number(show.timecode.rate)
     );
 }
+
+#[test]
+fn input_latency_moves_the_lock_earlier() {
+    let rate = FrameRate::F25;
+    let start = Timecode::new(1, 0, 0, 0).to_frame_number(rate);
+    let anchor = |latency_ms: i32| {
+        let mut f = fixture(TcJumpPolicy::Skip, rate);
+        let mut show = f.engine.show().clone();
+        show.timecode.input.latency_ms = latency_ms;
+        f.engine.set_show(show);
+        feed(&mut f.engine, start, 10_000.0, 1920.0, 8);
+        let t = f.engine.snapshot().tc;
+        assert!(t.running);
+        // Position extrapolated to a fixed sample, in frames * 1920.
+        (t.anchor_frame - start) * 1920 + 50_000 - t.anchor_sample
+    };
+    // 40 ms = 1920 samples = one frame further along at the same sample.
+    assert_eq!(anchor(40), anchor(0) + 1920);
+}
+
+#[test]
+fn reverse_running_source_stops_the_clock_and_fires_nothing() {
+    let rate = FrameRate::F25;
+    let start = Timecode::new(1, 0, 1, 20).to_frame_number(rate);
+    let mut f = fixture(TcJumpPolicy::Chase, rate);
+    feed(&mut f.engine, start, 0.0, 1920.0, 6);
+    assert!(f.engine.snapshot().tc.running);
+    // Now backwards across the 01:00:01:00 trigger of the audio cue.
+    let mut actions = Vec::new();
+    let mut at = 6.0 * 1920.0;
+    for k in 0..30u64 {
+        at += 1920.0;
+        let t = at as u64;
+        f.engine.advance(t + LOOKAHEAD);
+        f.engine.external_tc(TcObservation {
+            frame: start + 4 - k,
+            at: t,
+        });
+        actions.extend(f.engine.drain_actions());
+    }
+    assert_eq!(f.engine.tc_status(), TcStatus::Reverse);
+    let snap = f.engine.snapshot();
+    assert!(!snap.tc.running);
+    assert_eq!(snap.tc.anchor_frame, start + 4 - 29);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::StartVoice { .. } | Action::Midi { .. })),
+        "nothing fires while running backwards"
+    );
+}

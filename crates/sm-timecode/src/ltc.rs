@@ -320,6 +320,9 @@ pub struct DecodedLtcFrame {
     /// sample right after the frame's last bit (the end of the sync word),
     /// i.e. the first sample of the following frame.
     pub end_sample: u64,
+    /// The frame was received backwards (tape / timeline playing in
+    /// reverse): `end_sample` is then where the frame *before* it begins.
+    pub reverse: bool,
 }
 
 /// Lowest detection threshold; signals below roughly -70 dBFS are ignored.
@@ -327,7 +330,9 @@ const MIN_THRESHOLD: f32 = 1.0e-4;
 /// Detection threshold relative to the tracked signal peak.
 const THRESHOLD_RATIO: f32 = 0.3;
 
-/// LTC decoder working purely on the audio signal (forward direction).
+/// LTC decoder working purely on the audio signal, in either direction (the
+/// sync word tells the direction: played backwards it arrives first and
+/// bit-reversed).
 ///
 /// The signal is sliced with a hysteresis comparator whose threshold
 /// follows the signal peak, the intervals between level changes are
@@ -494,16 +499,39 @@ impl LtcDecoder {
         self.quiet_limit = ((self.period / 4.0) as u32).max(2);
         self.shift = (self.shift >> 1) | (u128::from(one) << 79);
         self.bits_seen = (self.bits_seen + 1).min(80);
-        if self.bits_seen == 80 && (self.shift >> 64) & 0xFFFF == SYNC_WORD_LSB_FIRST {
+        if self.bits_seen < 80 {
+            return;
+        }
+        if (self.shift >> 64) & 0xFFFF == SYNC_WORD_LSB_FIRST {
             if let Some((timecode, drop_frame)) = decode_fields(self.shift) {
                 out.push(DecodedLtcFrame {
                     timecode,
                     drop_frame,
                     end_sample: t,
+                    reverse: false,
+                });
+            }
+        } else if self.shift & 0xFFFF == SYNC_REVERSED {
+            // Backwards: the 80 bits arrived last-first.
+            let word = reverse80(self.shift);
+            if let Some((timecode, drop_frame)) = decode_fields(word) {
+                out.push(DecodedLtcFrame {
+                    timecode,
+                    drop_frame,
+                    end_sample: t,
+                    reverse: true,
                 });
             }
         }
     }
+}
+
+/// The sync word as it looks in the shift register when received backwards.
+const SYNC_REVERSED: u128 = (SYNC_WORD_LSB_FIRST as u16).reverse_bits() as u128;
+
+/// Bit order of an 80-bit word reversed (bit 0 <-> bit 79).
+fn reverse80(w: u128) -> u128 {
+    w.reverse_bits() >> 48
 }
 
 /// Extract the time fields from 80 received bits (first received = bit 0).
