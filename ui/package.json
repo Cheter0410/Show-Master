@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "mock": "node mock/server.mjs",
-    "icons": "node scripts/gen-icons.mjs",
+    "icons": "node ../scripts/render-logo.mjs",
     "e2e": "node e2e/smoke.mjs"
   },
   "dependencies": {

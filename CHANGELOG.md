@@ -2,6 +2,7 @@
 
 ## 0.4.0
 
+- New logo: the cue stack with the green NEXT cue (app icon, window, tray and tablet icons).
 - Groups: a group's colour tints every cue inside it, and a bracket in its colour shows what belongs
   to the group.
 - Group mode "List": a group that only bundles cues - nothing fires by itself, the playhead steps
