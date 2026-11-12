@@ -569,3 +569,32 @@ fn osc_cue_is_added_and_edited_in_the_inspector() {
         "/cue/5/start"
     );
 }
+
+#[test]
+fn touch_select_mode_taps_add_and_remove_cues() {
+    let env = Env::demo();
+    let mut h = harness(&env);
+    h.state_mut()
+        .prefs
+        .set_touch(sm_desktop::prefs::TouchPref::On);
+    settle(&mut h);
+    h.get_by_label("Select several cues").click();
+    settle(&mut h);
+    for label in ["Cue 1 Intro", "Cue 2 Fade intro", "Cue 4 Long"] {
+        h.get_by_label(label).click();
+        settle(&mut h);
+    }
+    let want = vec![id_of(&env, "1"), id_of(&env, "2"), id_of(&env, "4")];
+    assert_eq!(h.state().view.selection, want);
+    // A second tap removes the cue again.
+    h.get_by_label("Cue 2 Fade intro").click();
+    settle(&mut h);
+    assert_eq!(h.state().view.selection, vec![want[0], want[2]]);
+    // "Done" ends the mode: a tap selects one cue again.
+    h.get_by_label("Select several cues").click();
+    settle(&mut h);
+    // (a row near the top: the bulk inspector covers the lower rows)
+    h.get_by_label("Cue 3 Scene").click();
+    settle(&mut h);
+    assert_eq!(h.state().view.selection, vec![id_of(&env, "3")]);
+}

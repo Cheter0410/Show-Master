@@ -212,7 +212,10 @@ fn panic_messages_are_added_edited_and_removed() {
     h.get_all_by_value("pc 1 0").next().unwrap().click();
     settle(&mut h);
     h.key_press_modifiers(Modifiers::COMMAND, Key::A);
-    h.get_all_by_value("pc 1 0").next().unwrap().type_text("cc 1 7 0");
+    h.get_all_by_value("pc 1 0")
+        .next()
+        .unwrap()
+        .type_text("cc 1 7 0");
     h.key_press(Key::Enter);
     settle(&mut h);
     env.wait(&mut h, "midi message edited", |s| {
@@ -220,6 +223,10 @@ fn panic_messages_are_added_edited_and_removed() {
     });
     h.get_all_by_label("Remove").next().unwrap().click();
     env.wait(&mut h, "first removed", |s| {
-        s["show"]["settings"]["panic_send"].as_array().unwrap().len() == 1
+        s["show"]["settings"]["panic_send"]
+            .as_array()
+            .unwrap()
+            .len()
+            == 1
     });
 }

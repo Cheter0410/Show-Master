@@ -47,12 +47,38 @@ impl TouchPref {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Window size and position (points, outer position) of the last session.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WindowGeometry {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub maximized: bool,
+}
+
+impl WindowGeometry {
+    /// Sizes and positions a window could plausibly be restored to (a
+    /// monitor that is gone again must not leave the window out of reach).
+    pub fn sane(&self) -> bool {
+        let finite = [self.x, self.y, self.w, self.h]
+            .iter()
+            .all(|v| v.is_finite());
+        finite
+            && (300.0..=10_000.0).contains(&self.w)
+            && (200.0..=10_000.0).contains(&self.h)
+            && (-200.0..=8_000.0).contains(&self.x)
+            && (-50.0..=6_000.0).contains(&self.y)
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 struct Stored {
     touch: TouchPref,
     global_hotkeys: BTreeMap<String, String>,
     background_hint_seen: bool,
+    window: Option<WindowGeometry>,
 }
 
 pub struct Prefs {
@@ -62,6 +88,7 @@ pub struct Prefs {
     pub global_hotkeys: BTreeMap<String, String>,
     /// The "keeps running in the background" note was confirmed once.
     pub background_hint_seen: bool,
+    pub window: Option<WindowGeometry>,
 }
 
 impl Default for Prefs {
@@ -87,6 +114,7 @@ impl Prefs {
             touch: stored.touch,
             global_hotkeys: stored.global_hotkeys,
             background_hint_seen: stored.background_hint_seen,
+            window: stored.window.filter(WindowGeometry::sane),
         }
     }
 
@@ -101,6 +129,24 @@ impl Prefs {
     pub fn set_background_hint_seen(&mut self) {
         if !self.background_hint_seen {
             self.background_hint_seen = true;
+            self.save();
+        }
+    }
+
+    /// Remember the window geometry (saved when it changed noticeably).
+    pub fn set_window(&mut self, g: WindowGeometry) {
+        if !g.sane() {
+            return;
+        }
+        let same = self.window.is_some_and(|w| {
+            w.maximized == g.maximized
+                && (w.x - g.x).abs() < 2.0
+                && (w.y - g.y).abs() < 2.0
+                && (w.w - g.w).abs() < 2.0
+                && (w.h - g.h).abs() < 2.0
+        });
+        if !same {
+            self.window = Some(g);
             self.save();
         }
     }
@@ -121,6 +167,7 @@ impl Prefs {
             touch: self.touch,
             global_hotkeys: self.global_hotkeys.clone(),
             background_hint_seen: self.background_hint_seen,
+            window: self.window,
         };
         let Ok(text) = serde_json::to_string_pretty(&stored) else {
             return;
@@ -148,6 +195,32 @@ mod tests {
         assert!(!TouchPref::Auto.resolve(false));
         assert!(TouchPref::On.resolve(false));
         assert!(!TouchPref::Off.resolve(true));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn window_geometry_persists_and_insane_values_are_ignored() {
+        let dir = std::env::temp_dir().join(format!("sm-prefs-win-{}", std::process::id()));
+        let file = dir.join("desktop.json");
+        let mut p = Prefs::load_from(Some(file.clone()));
+        let g = WindowGeometry {
+            x: 100.0,
+            y: 50.0,
+            w: 1200.0,
+            h: 800.0,
+            maximized: false,
+        };
+        p.set_window(g);
+        assert_eq!(Prefs::load_from(Some(file.clone())).window, Some(g));
+        // A window on a monitor that is far away / garbage is not restored.
+        p.set_window(WindowGeometry { x: 90_000.0, ..g });
+        assert_eq!(Prefs::load_from(Some(file.clone())).window, Some(g));
+        std::fs::write(
+            &file,
+            r#"{"window":{"x":-5000,"y":0,"w":800,"h":600,"maximized":false}}"#,
+        )
+        .unwrap();
+        assert_eq!(Prefs::load_from(Some(file)).window, None);
         let _ = std::fs::remove_dir_all(dir);
     }
 

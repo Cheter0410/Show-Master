@@ -54,6 +54,13 @@ pub fn run(
     if let Some(icon) = icon() {
         viewport = viewport.with_icon(icon);
     }
+    // Where the window was last time (per machine, desktop.json).
+    if let Some(g) = prefs::Prefs::load().window {
+        viewport = viewport
+            .with_inner_size([g.w, g.h])
+            .with_position([g.x, g.y])
+            .with_maximized(g.maximized);
+    }
     // Early, so a document that launched the app is caught (macOS).
     open_files::install();
     let options = eframe::NativeOptions {
@@ -80,6 +87,43 @@ pub fn run(
     )
 }
 
+/// Store the window's size and position (only while it is shown normally:
+/// a hidden or minimized window reports nothing useful).
+fn remember_geometry(app: &mut App, ctx: &egui::Context) {
+    // Twice a second is plenty (and avoids writing the file every frame
+    // while the window is dragged).
+    if ctx.cumulative_pass_nr() % 15 != 0 {
+        return;
+    }
+    let info = ctx.input(|i| i.viewport().clone());
+    if info.minimized == Some(true) || info.visible() == Some(false) {
+        return;
+    }
+    let maximized = info.maximized == Some(true);
+    let (Some(outer), Some(inner)) = (info.outer_rect, info.inner_rect) else {
+        return; // e.g. Wayland: no positions
+    };
+    let g = if maximized {
+        // Keep the size from before maximizing; only remember the flag.
+        match app.prefs.window {
+            Some(w) => prefs::WindowGeometry {
+                maximized: true,
+                ..w
+            },
+            None => return,
+        }
+    } else {
+        prefs::WindowGeometry {
+            x: outer.min.x,
+            y: outer.min.y,
+            w: inner.width(),
+            h: inner.height(),
+            maximized: false,
+        }
+    };
+    app.prefs.set_window(g);
+}
+
 /// The app and its tray icon (kept alive as long as the window loop runs).
 struct Window(App, Option<tray::Tray>);
 
@@ -89,6 +133,7 @@ impl eframe::App for Window {
         if let Some(tray) = self.1.as_mut() {
             tray.set_address(self.0.tablet_address());
         }
+        remember_geometry(&mut self.0, ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

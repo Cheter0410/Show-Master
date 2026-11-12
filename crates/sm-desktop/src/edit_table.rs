@@ -27,6 +27,9 @@ pub struct TableState {
     pub collapsed: HashSet<u64>,
     /// Anchor of shift-click range selection.
     anchor: Option<u64>,
+    /// Touch "Select" mode: a tap adds / removes the cue instead of
+    /// replacing the selection (Ctrl-click for fingers).
+    pub multi: bool,
     inline: Option<Inline>,
     drop: Option<DropTarget>,
     renumber: Option<Renumber>,
@@ -865,7 +868,10 @@ fn draw_row(
     let in_cell = |x: Rangef| pointer.is_some_and(|p| x.contains(p.x));
 
     if resp.clicked() {
-        let mods = ui.input(|i| i.modifiers);
+        let mut mods = ui.input(|i| i.modifiers);
+        if edit.table.multi && !mods.shift {
+            mods.command = true;
+        }
         click_select(sel, &mut edit.table.anchor, ctx.order, id, mods);
     }
     if resp.secondary_clicked() && !sel.contains(&id) {

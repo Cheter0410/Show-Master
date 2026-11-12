@@ -268,9 +268,27 @@ fn add_buttons(app: &App, ui: &mut egui::Ui, out: &mut Vec<Out>, in_menu: bool) 
     }
 }
 
-/// Duplicate / Delete / Lists.
+/// Select (touch multi-select) / Duplicate / Delete / Lists.
 fn selection_buttons(app: &mut App, ui: &mut egui::Ui, out: &mut Vec<Out>) {
     let has_sel = !app.view.selection.is_empty();
+    let touch = crate::responsive::get(ui.ctx()).touch;
+    let multi = app.edit.table.multi;
+    if touch || multi {
+        let n = app.view.selection.len();
+        let text = if multi {
+            format!("Done ({n})")
+        } else {
+            "Select".to_string()
+        };
+        if ui
+            .add(egui::Button::new(text).selected(multi))
+            .accessible_name("Select several cues")
+            .on_hover_text("Tap cues to add them to the selection or remove them (like Ctrl-click)")
+            .clicked()
+        {
+            app.edit.table.multi = !multi;
+        }
+    }
     if ui
         .add_enabled(has_sel, egui::Button::new("Duplicate"))
         .accessible_name("Duplicate selected cues")
@@ -322,7 +340,15 @@ fn add_row(app: &mut App, ui: &mut egui::Ui, out: &mut Vec<Out>) {
     // of a wide screen; otherwise the types fold into an "Add cue" menu, and
     // if even that does not fit the transport moves to a second row.
     let bw = |ui: &egui::Ui, t: &str| App::button_width(ui, t);
-    let sel_w = bw(ui, "Duplicate") + bw(ui, "Delete") + bw(ui, "Lists") + 16.0;
+    let sel_w = bw(ui, "Duplicate")
+        + bw(ui, "Delete")
+        + bw(ui, "Lists")
+        + if touch || app.edit.table.multi {
+            bw(ui, "Done (99)")
+        } else {
+            0.0
+        }
+        + 16.0;
     let types_w: f32 = ADD_TYPES.iter().map(|(_, l)| bw(ui, l)).sum::<f32>();
     let transport_w = 248.0 + if touch { 48.0 } else { 0.0 } + 3.0 * 8.0;
     let avail = ui.available_width();
