@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 V=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
 mkdir -p dist
-touch dist/.build-start   # packaging/publish.sh uploads only files newer than this
+touch dist/.build-start   # release.sh uploads only files newer than this
 
 # The built web UI is committed; restore it if it was deleted locally.
 [ -f ui/dist/index.html ] || git checkout HEAD -- ui/dist
@@ -136,6 +136,3 @@ if [ -z "${SKIP_WINDOWS:-}" ]; then
 fi
 
 ls -la dist
-
-# Offer to upload this build to the release the in-app updater looks at.
-./packaging/publish.sh

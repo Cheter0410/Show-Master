@@ -1,71 +1,63 @@
-# Releases bauen und veröffentlichen
+# Releases veröffentlichen
 
-Ohne CI: Linux und Windows auf dem **Arch-Linux-PC**, das DMG auf dem **Mac**. Veröffentlicht wird mit
-der GitHub-Kommandozeile `gh` nach `Cheter0410/show-master-releases`, wo der eingebaute Updater nachsieht.
-
-## Einmalig: Arch-Linux-PC einrichten
+Ein Befehl, auf beiden Rechnern derselbe:
 
 ```bash
-sudo pacman -S --needed base-devel git github-cli rustup alsa-lib gtk3 libxkbcommon-x11 mingw-w64-gcc wine
-rustup default stable
-rustup target add x86_64-pc-windows-gnu
-gh auth login
-git clone -b claude/nifty-heisenberg-mcqrc9 https://github.com/Cheter0410/Show-Master.git ~/Show-Master
+./release.sh
 ```
 
-`wine` liegt im Repository *multilib*; falls pacman es nicht findet, in `/etc/pacman.conf` den Abschnitt
-`[multilib]` einkommentieren und `sudo pacman -Sy` ausführen.
+- **Arch-PC** baut Linux und Windows, **Mac** baut das DMG. Jeder lädt seinen Teil hoch.
+- Hochgeladen wird in einen **Entwurf** (für Nutzer unsichtbar). Sobald Mac, Windows und Linux drin
+  sind, veröffentlicht das Skript das Release automatisch – egal wer als Letzter fertig ist. Erst dann
+  bieten installierte Show Master (und Stagehand) das Update an.
+- Beim ersten Mal richtet das Skript alles Fehlende selbst ein: GitHub-Anmeldung (Browser öffnet sich),
+  Rust, auf dem Arch-PC die Werkzeuge für den Windows-Installer (MinGW, Wine, Inno Setup).
 
-Inno Setup (baut den Windows-Installer) einmalig unter Wine installieren:
+## Ablauf einer neuen Version
 
-```bash
-curl -L -o /tmp/innosetup.exe https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe
-WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" wine /tmp/innosetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER '/DIR=C:\InnoSetup'
-ls ~/.wine/drive_c/InnoSetup/ISCC.exe
-```
+1. **Einer** erhöht die Version (schreibt auch, was neu ist):
 
-Optional für Debian/Ubuntu-Pakete: `cargo install cargo-deb --locked`.
+   ```bash
+   ./release.sh version
+   ```
 
-Optional für das AppImage: `appimagetool` aus dem AUR (`appimagetool-bin`, z. B. `yay -S appimagetool-bin`)
-– oder gar nichts installieren und beim Bauen `APPIMAGE=1` setzen, dann lädt das Skript `appimagetool` einmal
-nach `~/.cache/showmaster-build/`.
+   Es öffnet sich `CHANGELOG.md`: unter der neuen Version kurz eintragen, was neu ist (das steht später
+   im Update-Dialog), speichern, schließen. Das Skript committet und pusht.
+2. **Beide** auf ihrem Rechner: `./release.sh` (holt vorher selbst den neuesten Stand).
+3. Nachsehen, was schon oben ist:
 
-Optional zum Signieren der Windows-Dateien: `sudo pacman -S osslsigncode` und ein Code-Signing-Zertifikat als
-`.pfx` (siehe unten).
+   ```bash
+   ./release.sh status
+   ```
 
-## Einmalig: Mac einrichten
+   ```
+   Show Master 0.4.1: Entwurf (noch nicht für Nutzer sichtbar)
+     · Mac      fehlt noch - baut der Mac mit ./release.sh
+     ✓ Windows  ShowMaster-Setup-0.4.1.exe
+     ✓ Linux    showmaster-0.4.1-linux-x86_64.tar.gz
+   ```
 
-Nichts außer Git – das Skript installiert die Xcode-Werkzeuge und Rust selbst, wenn sie fehlen. Für das
-Hochladen zusätzlich die GitHub-Kommandozeile (`brew install gh`, dann `gh auth login`) oder den Upload
-über die Website.
+Eine schon veröffentlichte Version wird nie überschrieben – dann sagt das Skript, dass zuerst
+`./release.sh version` nötig ist.
 
-## Eine Version bauen
+## Einmalig: Zugang für den zweiten Rechner
 
-Versionsnummer: `Cargo.toml` (`[workspace.package] version`) und ein Abschnitt `## x.y.z` oben in
-`CHANGELOG.md`. Nach dem Ändern `cargo update -w`, committen, pushen.
+Der Besitzer der Release-Repos lädt den Freund ein: auf GitHub
+`Cheter0410/show-master-releases` → **Settings → Collaborators → Add people** (dasselbe für
+`Cheter0410/stagehand-releases` und, damit er pushen kann, für die Code-Repos). Der Freund nimmt die
+Einladung an (E-Mail oder https://github.com/notifications). Fehlt das Recht, sagt `./release.sh` genau
+das und zeigt den Link zur Einladung.
 
-**Arch-PC** (Linux + Windows):
+## Wo liegen die Repos?
 
-```bash
-cd ~/Show-Master && git pull && ./packaging/build-on-linux.sh
-```
+| | Mac | Arch-PC |
+|---|---|---|
+| Show Master | `~/Desktop/dev/show-master` | wo `install.sh` geklont wurde |
+| Stagehand | `~/Desktop/dev/stagehand` | wo `install.sh` geklont wurde |
 
-Mit AppImage (lädt `appimagetool` beim ersten Mal herunter, falls es nicht installiert ist):
+In jedem Repo heißt der Befehl gleich: `./release.sh` (auf dem Mac auch `bash release.sh`).
 
-```bash
-APPIMAGE=1 ./packaging/build-on-linux.sh
-```
-
-**Mac** (DMG). Für ein Release universal bauen (Intel + Apple Silicon, zwei Durchläufe; optional):
-
-```bash
-cd ~/Desktop/dev/show-master && UNIVERSAL=1 NO_INSTALL=1 bash install-mac.sh
-```
-
-Nur für den eigenen Mac (ein Durchlauf, halbe Zeit) reicht `bash install-mac.sh`. Eine Intel-Version läuft
-auf Apple-Silicon-Macs über Rosetta, eine Apple-Silicon-Version auf Intel-Macs aber nicht.
-
-## Signieren (optional)
+## Anhang: Signieren (optional)
 
 Ohne diese Variablen bleibt alles wie bisher (Mac ad hoc signiert, Windows unsigniert). Details:
 [`packaging/README.md`](../packaging/README.md#code-signing-optional).
@@ -90,33 +82,3 @@ SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" NOTARY_PROFILE=showmaste
 ```
 
 Zeitstempel und Notarisierung brauchen Internet auf dem Build-Rechner, nie auf den Show-Rechnern.
-
-## Veröffentlichen
-
-Geht automatisch am Ende des Bauens: `./packaging/build-on-linux.sh` (Arch-PC) und `bash install-mac.sh`
-(Mac) rufen `packaging/publish.sh` auf. Das zeigt die Dateien dieses Builds und fragt
-**„Upload now? [y/N]“**; mit `y` legt es das Release `v<Version>` in `Cheter0410/show-master-releases`
-an oder lädt die Dateien zum schon vorhandenen Release dazu (gleichnamige werden ersetzt). Arch-PC und
-Mac können also in beliebiger Reihenfolge hochladen.
-
-- Voraussetzung einmalig: `gh` installiert und `gh auth login` (mit Schreibrecht auf das Release-Repo).
-  Ohne `gh` wird nichts gefragt und nichts hochgeladen.
-- `PUBLISH=1` lädt ohne Frage hoch, `PUBLISH=0` fragt nie.
-- Nur Dateien, die beim letzten Bauen entstanden sind, werden hochgeladen (alte aus `dist/` nicht).
-- Die Release-Notizen (auch im Update-Dialog der App) kommen aus dem Abschnitt `## x.y.z` in
-  `CHANGELOG.md`.
-- Später von Hand: `./packaging/publish.sh`.
-
-Ein Mac-Build nur für Intel reicht für alle Macs (Apple Silicon über Rosetta); `UNIVERSAL=1` baut beide.
-
-Prüfen: `gh release view "v$V" -R Cheter0410/show-master-releases` – vollständig sind: `.dmg`,
-`ShowMaster-Setup-….exe`, `.pkg.tar.zst`, `linux-x86_64.tar.gz` und die drei `showmaster-…gz` (dazu, falls
-gebaut, `.AppImage` und `.deb`).
-
-## Updater einmal komplett testen
-
-1. Version `0.1.0` wie oben veröffentlichen und installieren (Mac und/oder Windows).
-2. In `Cargo.toml` auf `0.1.1` anheben, `## 0.1.1` mit einer Zeile in `CHANGELOG.md`, `cargo update -w`,
-   committen, pushen; bauen und veröffentlichen wie oben.
-3. Die installierte 0.1.0 starten: oben erscheint **Update 0.1.1** → *Update and restart*. Danach muss die
-   App von selbst als 0.1.1 neu starten.
