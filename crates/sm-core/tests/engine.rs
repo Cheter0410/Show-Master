@@ -948,6 +948,7 @@ fn vamp_cue(rate: Option<u32>) -> CueKind {
         vamp: Some(Vamp {
             start: 4.0,
             end: 6.0,
+            timecode: true,
         }),
         ..AudioCue::default()
     })
@@ -1085,4 +1086,95 @@ fn release_loop_control_cue_and_stop_during_switch() {
     assert!(acts
         .iter()
         .any(|a| matches!(a, Action::DiscardVoice { voice } if *voice == pending)));
+}
+
+#[test]
+fn timecode_loops_back_with_the_vamp() {
+    let mut b = B::new();
+    b.0.timecode.start = Timecode::new(0, 0, 10, 0);
+    let c = b.cue(CueKind::Audio(AudioCue {
+        file: "a.wav".into(),
+        file_duration: Some(10.0),
+        file_rate: Some(44_100),
+        vamp: Some(Vamp {
+            start: 1.0,
+            end: 3.0,
+            timecode: true,
+        }),
+        ..AudioCue::default()
+    }));
+    // A memo fired by timecode at the loop start (file position 1.0 s).
+    let m = b.with(CueKind::Memo, |c| {
+        c.tc_trigger = Some(Timecode::new(0, 0, 11, 0))
+    });
+    let mut e = b.engine();
+    e.command(Command::SetPlayhead {
+        list: None,
+        cue: Some(c),
+    })
+    .unwrap();
+    e.command(Command::TcStart { from: None }).unwrap();
+    e.command(Command::Go { list: None }).unwrap();
+    let t0 = e.now();
+    let sr = u64::from(SR);
+    let fired = std::cell::Cell::new(0);
+    let check = |e: &mut Engine, secs_x10: u64, want: &str| {
+        e.advance(t0 + secs_x10 * sr / 10);
+        let n = e
+            .drain_events()
+            .iter()
+            .filter(|ev| matches!(ev.kind, EventKind::CueTriggered { cue } if cue == m))
+            .count();
+        fired.set(fired.get() + n);
+        assert_eq!(
+            e.snapshot().tc_position,
+            want,
+            "at {} s",
+            secs_x10 as f64 / 10.0
+        );
+    };
+    // Intro 3 s, then passes of 2 s over file 1..3 s: the timecode always
+    // shows 10 s + the file position.
+    check(&mut e, 26, "00:00:12:15");
+    check(&mut e, 56, "00:00:11:15");
+    check(&mut e, 116, "00:00:11:15");
+    // Once in the intro (1 s), then at every loop end (3, 5, 7, 9, 11 s).
+    assert_eq!(
+        fired.get(),
+        6,
+        "the trigger at the loop start fires every pass"
+    );
+    // Released at 11.6 s: it leaves the loop at the 13 s loop end, where the
+    // timecode no longer jumps back - both run on.
+    e.command(Command::ReleaseLoop { cue: c }).unwrap();
+    check(&mut e, 126, "00:00:12:15");
+    check(&mut e, 136, "00:00:13:15");
+    check(&mut e, 156, "00:00:15:15");
+}
+
+#[test]
+fn seek_moves_a_playing_cue_and_loads_a_stopped_one() {
+    let mut b = B::new();
+    let c = b.cue(audio(10.0));
+    let mut e = b.engine();
+    // Stopped: loaded there, GO starts there.
+    e.command(Command::SeekCue { cue: c, time: 2.0 }).unwrap();
+    assert_eq!(e.snapshot().loaded.get(&c).copied(), Some(2.0));
+    e.command(Command::Go { list: None }).unwrap();
+    let offset = |acts: &[Action]| {
+        acts.iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::PrepareVoice { spec, .. } => Some(spec.offset_frames),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert_eq!(offset(&e.drain_actions()), 2 * u64::from(SR));
+    // Playing: it continues from the new point.
+    e.advance(u64::from(SR));
+    e.command(Command::SeekCue { cue: c, time: 5.0 }).unwrap();
+    assert_eq!(offset(&e.drain_actions()), 5 * u64::from(SR));
+    let a = &e.snapshot().active[0];
+    assert!((a.elapsed - 5.0).abs() < 0.01 && a.cue == c);
 }

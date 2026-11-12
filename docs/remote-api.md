@@ -201,7 +201,7 @@ Cue:
             "start": 0.0, "end": null, "gain_db": 0.0, "fade_in": 0.0, "fade_out": 0.0,
             "fade_curve": "smooth"|"linear"|"equal_power"|"s_curve", "loop_count": 1 /* 0 = infinite */,
             "routing": [ { "src": 0, "out": 0, "db": 0.0 } ] /* empty = default routing */,
-            "file_rate": 44100 /* cached */, "vamp": { "start": 4.0, "end": 6.0 } /* optional: loops until released */ }
+            "file_rate": 44100 /* cached */, "vamp": { "start": 4.0, "end": 6.0, "timecode": true } /* optional: loops until released; timecode: a running generator jumps back with every loop */ }
   // { "type": "fade", "target": 5, "duration": 3.0, "curve": "equal_power", "gain_db": -120.0|null, "crosspoints": [], "stop_target": true }
   // { "type": "midi", "port": "Desk", "message": { "msg": "note_on", "channel": 1, "note": 60, "velocity": 100 } }
   //      msg: note_on | note_off | control_change{channel,controller,value} | program_change{channel,program}
@@ -269,6 +269,7 @@ Every command is `{ "cmd": "<name>", …fields }`.
 | `set_playhead` | `cue` (id or null), `list?` | |
 | `goto_number` | `number` | "Go to cue 14" – moves the playhead |
 | `start_cue`, `stop_cue`, `pause_cue`, `resume_cue`, `reset_cue` | `cue` | single cue; `start_cue` = preview, does not move the playhead |
+| `seek_cue` | `cue`, `time` | playhead of one cue: a playing cue continues from `time` s into its action, a stopped one is loaded there |
 | `release_loop` | `cue` | release a vamping audio cue: it leaves its loop at the next loop end (at least 0.5 s ahead, sample-exact crossover) and plays on; `tick.active[].vamping` is true until then |
 | `load_cue` | `cue`, `time` | load to time (s) |
 | `arm_cue` | `cue`, `armed` | |

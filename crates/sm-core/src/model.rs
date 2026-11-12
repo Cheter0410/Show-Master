@@ -732,6 +732,15 @@ pub struct AudioCue {
 pub struct Vamp {
     pub start: f64,
     pub end: f64,
+    /// A running timecode generator jumps back with every loop, so it
+    /// keeps matching the audio (and timecode triggers in the loop fire
+    /// again each pass).
+    #[serde(default = "yes")]
+    pub timecode: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl Default for AudioCue {
@@ -768,7 +777,11 @@ impl AudioCue {
         let start = self.start.max(0.0);
         let end = self.end.or(self.file_duration).unwrap_or(f64::INFINITY);
         let (a, b) = (v.start.max(start), v.end.min(end));
-        (b - a >= 0.01).then_some(Vamp { start: a, end: b })
+        (b - a >= 0.01).then_some(Vamp {
+            start: a,
+            end: b,
+            ..v
+        })
     }
 
     /// Total length in seconds; `None` = unknown or open-ended (looping

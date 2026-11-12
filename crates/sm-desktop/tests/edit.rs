@@ -637,3 +637,83 @@ fn copy_and_paste_cues_with_the_keyboard() {
     assert_eq!(copy["kind"]["target"], id_of(&env, "1"));
     assert_eq!(h.state().view.selection, vec![pasted.0]);
 }
+
+/// Press at `from`, move to `to` in steps, release (a drag; `from == to` = a click).
+fn pointer_drag(h: &mut Harness<'static, App>, from: egui::Pos2, to: egui::Pos2) {
+    let t0 = h.ctx.input(|i| i.time) + 1.0;
+    h.hover_at(from);
+    h.step();
+    let mut n = 0.0;
+    let mut ev = |h: &mut Harness<'static, App>, e: egui::Event| {
+        n += 1.0;
+        let input = h.input_mut();
+        input.time = Some(t0 + n * 0.05);
+        input.events.push(e);
+        h.step();
+    };
+    let press = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    ev(h, press(from, true));
+    if from != to {
+        for i in 1..=6 {
+            ev(
+                h,
+                egui::Event::PointerMoved(from + (to - from) * (i as f32 / 6.0)),
+            );
+        }
+    }
+    ev(h, press(to, false));
+    settle(h);
+}
+
+#[test]
+fn waveform_click_sets_the_playhead_and_the_strip_draws_a_loop() {
+    let env = Env::demo();
+    let mut h = harness(&env);
+    let id = id_of(&env, "1");
+    h.get_by_label("Cue 1 Intro").click();
+    settle(&mut h);
+    h.get_by_label("Audio tab").click();
+    for _ in 0..10 {
+        settle(&mut h);
+    }
+    let w = h.get_by_label("Waveform").rect();
+    let at = |f: f32, y: f32| egui::pos2(w.left() + w.width() * f, y);
+    // Intro is 2 s: a click at 50 % loads it to 1 s, the markers stay.
+    let mid = at(0.5, w.center().y - 10.0);
+    pointer_drag(&mut h, mid, mid);
+    env.wait(&mut h, "loaded to 1 s", |s| {
+        s["loaded"][id.to_string()]
+            .as_f64()
+            .is_some_and(|t| (t - 1.0).abs() < 0.02)
+    });
+    let kind = find_cue(&env.state(), id).unwrap()["kind"].clone();
+    assert_eq!(kind["start"], 0.0);
+    assert!(kind["end"].is_null());
+    // Dragging in the bottom strip from 25 % to 75 % makes a loop 0.5 .. 1.5 s.
+    let y = w.bottom() - 5.0;
+    pointer_drag(&mut h, at(0.25, y), at(0.75, y));
+    env.wait(&mut h, "loop drawn", |s| {
+        let v = &find_cue(s, id).unwrap()["kind"]["vamp"];
+        v["start"].as_f64().is_some_and(|x| (x - 0.5).abs() < 0.03)
+            && v["end"].as_f64().is_some_and(|x| (x - 1.5).abs() < 0.03)
+    });
+    // Dragging inside it moves it by 10 % (0.2 s), length kept.
+    pointer_drag(&mut h, at(0.5, y), at(0.6, y));
+    env.wait(&mut h, "loop moved", |s| {
+        let v = &find_cue(s, id).unwrap()["kind"]["vamp"];
+        v["start"].as_f64().is_some_and(|x| (x - 0.7).abs() < 0.03)
+            && v["end"].as_f64().is_some_and(|x| (x - 1.7).abs() < 0.03)
+    });
+    // The in point still moves by its handle.
+    pointer_drag(&mut h, at(0.0, w.center().y), at(0.1, w.center().y));
+    env.wait(&mut h, "in point moved", |s| {
+        find_cue(s, id).unwrap()["kind"]["start"]
+            .as_f64()
+            .is_some_and(|x| (x - 0.2).abs() < 0.03)
+    });
+}

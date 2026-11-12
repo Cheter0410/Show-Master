@@ -37,7 +37,7 @@ export interface AudioKind {
   /** native sample rate of the file (cached) */
   file_rate?: number | null;
   /** vamp: this part loops until it is released */
-  vamp?: { start: number; end: number } | null;
+  vamp?: { start: number; end: number; timecode?: boolean } | null;
 }
 
 export interface FadeKind {
@@ -448,7 +448,7 @@ export type Command =
   | { cmd: "set_playhead"; cue: number | null; list?: number }
   | { cmd: "goto_number"; number: string }
   | { cmd: "start_cue" | "stop_cue" | "pause_cue" | "resume_cue" | "reset_cue" | "release_loop"; cue: number }
-  | { cmd: "load_cue"; cue: number; time: number }
+  | { cmd: "load_cue" | "seek_cue"; cue: number; time: number }
   | { cmd: "arm_cue"; cue: number; armed: boolean }
   | { cmd: "reset" | "reset_show_clock" | "midi_panic" | "reset_clip" }
   | { cmd: "tc_start"; from?: string }

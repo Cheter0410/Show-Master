@@ -66,6 +66,13 @@ pub enum Command {
     ReleaseLoop {
         cue: CueId,
     },
+    /// Jump to `time` seconds into the cue's action (the waveform's
+    /// playhead): a playing cue continues from there, a stopped one is
+    /// loaded to that point (GO / preview start there).
+    SeekCue {
+        cue: CueId,
+        time: f64,
+    },
     PauseCue {
         cue: CueId,
     },
@@ -323,6 +330,7 @@ pub struct Snapshot {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Ev {
     Action,
+    VampWrap,
     VampSwitch,
     FadeOut,
     Continue,
@@ -366,6 +374,35 @@ struct Inst {
     vamp: VampState,
     /// The vamp voice fading out after the switch, until this global time.
     old_voice: Option<(VoiceId, u64)>,
+    /// Loop ends of a vamp the timecode follows.
+    wraps: Option<Wraps>,
+}
+
+/// Where the loop ends of a vamping voice fall, exactly: the `k`-th loop end
+/// is `intro + k * len` source frames into the voice.
+#[derive(Clone, Copy, Debug)]
+struct Wraps {
+    next: u64,
+    intro: u64,
+    len: u64,
+    rate: u64,
+    sr: u64,
+}
+
+impl Wraps {
+    /// Voice position (engine frames) of source position `n`.
+    fn at(&self, n: u64) -> u64 {
+        ((u128::from(n) * u128::from(self.sr) + u128::from(self.rate) / 2) / u128::from(self.rate))
+            as u64
+    }
+    /// Position of loop end `k`.
+    fn end(&self, k: u64) -> u64 {
+        self.at(self.intro + k * self.len)
+    }
+    /// Length (engine frames) of the pass that ends at loop end `k`.
+    fn pass(&self, k: u64) -> u64 {
+        self.end(k) - self.at((self.intro + k * self.len).saturating_sub(self.len))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -449,6 +486,17 @@ impl Inst {
         }
         if let VampState::Switching { at, .. } = self.vamp {
             consider(self.global(at), Ev::VampSwitch);
+        }
+        if let Some(w) = &self.wraps {
+            let local = self.pre + w.end(w.next);
+            let before_switch = match self.vamp {
+                VampState::Switching { at, .. } => local < at,
+                VampState::Looping => true,
+                _ => false,
+            };
+            if before_switch {
+                consider(self.global(local), Ev::VampWrap);
+            }
         }
         if let Some(c) = self.cont_at {
             consider(self.global(c), Ev::Continue);
@@ -824,6 +872,7 @@ impl Engine {
             stop_target_on_end: None,
             vamp: VampState::None,
             old_voice: None,
+            wraps: None,
         });
         self.emit(t, EventKind::CueTriggered { cue: cue_id });
         Some(id)
@@ -858,6 +907,7 @@ impl Engine {
                 }
             }
             Ev::VampSwitch => self.vamp_switch(ix, t),
+            Ev::VampWrap => self.vamp_wrap(ix, t),
             Ev::Continue => {
                 self.insts[ix].cont_at = None;
                 if let Some(next) = self.insts[ix].next {
@@ -1131,6 +1181,42 @@ impl Engine {
         Ok(())
     }
 
+    /// A loop end of a vamp the timecode follows: the generator jumps back by
+    /// exactly the length of the pass, so it keeps matching the audio.
+    fn vamp_wrap(&mut self, ix: usize, t: u64) {
+        let Some(w) = self.insts[ix].wraps else {
+            return;
+        };
+        let back = w.pass(w.next);
+        if let Some(w) = &mut self.insts[ix].wraps {
+            w.next += 1;
+        }
+        let old = self.tc;
+        if self.chase.is_some() || !old.running || t < old.anchor_sample + back {
+            return;
+        }
+        // Timecode shown `back` samples ago, anchored where that frame began
+        // (shifted by `back`): from here on the generator repeats the pass.
+        let sr = self.sr;
+        let e = old.frames_elapsed(t - back, sr);
+        let Some(frame_start) = old.sample_after_frames(e, sr) else {
+            return;
+        };
+        let day = old.rate.frames_per_day();
+        let pos = old.frame_at(t, sr);
+        let new = TcTransport {
+            rate: old.rate,
+            running: true,
+            anchor_sample: frame_start + back,
+            anchor_frame: (old.anchor_frame + e) % day,
+        };
+        self.tc = new;
+        self.tc_next_k = 0;
+        self.tc_pos_fired = false;
+        self.actions.push(Action::Timecode(new));
+        self.tc_jump(pos, new.anchor_frame, true, t);
+    }
+
     /// The switch point of a released vamp: cross over to the rest of the file.
     fn vamp_switch(&mut self, ix: usize, t: u64) {
         let VampState::Switching {
@@ -1238,6 +1324,27 @@ impl Engine {
                     fade_in_frames: fade_in,
                     curve: a.fade_curve,
                 });
+                let mut wraps = None;
+                if let (true, Some(v)) = (vamping, a.active_vamp().filter(|v| v.timecode)) {
+                    let rate = u64::from(a.file_rate.unwrap_or(self.sr).max(1));
+                    let src = |secs: f64| (secs.max(0.0) * rate as f64).round() as u64;
+                    let (s0, ls, le) = (src(a.start), src(v.start), src(v.end));
+                    let ls = ls.max(s0);
+                    if le > ls {
+                        let mut w = Wraps {
+                            next: 0,
+                            intro: le - s0,
+                            len: le - ls,
+                            rate,
+                            sr: u64::from(self.sr.max(1)),
+                        };
+                        // Started inside the loop (load to time): skip passed ends.
+                        while w.end(w.next) <= offset {
+                            w.next += 1;
+                        }
+                        wraps = Some(w);
+                    }
+                }
                 let fade = self.fr(a.fade_out);
                 let i = &mut self.insts[ix];
                 i.voice = Some(voice);
@@ -1246,6 +1353,7 @@ impl Engine {
                 } else {
                     VampState::None
                 };
+                i.wraps = wraps;
                 i.dur = dur;
                 if let (Some(d), true) = (dur, fade > 0) {
                     i.fade_frames = fade.min(d - offset);
@@ -2319,6 +2427,18 @@ impl Engine {
                 self.need_cue(cue)?;
                 let fade = self.fr(f64::from(self.show.settings.stop_fade_ms) / 1000.0);
                 self.stop_cue(cue, t, fade);
+                Ok(())
+            }
+            Command::SeekCue { cue, time } => {
+                self.need_cue(cue)?;
+                let running = self.insts.iter().any(|i| i.cue == cue && i.started);
+                if running {
+                    self.stop_cue(cue, t, self.fr(0.01));
+                }
+                self.load_cue(cue, time.max(0.0), t);
+                if running {
+                    self.trigger(cue, t, Trig::default());
+                }
                 Ok(())
             }
             Command::ReleaseLoop { cue } => {

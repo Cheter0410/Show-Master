@@ -67,6 +67,7 @@ fn vamp_loops_and_releases_without_a_glitch() {
             vamp: Some(Vamp {
                 start: 1.0,
                 end: 1.5,
+                timecode: true,
             }),
             ..AudioCue::default()
         }),

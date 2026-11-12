@@ -81,18 +81,42 @@ impl Waves {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// What a drag on the waveform moves.
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Marker {
+    /// In point (its handle).
     Start,
+    /// Out point (its handle).
     End,
+    /// One edge of the loop (in the loop strip).
+    LoopStart,
+    LoopEnd,
+    /// The whole loop; `grab` = pointer time minus loop start at the press.
+    LoopMove {
+        grab: f64,
+    },
+    /// A new loop drawn in the loop strip from `anchor`.
+    LoopNew {
+        anchor: f64,
+    },
+    /// The playhead (anywhere else): set where the pointer is released.
+    Seek,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct WaveDrag {
     cue: u64,
     marker: Marker,
+    /// Marker time; for loop drags the loop start.
     time: f64,
+    /// Loop end for loop drags.
+    time2: f64,
 }
+
+/// Height of the loop strip along the bottom of the waveform.
+const LOOP_STRIP: f32 = 18.0;
+/// Pointer distance (px) that grabs a marker or a loop edge.
+const GRAB_PX: f32 = 8.0;
 
 fn show_dir(state: &UiState) -> Option<PathBuf> {
     state
@@ -336,6 +360,21 @@ fn waveform(
         Some(d) if d.marker == Marker::End => d.time,
         _ => a.end.unwrap_or(duration).min(duration),
     };
+    // The loop as drawn: being dragged, or the cue's.
+    let shown_loop = match drag {
+        Some(d)
+            if matches!(
+                d.marker,
+                Marker::LoopStart
+                    | Marker::LoopEnd
+                    | Marker::LoopMove { .. }
+                    | Marker::LoopNew { .. }
+            ) =>
+        {
+            Some((d.time, d.time2))
+        }
+        _ => a.active_vamp().map(|v| (v.start, v.end)),
+    };
     let x_of = |t: f64| {
         if duration > 0.0 {
             rect.left() + (t / duration) as f32 * rect.width()
@@ -431,20 +470,43 @@ fn waveform(
                 Stroke::NONE,
             ));
         }
-        // vamp: an orange band along the bottom
-        if let Some(v) = a.active_vamp() {
-            let band = Rect::from_x_y_ranges(
-                x_of(v.start)..=x_of(v.end),
-                (rect.bottom() - 12.0)..=rect.bottom(),
-            );
-            painter.rect_filled(band, 2.0, theme::PAUSED.gamma_multiply(0.55));
-            painter.text(
-                band.center(),
-                egui::Align2::CENTER_CENTER,
-                "LOOP",
-                egui::FontId::proportional(10.0),
-                Color32::BLACK,
-            );
+        // Loop strip along the bottom: the vamp as an orange band (its
+        // part of the wave tinted too), or a hint how to draw one.
+        let strip =
+            Rect::from_x_y_ranges(rect.x_range(), (rect.bottom() - LOOP_STRIP)..=rect.bottom());
+        painter.rect_filled(strip, 0.0, Color32::from_black_alpha(70));
+        match shown_loop {
+            Some((ls, le)) => {
+                let (x0, x1) = (x_of(ls), x_of(le));
+                painter.rect_filled(
+                    Rect::from_x_y_ranges(x0..=x1, rect.top()..=strip.top()),
+                    0.0,
+                    theme::PAUSED.gamma_multiply(0.12),
+                );
+                let band = Rect::from_x_y_ranges(x0..=x1, strip.y_range());
+                painter.rect_filled(band, 3.0, theme::PAUSED.gamma_multiply(0.8));
+                for x in [x0, x1] {
+                    painter.vline(x, rect.y_range(), Stroke::new(1.0, theme::PAUSED));
+                }
+                if band.width() > 34.0 {
+                    painter.text(
+                        band.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "LOOP",
+                        egui::FontId::proportional(10.0),
+                        Color32::BLACK,
+                    );
+                }
+            }
+            None => {
+                painter.text(
+                    strip.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "drag here to loop a part",
+                    egui::FontId::proportional(10.0),
+                    Color32::from_gray(110),
+                );
+            }
         }
         // play cursor
         if let Some(act) = tick.active(id).filter(|t| t.phase == Phase::Running) {
@@ -467,49 +529,182 @@ fn waveform(
                 painter.vline(x_of(pos), rect.y_range(), Stroke::new(1.5, Color32::WHITE));
             }
             ui.ctx().request_repaint();
+        } else if let Some(l) = state.loaded(id) {
+            // Stopped but loaded: GO / preview start here.
+            let x = x_of(start + l);
+            painter.vline(x, rect.y_range(), Stroke::new(1.5, theme::LOADED));
+            painter.add(Shape::convex_polygon(
+                vec![
+                    pos2(x - 5.0, rect.top()),
+                    pos2(x + 5.0, rect.top()),
+                    pos2(x, rect.top() + 7.0),
+                ],
+                theme::LOADED,
+                Stroke::NONE,
+            ));
+        }
+        if let Some(d) = drag.filter(|d| d.marker == Marker::Seek) {
+            painter.vline(
+                x_of(d.time),
+                rect.y_range(),
+                Stroke::new(1.0, Color32::from_white_alpha(140)),
+            );
         }
     }
 
-    // Marker dragging: grab the nearest marker; commit on release.
+    // Pointer: a click (anywhere but a marker handle or the loop strip)
+    // sets the playhead; marker handles and the loop strip are dragged.
     let time_at =
         |x: f32| (((x - rect.left()) / rect.width()) as f64 * duration).clamp(0.0, duration);
     let min_len = 0.01;
+    let min_loop = 0.05;
+    let r2 = |t: f64| (t * 1000.0).round() / 1000.0;
     if duration > 0.0 {
-        if resp.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-        }
-        if let Some(p) = resp.interact_pointer_pos() {
+        let in_strip = |y: f32| y >= rect.bottom() - LOOP_STRIP;
+        let near = |px: f32, t: f64| (px - x_of(t)).abs() <= GRAB_PX;
+        // What a press at `p` grabs.
+        let grab = |p: egui::Pos2| -> (Marker, f64, f64) {
             let t = time_at(p.x);
-            let marker = match edit.insp.wave_drag {
-                Some(d) if d.cue == id => d.marker,
-                _ if (t - start).abs() <= (t - end).abs() => Marker::Start,
-                _ => Marker::End,
+            if in_strip(p.y) {
+                if let Some((ls, le)) = shown_loop {
+                    if near(p.x, ls) && (!near(p.x, le) || t <= (ls + le) / 2.0) {
+                        return (Marker::LoopStart, ls, le);
+                    }
+                    if near(p.x, le) {
+                        return (Marker::LoopEnd, ls, le);
+                    }
+                    if t > ls && t < le {
+                        return (Marker::LoopMove { grab: t - ls }, ls, le);
+                    }
+                }
+                return (Marker::LoopNew { anchor: t }, t, t);
+            }
+            if near(p.x, start) && (!near(p.x, end) || t <= (start + end) / 2.0) {
+                return (Marker::Start, start, 0.0);
+            }
+            if near(p.x, end) {
+                return (Marker::End, end, 0.0);
+            }
+            (Marker::Seek, t, 0.0)
+        };
+        // Cursor: what a press would grab.
+        if let Some(p) = resp.hover_pos() {
+            let icon = match edit
+                .insp
+                .wave_drag
+                .filter(|d| d.cue == id)
+                .map(|d| d.marker)
+            {
+                Some(Marker::LoopMove { .. }) => egui::CursorIcon::Grabbing,
+                Some(Marker::Seek) => egui::CursorIcon::Default,
+                Some(_) => egui::CursorIcon::ResizeHorizontal,
+                None => match grab(p).0 {
+                    Marker::LoopMove { .. } => egui::CursorIcon::Grab,
+                    Marker::Seek => egui::CursorIcon::Default,
+                    Marker::LoopNew { .. } => egui::CursorIcon::Crosshair,
+                    _ => egui::CursorIcon::ResizeHorizontal,
+                },
             };
-            if resp.drag_started() || resp.dragged() || resp.clicked() {
-                let time = match marker {
-                    Marker::Start => t.min(end - min_len).max(0.0),
-                    Marker::End => t.max(start + min_len).min(duration),
-                };
+            ui.ctx().set_cursor_icon(icon);
+        }
+        // Decide what is grabbed when the button goes down (the press origin
+        // is gone by the time a click is reported).
+        let held = edit.insp.wave_drag.is_some_and(|d| d.cue == id);
+        let press = ui.input(|i| i.pointer.press_origin());
+        let primary = ui.input(|i| i.pointer.primary_down());
+        if !held && primary && resp.is_pointer_button_down_on() {
+            if let Some(p) = press.filter(|p| rect.contains(*p)) {
+                let (marker, time, time2) = grab(p);
                 edit.insp.wave_drag = Some(WaveDrag {
                     cue: id,
                     marker,
                     time,
+                    time2,
                 });
+            }
+        }
+        if let (Some(p), Some(d)) = (
+            resp.interact_pointer_pos(),
+            edit.insp.wave_drag.as_mut().filter(|d| d.cue == id),
+        ) {
+            let t = time_at(p.x);
+            match d.marker {
+                Marker::Start => d.time = t.min(end - min_len).max(0.0),
+                Marker::End => d.time = t.max(start + min_len).min(duration),
+                Marker::Seek => d.time = t,
+                Marker::LoopStart => d.time = t.clamp(start, d.time2 - min_loop),
+                Marker::LoopEnd => d.time2 = t.clamp(d.time + min_loop, end),
+                Marker::LoopMove { grab } => {
+                    let len = d.time2 - d.time;
+                    let s = (t - grab).clamp(start, (end - len).max(start));
+                    d.time = s;
+                    d.time2 = s + len;
+                }
+                Marker::LoopNew { anchor } => {
+                    let a = anchor.clamp(start, end);
+                    let b = t.clamp(start, end);
+                    d.time = a.min(b);
+                    d.time2 = a.max(b);
+                }
             }
         }
         if resp.drag_stopped() || resp.clicked() {
             if let Some(d) = edit.insp.wave_drag.take().filter(|d| d.cue == id) {
-                let t = (d.time * 100.0).round() / 100.0;
                 let patch = match d.marker {
-                    Marker::Start => json!({ "start": t }),
-                    Marker::End if t >= (duration * 100.0).round() / 100.0 => {
-                        json!({ "end": Value::Null })
+                    Marker::Start => Some(json!({ "start": r2(d.time) })),
+                    Marker::End if r2(d.time) >= r2(duration) => {
+                        Some(json!({ "end": Value::Null }))
                     }
-                    Marker::End => json!({ "end": t }),
+                    Marker::End => Some(json!({ "end": r2(d.time) })),
+                    Marker::LoopStart
+                    | Marker::LoopEnd
+                    | Marker::LoopMove { .. }
+                    | Marker::LoopNew { .. } => {
+                        // A click in the strip (or a tiny drag) makes no loop.
+                        (d.time2 - d.time >= min_loop)
+                            .then(|| json!({ "vamp": { "start": r2(d.time), "end": r2(d.time2) } }))
+                    }
+                    Marker::Seek => {
+                        // The playhead: a playing cue jumps there, a stopped
+                        // one is loaded there (GO / preview start there).
+                        let at = match a.active_vamp() {
+                            // Past the loop the cue only gets after a release.
+                            Some(v) => d.time.clamp(start, v.end - min_len),
+                            None => d.time.clamp(start, end),
+                        };
+                        out.push(Out::Cmd(json!({
+                            "cmd": "seek_cue", "cue": id, "time": r2(at - start),
+                        })));
+                        None
+                    }
                 };
-                out.push(Out::Cmd(kind_patch(id, patch)));
+                if let Some(patch) = patch {
+                    out.push(Out::Cmd(kind_patch(id, patch)));
+                }
             }
         }
+        // Released without a click or drag being reported (e.g. outside):
+        // drop the grab.
+        if !primary
+            && !resp.drag_stopped()
+            && !resp.clicked()
+            && edit.insp.wave_drag.is_some_and(|d| d.cue == id)
+        {
+            edit.insp.wave_drag = None;
+        }
+        // Right-click: remove the loop, play from the start.
+        resp.context_menu(|ui| {
+            if a.vamp.is_some() && ui.button("Remove loop").clicked() {
+                out.push(Out::Cmd(kind_patch(id, json!({ "vamp": Value::Null }))));
+                ui.close();
+            }
+            if ui.button("Play from the start").clicked() {
+                out.push(Out::Cmd(
+                    json!({ "cmd": "seek_cue", "cue": id, "time": 0.0 }),
+                ));
+                ui.close();
+            }
+        });
     }
     // Info line under the waveform
     ui.horizontal(|ui| {
@@ -772,7 +967,8 @@ fn vamp_rows(ui: &mut Ui, edit: &mut EditState, out: &mut Vec<Out>, id: u64, a: 
         .on_hover_text(
             "The part loops until it is released (Release loop in Live, a Control cue \
              \"Release loop\", or OSC /showmaster/cue/<n>/release); then the cue plays \
-             on to the end. Shown in orange on the waveform.",
+             on to the end. Shown in orange on the waveform: drag in the strip along its \
+             bottom to draw, move or resize the loop.",
         )
         .changed()
     {
@@ -810,6 +1006,22 @@ fn vamp_rows(ui: &mut Ui, edit: &mut EditState, out: &mut Vec<Out>, id: u64, a: 
         v.end,
         move |x| kind_patch(id, json!({ "vamp": { "start": v.start, "end": x } })),
     );
+    ui.end_row();
+    label(ui, "");
+    let mut tc = v.timecode;
+    if ui
+        .checkbox(&mut tc, "Timecode loops too")
+        .on_hover_text(
+            "While the part loops, a running timecode jumps back with it, so it keeps \
+             matching the audio (timecode triggers in the loop fire again each pass).",
+        )
+        .changed()
+    {
+        out.push(Out::Cmd(kind_patch(
+            id,
+            json!({ "vamp": { "timecode": tc } }),
+        )));
+    }
     ui.end_row();
     if a.active_vamp().is_none() {
         label(ui, "");
