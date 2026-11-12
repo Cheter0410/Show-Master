@@ -87,3 +87,41 @@ fn quit_button_asks_nothing_when_idle_and_requests_close() {
     settle(&mut h);
     assert!(h.query_by_label("Quit Show Master?").is_none());
 }
+
+#[test]
+fn kiosk_mode_goes_live_and_locks_until_unlocked() {
+    let env = Env::demo();
+    let mut h = env.harness();
+    h.state_mut().prefs.set_kiosk(true, "4321");
+    env.wait(&mut h, "kiosk goes live", |s| s["mode"] == "live");
+    settle(&mut h);
+    assert!(h.query_by_label("Setup").is_none());
+    assert!(h.query_by_label("EDIT").is_none());
+    assert!(h.query_by_label("Quit").is_none());
+    // GO still works.
+    assert!(h.query_by_label("GO").is_some());
+    // Quitting asks for the PIN first.
+    h.state_mut().request_quit(&egui::Context::default());
+    settle(&mut h);
+    assert!(h
+        .query_by_label("Unlock editing, Setup and Quit on this computer?")
+        .is_none());
+    h.get_by_label("Cancel").click();
+    settle(&mut h);
+    h.get_by_label("Unlock").click();
+    settle(&mut h);
+    h.get_by_label("Kiosk PIN").type_text("1111");
+    h.key_press(egui::Key::Enter);
+    settle(&mut h);
+    assert!(
+        h.query_by_label("Setup").is_none(),
+        "wrong PIN unlocks nothing"
+    );
+    h.get_by_label("Kiosk PIN").type_text("4321");
+    h.key_press(egui::Key::Enter);
+    settle(&mut h);
+    assert!(h.query_by_label("EDIT").is_some());
+    h.get_by_label("Lock").click();
+    settle(&mut h);
+    assert!(h.query_by_label("EDIT").is_none());
+}

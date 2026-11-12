@@ -66,6 +66,9 @@ pub(super) enum Out {
     SetTouch(crate::prefs::TouchPref),
     /// Pair a new device with this role and show its QR code.
     Pair(&'static str),
+    SetAutostart(bool),
+    SetOpenLast(bool),
+    SetKiosk(bool, String),
 }
 
 #[derive(Default)]
@@ -93,6 +96,12 @@ pub struct SetupState {
     touch_active: bool,
     /// Just paired: (QR URL, device name), shown until dismissed.
     pub pair_shown: Option<(String, String)>,
+    /// Per-machine settings mirrored from the preferences while Setup is open.
+    open_last: bool,
+    kiosk: bool,
+    kiosk_pin: String,
+    /// Start with the computer (read from the system when Setup opens).
+    autostart: Option<bool>,
 }
 
 impl SetupState {
@@ -143,6 +152,7 @@ pub fn capture_keys(app: &mut App, ctx: &egui::Context) {
 pub fn show(app: &mut App, ctx: &egui::Context) {
     if !app.setup.open {
         app.setup.capture = None;
+        app.setup.autostart = None;
         return;
     }
     let live = app.is_live();
@@ -154,6 +164,12 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     let mut open = true;
     {
         app.setup.touch_pref = app.prefs.touch;
+        app.setup.open_last = app.prefs.open_last;
+        app.setup.kiosk = app.prefs.kiosk;
+        app.setup.kiosk_pin.clone_from(&app.prefs.kiosk_pin);
+        if app.setup.autostart.is_none() {
+            app.setup.autostart = Some(crate::autostart::is_enabled());
+        }
         app.setup.touch_active = app.touch_mode();
         let st = &mut app.setup;
         let s = &app.client.state;
@@ -279,6 +295,19 @@ fn flush(app: &mut App) {
             Out::ExportDiagnostics => app.export_diagnostics(),
             Out::OpenLogFolder => app.open_log_folder(),
             Out::SetTouch(t) => app.prefs.set_touch(t),
+            Out::SetAutostart(on) => match crate::autostart::set_enabled(on) {
+                Ok(()) => {
+                    app.setup.autostart = Some(on);
+                    app.toast(if on {
+                        "Show Master now starts with this computer"
+                    } else {
+                        "Show Master no longer starts with this computer"
+                    });
+                }
+                Err(e) => app.toast_error(format!("Start with the computer: {e}")),
+            },
+            Out::SetOpenLast(on) => app.prefs.set_open_last(on),
+            Out::SetKiosk(on, pin) => app.prefs.set_kiosk(on, &pin),
             Out::Pair(role) => {
                 let page = if role == "view" { "view" } else { "remote" };
                 app.cmd_then(

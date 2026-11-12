@@ -6,6 +6,7 @@
 //! slow or busy window never affects playback.
 
 pub mod app;
+pub mod autostart;
 pub mod background;
 pub mod client;
 pub mod clipboard;
@@ -73,14 +74,24 @@ pub fn run(
         "Show Master",
         options,
         Box::new(move |cc| {
+            // A show given on the command line is already open in the runtime.
+            let has_show = !handle.state()["show_path"].is_null();
             let client = client::Client::new(handle, rt.clone());
             open_files::install();
             open_files::set_repaint_context(&cc.egui_ctx);
             background::set_repaint_context(&cc.egui_ctx);
             open_files::install_menu();
+            let prefs = prefs::Prefs::load();
+            let recent = recent::Recent::load();
+            // "Open the last show at start" (when started without a show).
+            let open = open.or_else(|| {
+                (prefs.open_last && !has_show)
+                    .then(|| recent.existing().next().cloned())
+                    .flatten()
+            });
             let mut app = App::new(&cc.egui_ctx, client, open);
-            app.recent = recent::Recent::load();
-            app.prefs = prefs::Prefs::load();
+            app.recent = recent;
+            app.prefs = prefs;
             app.global_hotkeys = global_hotkeys::GlobalHotkeys::native();
             let tray = tray::start(app.tablet_address(), &rt);
             Ok(Box::new(Window(app, tray)))

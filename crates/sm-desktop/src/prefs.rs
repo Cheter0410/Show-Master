@@ -79,6 +79,9 @@ struct Stored {
     global_hotkeys: BTreeMap<String, String>,
     background_hint_seen: bool,
     window: Option<WindowGeometry>,
+    open_last: bool,
+    kiosk: bool,
+    kiosk_pin: String,
 }
 
 pub struct Prefs {
@@ -89,6 +92,12 @@ pub struct Prefs {
     /// The "keeps running in the background" note was confirmed once.
     pub background_hint_seen: bool,
     pub window: Option<WindowGeometry>,
+    /// Open the most recent show when started without one.
+    pub open_last: bool,
+    /// Kiosk: start in Live mode with editing, Setup and Quit locked.
+    pub kiosk: bool,
+    /// PIN that unlocks kiosk mode ("" = unlock asks for confirmation only).
+    pub kiosk_pin: String,
 }
 
 impl Default for Prefs {
@@ -115,6 +124,9 @@ impl Prefs {
             global_hotkeys: stored.global_hotkeys,
             background_hint_seen: stored.background_hint_seen,
             window: stored.window.filter(WindowGeometry::sane),
+            open_last: stored.open_last,
+            kiosk: stored.kiosk,
+            kiosk_pin: stored.kiosk_pin,
         }
     }
 
@@ -151,6 +163,21 @@ impl Prefs {
         }
     }
 
+    pub fn set_open_last(&mut self, on: bool) {
+        if self.open_last != on {
+            self.open_last = on;
+            self.save();
+        }
+    }
+
+    pub fn set_kiosk(&mut self, on: bool, pin: &str) {
+        if self.kiosk != on || self.kiosk_pin != pin {
+            self.kiosk = on;
+            self.kiosk_pin = pin.to_string();
+            self.save();
+        }
+    }
+
     pub fn set_touch(&mut self, touch: TouchPref) {
         if self.touch != touch {
             self.touch = touch;
@@ -168,6 +195,9 @@ impl Prefs {
             global_hotkeys: self.global_hotkeys.clone(),
             background_hint_seen: self.background_hint_seen,
             window: self.window,
+            open_last: self.open_last,
+            kiosk: self.kiosk,
+            kiosk_pin: self.kiosk_pin.clone(),
         };
         let Ok(text) = serde_json::to_string_pretty(&stored) else {
             return;

@@ -65,6 +65,8 @@ enum Modal {
     RunsInBackground,
     /// Name for a new template from the selected cues.
     SaveTemplate(String),
+    /// Kiosk unlock: PIN typed so far, and what to do afterwards (quit).
+    Unlock(String, bool),
     Message {
         title: String,
         text: String,
@@ -91,6 +93,10 @@ pub struct App {
     clip: Option<String>,
     /// Text to hand to the system clipboard in the next pass.
     to_clipboard: Option<String>,
+    /// Kiosk mode was unlocked in this session.
+    kiosk_unlocked: bool,
+    /// Kiosk start-up (switch to Live) done.
+    kiosk_started: bool,
     pub client: Client,
     pub view: View,
     pub edit: crate::edit::EditState,
@@ -144,6 +150,8 @@ impl App {
             jobs: Vec::new(),
             clip: None,
             to_clipboard: None,
+            kiosk_unlocked: false,
+            kiosk_started: false,
             style_key: None,
             prefs: crate::prefs::Prefs::default(),
             global_hotkeys: Default::default(),
@@ -963,6 +971,7 @@ impl App {
                     self.cmd(json!({ "cmd": "start_cue", "cue": cue }));
                 }
             }
+            "toggle_mode" if self.kiosk_locked() => {}
             "toggle_mode" => self.request_mode(if self.is_live() {
                 Mode::Edit
             } else {
@@ -1076,6 +1085,13 @@ impl App {
         if let Some(path) = self.open_at_start.take() {
             self.open_show(path);
         }
+        // Kiosk: go live once the show is there (no pre-flight dialog to answer).
+        if self.prefs.kiosk && !self.kiosk_started && !self.client.state.version.is_empty() {
+            self.kiosk_started = true;
+            if !self.is_live() {
+                self.cmd(json!({ "cmd": "set_mode", "mode": "live" }));
+            }
+        }
         // Files the OS asked us to open (double-click, Open with, Dock).
         let requested = crate::open_files::take();
         if !requested.is_empty() {
@@ -1173,11 +1189,20 @@ impl App {
             .or_else(|| r.urls.first().map(|u| format!("{u}/view")))
     }
 
+    /// Kiosk mode is on and locked: no editing, Setup or Quit.
+    pub fn kiosk_locked(&self) -> bool {
+        self.prefs.kiosk && !self.kiosk_unlocked
+    }
+
     /// Really quit Show Master (Quit button, Cmd+Q, tray menu): asks first
     /// when cues are running, in Live mode with quit protection, or with
     /// unsaved changes.
     pub fn request_quit(&mut self, ctx: &egui::Context) {
         if self.allow_close {
+            return;
+        }
+        if self.kiosk_locked() {
+            self.modal = Some(Modal::Unlock(String::new(), true));
             return;
         }
         let s = &self.client.state;
@@ -1355,7 +1380,38 @@ impl App {
                         .size(16.0),
                 );
             }
+            if self.kiosk_locked() {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .button("Unlock")
+                        .on_hover_text("Kiosk mode: unlock editing, Setup and Quit")
+                        .clicked()
+                    {
+                        self.modal = Some(Modal::Unlock(String::new(), false));
+                    }
+                    ui.label(RichText::new("KIOSK").small().color(theme::MUTED));
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&self.client.state.show.name)
+                                    .strong()
+                                    .size(17.0),
+                            )
+                            .truncate(),
+                        );
+                    });
+                });
+                return;
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if self.prefs.kiosk
+                    && ui
+                        .button("Lock")
+                        .on_hover_text("Back to kiosk mode")
+                        .clicked()
+                {
+                    self.kiosk_unlocked = false;
+                }
                 if ui
                     .button("Quit")
                     .on_hover_text(
@@ -1915,6 +1971,52 @@ impl App {
                             keep = false;
                             self.prefs.set_background_hint_seen();
                             self.hide_window(ui.ctx());
+                        }
+                    });
+                }
+                Modal::Unlock(typed, quit) => {
+                    ui.heading("Unlock");
+                    let has_pin = !self.prefs.kiosk_pin.is_empty();
+                    ui.label(if has_pin {
+                        "Enter the kiosk PIN to unlock editing, Setup and Quit."
+                    } else {
+                        "Unlock editing, Setup and Quit on this computer?"
+                    });
+                    let mut text = typed.clone();
+                    let mut enter = false;
+                    if has_pin {
+                        let resp = ui.add(
+                            egui::TextEdit::singleline(&mut text)
+                                .password(true)
+                                .hint_text("PIN")
+                                .desired_width(160.0),
+                        );
+                        ui.ctx().accesskit_node_builder(resp.id, |b| b.set_label("Kiosk PIN"));
+                        enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        if !enter && !resp.has_focus() && typed.is_empty() {
+                            resp.request_focus();
+                        }
+                        if text != *typed {
+                            next = Some(Modal::Unlock(text.clone(), *quit));
+                        }
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            keep = false;
+                            next = None;
+                        }
+                        if ui.button("Unlock").clicked() || enter {
+                            if !has_pin || text == self.prefs.kiosk_pin {
+                                keep = false;
+                                next = None;
+                                self.kiosk_unlocked = true;
+                                if *quit {
+                                    self.request_quit(ui.ctx());
+                                }
+                            } else {
+                                next = Some(Modal::Unlock(String::new(), *quit));
+                                self.toast_error("Wrong PIN");
+                            }
                         }
                     });
                 }

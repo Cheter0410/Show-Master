@@ -135,6 +135,53 @@ pub(super) fn general_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
                 },
             );
         });
+        row(ui, "Start", |ui| {
+            let mut on = st.autostart.unwrap_or(false);
+            if ui
+                .checkbox(&mut on, "Start Show Master with this computer")
+                .changed()
+            {
+                st.outbox_push(super::Out::SetAutostart(on));
+            }
+        });
+        row(ui, "", |ui| {
+            let mut on = st.open_last;
+            if ui
+                .checkbox(&mut on, "Open the last show at start")
+                .changed()
+            {
+                st.outbox_push(super::Out::SetOpenLast(on));
+            }
+        });
+        row(ui, "Kiosk mode", |ui| {
+            let mut on = st.kiosk;
+            if ui
+                .checkbox(&mut on, "Start in Live mode, lock editing, Setup and Quit")
+                .on_hover_text(
+                    "For fixed installations: the show runs, GO / Stop / PANIC work, nothing \
+                     can be changed. \"Unlock\" (top right) asks for the kiosk PIN.",
+                )
+                .changed()
+            {
+                let pin = st.kiosk_pin.clone();
+                st.outbox_push(super::Out::SetKiosk(on, pin));
+            }
+        });
+        row(ui, "Kiosk PIN", |ui| {
+            if let Some(v) =
+                text_field(ui, &mut st.drafts, "kiosk_pin", &st.kiosk_pin.clone(), 90.0)
+            {
+                let v = v.trim().to_string();
+                if v.chars().all(|c| c.is_ascii_digit()) && v.len() <= 12 {
+                    st.kiosk_pin = v.clone();
+                    let on = st.kiosk;
+                    st.outbox_push(super::Out::SetKiosk(on, v));
+                } else {
+                    st.error("The kiosk PIN may only contain digits (max. 12).");
+                }
+            }
+            unit(ui, "empty = Unlock only asks for confirmation");
+        });
     });
 
     panic_messages(ui, st, s);

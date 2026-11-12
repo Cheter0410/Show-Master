@@ -105,6 +105,9 @@ Eine neue Version veröffentlichen: siehe [`docs/release-anleitung.md`](docs/rel
   Show (auch in einem zweiten Show-Master-Fenster) mit Strg/Cmd+V einfügen; Audiopfade und Fade-/Control-
   Ziele werden mitgenommen. Rechtsklick → *Save as template* speichert Cues als Vorlage, *Insert template*
   fügt sie in jede Show ein.
+- **Feste Installationen:** *Setup → General → This computer*: mit dem Rechner starten, letzte Show öffnen,
+  **Kiosk-Modus** (startet im Live-Modus; Bearbeiten, Setup und Beenden sind gesperrt, *Unlock* mit
+  Kiosk-PIN).
 - **Show-Paket:** *File → Export show package* packt Show und alle Audiodateien in eine `.smpack`-Datei;
   *Open show package* (oder Datei aufs Fenster ziehen) packt sie auf einem anderen Rechner in einen Ordner aus.
 - **Cue-Sheet:** *File → Export cue sheet* als PDF (zum Ausdrucken) oder CSV (Tabelle), mit Notizen.
