@@ -216,8 +216,12 @@ cmd_release() {
       # Erste Veröffentlichung dieser Version, oder ein Entwurf wartet: Tag setzen, falls er fehlt.
       if ! git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
         git tag "v$v"
-        git push -q origin "v$v" || fail "Konnte den Tag v$v nicht pushen."
       fi
+      # Immer hochschieben: der andere Rechner baut genau diesen Stand
+      # (auch wenn ein abgebrochener Lauf den Tag nur lokal angelegt hat).
+      git push -q origin "v$v" 2>/dev/null \
+        || git ls-remote --exit-code --tags origin "v$v" >/dev/null \
+        || fail "Konnte den Tag v$v nicht pushen."
       ;;
   esac
 
