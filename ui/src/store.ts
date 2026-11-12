@@ -9,6 +9,8 @@ export interface Toast {
   id: number;
   level: "info" | "warn" | "error" | "alarm";
   text: string;
+  /** optional button in the toast (e.g. "Undo" after a delete – the only undo on a touch screen) */
+  action?: { label: string; run: () => void };
 }
 
 export interface AppState {
@@ -86,11 +88,11 @@ export function appendLog(entries: LogEntry[]): void {
 }
 
 let toastId = 1;
-export function toast(text: string, level: Toast["level"] = "info", ttlMs = 4000): void {
+export function toast(text: string, level: Toast["level"] = "info", ttlMs = 4000, action?: Toast["action"]): void {
   // Collapse identical toasts (e.g. a held hotkey producing the same error).
   if (state.toasts.some((t) => t.text === text && t.level === level)) return;
   const id = toastId++;
-  setApp({ toasts: [...state.toasts.slice(-4), { id, level, text }] });
+  setApp({ toasts: [...state.toasts.slice(-4), { id, level, text, ...(action ? { action } : {}) }] });
   setTimeout(() => dismissToast(id), ttlMs);
 }
 

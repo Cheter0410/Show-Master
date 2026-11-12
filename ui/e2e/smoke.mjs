@@ -71,6 +71,41 @@ function watch(page) {
 const shot = (page, name) => page.screenshot({ path: join(SHOTS, name) });
 const noHScroll = (page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && document.body.scrollWidth <= window.innerWidth);
 const nextNumber = (page) => page.locator('[data-testid="next-number"]').first().innerText();
+const hasCue = (id) => {
+  const walk = (cues) => cues.some((c) => c.id === id || (c.kind.type === "group" && walk(c.kind.children)));
+  return mock.getState().show.cue_lists.some((l) => walk(l.cues));
+};
+/** testids that are not fully inside the viewport (or missing / hidden) */
+const outside = (page, ids) =>
+  page.evaluate((ids) => {
+    const bad = [];
+    for (const id of ids) {
+      const el = [...document.querySelectorAll(`[data-testid="${id}"]`)].find((e) => e.getClientRects().length > 0);
+      const r = el?.getBoundingClientRect();
+      if (!r || r.width === 0 || r.left < 0 || r.top < 0 || r.right > innerWidth + 0.5 || r.bottom > innerHeight + 0.5) bad.push(id);
+    }
+    return bad;
+  }, ids);
+/** visible buttons / tabs smaller than `min` px in either direction */
+const tinyTargets = (page, selector, min) =>
+  page.evaluate(
+    ([sel, min]) =>
+      [...document.querySelectorAll(sel)]
+        .filter((b) => b.getClientRects().length > 0)
+        .map((b) => ({ r: b.getBoundingClientRect(), t: (b.getAttribute("data-testid") || b.getAttribute("aria-label") || b.textContent || "").trim().slice(0, 20) }))
+        .filter((x) => x.r.height < min - 0.5 || x.r.width < min - 0.5)
+        .map((x) => `${x.t}:${Math.round(x.r.width)}x${Math.round(x.r.height)}`),
+    [selector, min],
+  );
+async function longPress(ctx, page, selector, ms = 800) {
+  const box = await page.locator(selector).first().boundingBox();
+  const cdp = await ctx.newCDPSession(page);
+  const pt = { x: box.x + Math.min(box.width / 2, 160), y: box.y + box.height / 2 };
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [pt] });
+  await page.waitForTimeout(ms);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
+}
 
 try {
   // ------------------------------------------------------------------ desktop
@@ -112,6 +147,50 @@ try {
     await page.waitForFunction(() => !document.querySelector('[data-cue="5"] .t-name')?.textContent?.includes("(edited)"));
   });
 
+  await step("Delete button: disabled without selection, deletes the selection, toast offers undo", async () => {
+    await page.evaluate(() => document.querySelector('[data-testid="cuetable"] .tbody')?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    if (!(await page.locator('[data-testid="tb-delete"]').isDisabled())) throw new Error("Delete enabled without a selection");
+    await page.click('[data-cue="8"] .t-name');
+    await page.click('[data-testid="tb-delete"]');
+    await page.waitForSelector('[data-cue="8"]', { state: "detached" });
+    if (hasCue(8)) throw new Error("cue 8 still on the server");
+    const t = await page.locator('[data-testid="toast"]', { hasText: "Deleted 1 cue" }).innerText();
+    if (!/undo with Ctrl\/Cmd\+Z/.test(t)) throw new Error(`toast: ${t}`);
+    await page.click('[data-testid="toast-action"]');
+    await page.waitForSelector('[data-cue="8"]');
+    if (!hasCue(8)) throw new Error("undo from the toast did not restore cue 8");
+  });
+
+  await step("Backspace deletes the selected cue (Mac delete key); Cmd+Z restores it", async () => {
+    await page.click('[data-cue="10"] .t-name');
+    await page.keyboard.press("Backspace");
+    await page.waitForSelector('[data-cue="10"]', { state: "detached" });
+    if (hasCue(10)) throw new Error("cue 10 still on the server");
+    await page.keyboard.press("Meta+KeyZ");
+    await page.waitForSelector('[data-cue="10"]');
+  });
+
+  await step("Backspace while typing in a field edits text, it does not delete the cue", async () => {
+    await page.click('[data-cue="5"] .t-name');
+    await page.click('[data-testid="insp-name"]');
+    await page.keyboard.press("End");
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(100);
+    if (!hasCue(5)) throw new Error("cue 5 was deleted while typing");
+    await page.keyboard.type("e");
+    await page.keyboard.press("Tab");
+  });
+
+  await step("right-click opens the row context menu (Delete / Duplicate / Move); Escape closes it without panic", async () => {
+    await page.click('[data-cue="6"] .t-name', { button: "right" });
+    await page.waitForSelector('[data-testid="row-menu"] [data-testid="ctx-delete"]');
+    await page.waitForSelector('[data-testid="row-menu"] [data-testid="ctx-duplicate"]');
+    await page.keyboard.press("Escape");
+    await page.waitForSelector('[data-testid="row-menu"]', { state: "detached" });
+    if (mock.getState().mode !== "edit") throw new Error("mode changed");
+    await page.click('[data-cue="5"] .t-name');
+  });
+
   await shot(page, "desktop-edit.png");
   await page.click('[data-testid="insp-tab-kind"]');
   await page.waitForSelector('[data-testid="waveform"]');
@@ -121,6 +200,81 @@ try {
   await page.click('[data-testid="insp-tab-routing"]');
   await page.waitForSelector('[data-testid="routing"]');
   await shot(page, "desktop-edit-routing.png");
+
+  // ---- desktop web view on touch devices (phone / tablet), still in Edit mode ----
+  const DEVICE_SIZES = [[360, 640], [390, 844], [844, 390], [768, 1024], [1024, 768], [1180, 820]];
+  const touchDesk = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true });
+  const tp = await touchDesk.newPage();
+  watch(tp);
+  await tp.goto(ADMIN + "/");
+  await tp.waitForSelector('[data-testid="cuetable"] [data-cue]');
+  for (const [w, h] of DEVICE_SIZES) {
+    await tp.setViewportSize({ width: w, height: h });
+    await tp.waitForTimeout(150);
+    await step(`edit view ${w}×${h} (touch): no horizontal scroll; GO, PANIC, Add, Delete reachable; targets ≥ 44 px`, async () => {
+      if (!(await noHScroll(tp))) throw new Error("page scrolls horizontally");
+      const menu = w < 600 || h <= 500 ? "tb-more" : "tb-file-menu";
+      const bad = await outside(tp, ["go", "panic", "tb-add-menu", "tb-delete", "tb-duplicate", "tb-undo", "mode-live", menu]);
+      if (bad.length) throw new Error(`outside the viewport: ${bad.join(", ")}`);
+      const tiny = await tinyTargets(tp, ".toolbar button, .insp-tabs button, .trow .t-gutter", 44);
+      if (tiny.length) throw new Error(`too small: ${tiny.join(", ")}`);
+    });
+  }
+  await tp.setViewportSize({ width: 390, height: 844 });
+  await tp.waitForTimeout(150);
+  await shot(tp, "desktop-phone-edit.png");
+  await step("phone: long-press on a cue opens the context menu; Delete there deletes; toast Undo restores", async () => {
+    await longPress(touchDesk, tp, '[data-cue="9"] .t-name');
+    await tp.waitForSelector('[data-testid="row-menu"] [data-testid="ctx-delete"]');
+    await shot(tp, "desktop-phone-context-menu.png");
+    await tp.tap('[data-testid="ctx-delete"]');
+    await tp.waitForSelector('[data-cue="9"]', { state: "detached" });
+    if (hasCue(9)) throw new Error("cue 9 still on the server");
+    await tp.tap('[data-testid="toast-action"]');
+    await tp.waitForSelector('[data-cue="9"]');
+  });
+  await step("phone: tap selects; inspector Delete is visible; Move down via the context menu reorders", async () => {
+    await tp.tap('[data-cue="2"] .t-name');
+    await tp.waitForSelector('[data-testid="insp-delete"]');
+    if ((await outside(tp, ["insp-delete", "insp-duplicate", "tb-delete"])).length) throw new Error("delete buttons outside the viewport");
+    await shot(tp, "desktop-phone-inspector.png");
+    await longPress(touchDesk, tp, '[data-cue="2"] .t-name');
+    await tp.tap('[data-testid="ctx-down"]');
+    await tp.waitForFunction(() => document.querySelectorAll("[data-cue]")[2]?.getAttribute("data-cue") === "2");
+    await longPress(touchDesk, tp, '[data-cue="2"] .t-name');
+    await tp.tap('[data-testid="ctx-up"]');
+    await tp.waitForFunction(() => document.querySelectorAll("[data-cue]")[1]?.getAttribute("data-cue") === "2");
+  });
+  await step("phone: the ⋯ menu opens as a sheet and reaches Setup (full screen)", async () => {
+    await tp.tap('[data-testid="tb-more"]');
+    await tp.waitForSelector('[data-testid="menu-setup"]');
+    await shot(tp, "desktop-phone-menu.png");
+    await tp.tap('[data-testid="menu-setup"]');
+    await tp.waitForSelector('[data-testid="setup"]');
+    const box = await tp.locator('[data-testid="setup"]').boundingBox();
+    if (box.width < 389 || box.height < 843) throw new Error(`setup is ${Math.round(box.width)}×${Math.round(box.height)}`);
+    if (!(await noHScroll(tp))) throw new Error("setup scrolls horizontally");
+    await shot(tp, "desktop-phone-setup.png");
+    await tp.tap('[data-testid="setup"] [aria-label="Close"]');
+    await tp.waitForSelector('[data-testid="setup"]', { state: "detached" });
+  });
+  await tp.setViewportSize({ width: 768, height: 1024 });
+  await tp.tap('[data-cue="5"] .t-name');
+  await tp.waitForTimeout(200);
+  await shot(tp, "desktop-tablet-edit.png");
+  await step("tablet: Add cue menu adds a memo cue; Duplicate button copies it", async () => {
+    const count = () => tp.locator('[data-testid="cuetable"] [data-cue]').count();
+    const before = await count();
+    await tp.tap('[data-testid="tb-add-menu"]');
+    await tp.tap('[data-testid="menu-add-memo"]');
+    await tp.waitForFunction((n) => document.querySelectorAll('[data-testid="cuetable"] [data-cue]').length === n + 1, before);
+    await tp.tap('[data-testid="tb-duplicate"]');
+    await tp.waitForFunction((n) => document.querySelectorAll('[data-testid="cuetable"] [data-cue]').length === n + 2, before);
+    await tp.tap('[data-testid="tb-undo"]');
+    await tp.waitForFunction((n) => document.querySelectorAll('[data-testid="cuetable"] [data-cue]').length === n + 1, before);
+    await tp.tap('[data-testid="tb-undo"]');
+    await tp.waitForFunction((n) => document.querySelectorAll('[data-testid="cuetable"] [data-cue]').length === n, before);
+  });
 
   await step("setup dialog opens; hotkey conflict is refused", async () => {
     await page.click('[data-testid="tb-setup"]');
@@ -193,6 +347,25 @@ try {
       if (e.message === "live_mode") return;
     }
     throw new Error("add_cue was accepted in live mode");
+  });
+
+  for (const [w, h] of [[360, 640], [390, 844], [844, 390], [768, 1024]]) {
+    await tp.setViewportSize({ width: w, height: h });
+    await tp.waitForTimeout(200);
+    await step(`live dashboard ${w}×${h} (touch): no horizontal scroll; GO, PANIC, NEXT, list inside the viewport`, async () => {
+      await tp.waitForSelector('[data-testid="live-dashboard"]');
+      if (!(await noHScroll(tp))) throw new Error("page scrolls horizontally");
+      const bad = await outside(tp, ["go", "panic", "pause", "stop-all", "next-panel", "mode-edit"]);
+      if (bad.length) throw new Error(`outside the viewport: ${bad.join(", ")}`);
+      if ((await tp.locator('.live-cues [data-cue]').count()) === 0) throw new Error("no cue rows");
+      const tiny = await tinyTargets(tp, '[data-testid="transport"] button, .live-tabs button', 44);
+      if (tiny.length) throw new Error(`too small: ${tiny.join(", ")}`);
+    });
+    await shot(tp, `desktop-live-${w}x${h}.png`);
+  }
+  await step("live dashboard on a phone: PANIC needs press-and-hold on touch", async () => {
+    await tp.setViewportSize({ width: 390, height: 844 });
+    if (!/hold/.test(await tp.locator('[data-testid="panic"]').innerText())) throw new Error("panic is not hold-to-fire");
   });
 
   await step("connection-lost banner appears when the WebSocket dies and recovers", async () => {
@@ -300,17 +473,30 @@ try {
   await rp.tap('[data-testid="tab-cues"]');
   await rp.setViewportSize({ width: 360, height: 640 });
   await rp.waitForTimeout(300);
-  await step("remote 360 px wide: no horizontal scroll; touch targets ≥ 56 px", async () => {
+  await step("remote 360 px wide: no horizontal scroll; transport ≥ 56 px, every other target ≥ 44 px; GO/PANIC visible", async () => {
     if (!(await noHScroll(rp))) throw new Error("page scrolls horizontally");
-    const small = await rp.evaluate(() =>
-      [...document.querySelectorAll('[data-testid="transport"] button, .r-tab, .r-selbar button')]
-        .map((b) => ({ r: b.getBoundingClientRect(), t: b.textContent }))
-        .filter((x) => x.r.height < 55.5)
-        .map((x) => `${x.t}:${Math.round(x.r.height)}`),
-    );
+    const small = [...(await tinyTargets(rp, '[data-testid="transport"] button', 56)), ...(await tinyTargets(rp, "button", 44))];
     if (small.length) throw new Error(`too small: ${small.join(", ")}`);
+    const bad = await outside(rp, ["go", "panic", "next-panel", "cuelist"]);
+    if (bad.length) throw new Error(`outside the viewport: ${bad.join(", ")}`);
   });
   await shot(rp, "remote-360x640.png");
+  await step("remote phone: selecting a cue shows the selection bar with Set NEXT", async () => {
+    await rp.tap('[data-cue="3"]');
+    await rp.waitForSelector('[data-testid="set-next"]');
+    if ((await outside(rp, ["set-next", "fire-selected", "go", "panic"])).length) throw new Error("selection bar pushed controls out");
+  });
+  await rp.setViewportSize({ width: 844, height: 390 });
+  await rp.waitForTimeout(300);
+  await step("remote landscape phone 844×390: no horizontal scroll; GO, PANIC, NEXT, list visible", async () => {
+    if (!(await noHScroll(rp))) throw new Error("page scrolls horizontally");
+    const bad = await outside(rp, ["go", "panic", "pause", "stop-all", "next", "prev", "next-panel", "tab-cues", "set-next"]);
+    if (bad.length) throw new Error(`outside the viewport: ${bad.join(", ")}`);
+    if ((await rp.locator('[data-testid="cuelist"] [data-cue]').count()) === 0) throw new Error("no cue rows");
+    const tiny = await tinyTargets(rp, "button", 44);
+    if (tiny.length) throw new Error(`too small: ${tiny.join(", ")}`);
+  });
+  await shot(rp, "remote-844x390.png");
 
   // ------------------------------------------------------------------ view
   const viewCtx = await browser.newContext({ viewport: { width: 1024, height: 768 }, deviceScaleFactor: 1, hasTouch: true });
@@ -335,10 +521,24 @@ try {
   await shot(vp, "view.png");
   await vp.setViewportSize({ width: 390, height: 844 });
   await vp.waitForTimeout(300);
-  await step("/view on a phone: no horizontal scroll", async () => {
-    if (!(await noHScroll(vp))) throw new Error("page scrolls horizontally");
-  });
-  await shot(vp, "view-390x844.png");
+  for (const [w, h] of [[390, 844], [360, 640], [844, 390], [768, 1024], [1920, 1080]]) {
+    await vp.setViewportSize({ width: w, height: h });
+    await vp.waitForTimeout(200);
+    await step(`/view ${w}×${h}: no horizontal scroll; NEXT, clocks and ≥ 3 list rows visible`, async () => {
+      if (!(await noHScroll(vp))) throw new Error("page scrolls horizontally");
+      const bad = await outside(vp, ["next-panel", "clocks", "cuelist"]);
+      if (bad.length) throw new Error(`outside the viewport: ${bad.join(", ")}`);
+      const rows = await vp.evaluate(() => {
+        const box = document.querySelector('[data-testid="cuelist"]').getBoundingClientRect();
+        return [...document.querySelectorAll('[data-testid="cuelist"] [data-cue]')].filter((r) => {
+          const b = r.getBoundingClientRect();
+          return b.top >= box.top - 1 && b.bottom <= box.bottom + 1;
+        }).length;
+      });
+      if (rows < 3) throw new Error(`only ${rows} rows visible`);
+    });
+    await shot(vp, `view-${w}x${h}.png`);
+  }
 
   // ------------------------------------------------------------------ extra: kick + high contrast
   await step("kick_client disconnects the remote and tells the user", async () => {

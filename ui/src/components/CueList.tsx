@@ -196,7 +196,7 @@ export function CueList(p: {
 
   if (!show || !list) return <div className="cuelist empty">No cue list</div>;
   return (
-    <div className={`cuelist cuelist-${p.variant}`} ref={ref} role="grid" aria-label={`Cue list ${list.name}`} data-testid="cuelist">
+    <div className={`cuelist cuelist-${p.variant}${p.gutterSetsPlayhead ? " cuelist-gutter" : ""}`} ref={ref} role="grid" aria-label={`Cue list ${list.name}`} data-testid="cuelist">
       {rows.length === 0 ? <div className="cuelist-empty">This cue list is empty.</div> : null}
       {rows.map((r) => (
         <LiveRow

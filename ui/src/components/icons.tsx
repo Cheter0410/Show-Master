@@ -151,6 +151,24 @@ export const IconDisarmed = (p: P) => (
     <path d="M3.8 12.2l8.4-8.4" />
   </Svg>
 );
+export const IconTrash = (p: P) => (
+  <Svg {...p}>
+    <path d="M2.5 4.2h11M6.2 4.2V2.6h3.6v1.6M4 4.2l.7 9.2h6.6l.7-9.2M6.6 6.6v4.6M9.4 6.6v4.6" />
+  </Svg>
+);
+export const IconCopy = (p: P) => (
+  <Svg {...p}>
+    <rect x="5.2" y="5.2" width="8.3" height="8.3" rx="1.2" />
+    <path d="M10.8 5.2V3.7a1.2 1.2 0 0 0-1.2-1.2H3.7a1.2 1.2 0 0 0-1.2 1.2v5.9a1.2 1.2 0 0 0 1.2 1.2h1.5" />
+  </Svg>
+);
+export const IconMore = (p: P) => (
+  <Svg {...p}>
+    <circle cx="3.2" cy="8" r="1.1" fill="currentColor" />
+    <circle cx="8" cy="8" r="1.1" fill="currentColor" />
+    <circle cx="12.8" cy="8" r="1.1" fill="currentColor" />
+  </Svg>
+);
 export const IconClock = (p: P) => (
   <Svg {...p}>
     <circle cx="8" cy="8" r="6.2" />

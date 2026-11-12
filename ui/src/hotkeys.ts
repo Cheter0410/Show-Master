@@ -96,6 +96,27 @@ export function matchHotkey(hotkeys: Record<string, string>, e: KeyLike): string
   return null;
 }
 
+/**
+ * matchHotkey plus two platform aliases, used only when the pressed combo itself is unbound:
+ * - Backspace (Mac keyboards label it "delete") acts as the key bound to the `delete` action;
+ * - Cmd (Meta) stands in for Ctrl, so Cmd+Z / Cmd+S / Cmd+D work on a Mac.
+ */
+export function resolveHotkey(hotkeys: Record<string, string>, e: KeyLike): string | null {
+  const direct = matchHotkey(hotkeys, e);
+  if (direct) return direct;
+  if (e.metaKey && !e.ctrlKey) {
+    // explicit copy: DOM event properties are prototype getters, a spread would lose them
+    const viaCtrl = matchHotkey(hotkeys, { code: e.code, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: false, ctrlKey: true });
+    if (viaCtrl) return viaCtrl;
+  }
+  if (e.code === "Backspace" && !e.altKey && !e.shiftKey && !e.ctrlKey) {
+    const del = keyForAction(hotkeys, "delete");
+    // Alias only a plain Delete binding: a custom modifier combo stays the only way.
+    if (del != null && normalizeCombo(del) === "Delete") return "delete";
+  }
+  return null;
+}
+
 /** The action already bound to `combo` (other than `exceptAction`), i.e. a conflict. */
 export function findConflict(hotkeys: Record<string, string>, combo: string, exceptAction?: string): string | null {
   const n = normalizeCombo(combo);

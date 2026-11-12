@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { fireGo, pressPanic, run, toggleMode, transport } from "../commands";
 import { Confirm, Modal } from "../components/Modal";
 import { GOTO_INPUT_ID, StatusBar } from "../components/Panels";
-import { isEditableTarget, matchHotkey, type HotkeyAction } from "../hotkeys";
+import { isEditableTarget, resolveHotkey, type HotkeyAction } from "../hotkeys";
+import { deleteCues, duplicateCues } from "../editing";
 import { getApp, setApp, useApp } from "../store";
 import { CueTable } from "./CueTable";
 import type { FileMode } from "./FileBrowser";
@@ -73,14 +74,10 @@ export function DesktopApp() {
           void saveShow(() => ui.current.setFileDialog("save-show"));
           break;
         case "duplicate":
-          if (editing && s.selection.length > 0) void run({ cmd: "duplicate_cues", cues: s.selection });
+          if (editing && s.selection.length > 0) void duplicateCues(s.selection);
           break;
         case "delete":
-          if (editing && s.selection.length > 0) {
-            const cues = s.selection;
-            setApp({ selection: [] });
-            void run({ cmd: "delete_cues", cues });
-          }
+          if (editing && s.selection.length > 0) void deleteCues(s.selection);
           break;
         case "find": {
           const el = document.getElementById(GOTO_INPUT_ID) as HTMLInputElement | null;
@@ -96,7 +93,7 @@ export function DesktopApp() {
       if (editable && e.code !== "Escape") return;
       // Space must never scroll the page or "click" a focused button.
       if (e.code === "Space") e.preventDefault();
-      const action = matchHotkey(getApp().doc?.show.hotkeys ?? {}, e);
+      const action = resolveHotkey(getApp().doc?.show.hotkeys ?? {}, e);
       if (!action) return;
       e.preventDefault();
       perform(action as HotkeyAction, e.repeat);

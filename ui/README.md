@@ -5,7 +5,7 @@ Single-page app (Vite + React + TypeScript, strict) for the three Show Master sc
 | Route     | Screen                                             | Role      |
 |-----------|----------------------------------------------------|-----------|
 | `/`       | desktop app: **Edit** mode and **Live** dashboard  | `admin`   |
-| `/remote` | touch-first iPad control surface                   | `control` |
+| `/remote` | touch-first control surface (phones and tablets)   | `control` |
 | `/view`   | read-only monitor (no control that sends commands) | `view`    |
 
 The binding contract is [`../docs/remote-api.md`](../docs/remote-api.md). The UI renders what the role
@@ -64,10 +64,13 @@ Environment: `SM_MOCK_PORT` (default 7400), `SM_MOCK_ALL_ADMIN=1` (everybody is 
 Uses the **globally installed** Playwright + Chromium (not a dependency of this package; the script
 resolves it through `npm root -g`). It starts the mock in-process on port 7461 (`SM_E2E_PORT`), serves
 `dist/` and checks: edit screen and cue list, inspector round trip + validation + undo, setup dialog and
-hotkey conflict refusal, pre-flight → live dashboard, GO / debounce / Space hotkey, connection-lost banner
-and recovery, Live→Edit confirmation, `/remote` PIN pad (wrong/right PIN), GO / Set NEXT / hold-to-panic,
-no horizontal scroll at 1024×768, 768×1024, 390×844 and 360×640, `/view` without any control, server-side
-`forbidden`, kick, high contrast, and that **no request left the mock's origin**.
+hotkey conflict refusal, deleting cues (toolbar button, Backspace, toast undo, right-click menu), the edit view
+and the live dashboard on touch devices (360×640 … 1180×820: no horizontal scroll, GO / PANIC / Add / Delete
+inside the viewport, targets ≥ 44 px, long-press context menu, full-screen setup on phones), pre-flight → live
+dashboard, GO / debounce / Space hotkey, connection-lost banner and recovery, Live→Edit confirmation, `/remote`
+PIN pad (wrong/right PIN), GO / Set NEXT / hold-to-panic, phone portrait and landscape layouts, `/view` at
+phone … 1920×1080 without any control, server-side `forbidden`, kick, high contrast, and that **no request left
+the mock's origin**.
 
 Screenshots are written to `e2e/screenshots/` (git-ignored, regenerated on every run).
 
@@ -80,11 +83,12 @@ src/patch.ts        immutable apply of WebSocket patch ops (structural sharing)
 src/connection.ts   WebSocket: reconnect/backoff, rev-gap resync, ping/latency, send() -> ack promise
 src/session.ts      /api/session, PIN login, token in sessionStorage, re-auth on reconnect
 src/commands.ts     GO lock, panic double-tap, transport helpers, mode switching
-src/hotkeys.ts      combo matching, conflict detection, defaults
+src/hotkeys.ts      combo matching (+ Backspace / Cmd aliases), conflict detection, defaults
+src/editing.ts      delete / duplicate / move-a-step actions shared by toolbar, inspector, context menu, hotkeys
 src/time.ts         duration / clock / timecode / dB / SysEx helpers
 src/cues.ts         cue tree helpers
-src/platform.ts     optional Tauri file-drop adapter, screen wake lock
-src/components/     shared: CueList, NextPanel, Clocks, Meters, Transport, Panels, fields, Modal, icons
+src/platform.ts     optional Tauri file-drop adapter, screen wake lock, media-query hook
+src/components/     shared: CueList, NextPanel, Clocks, Meters, Transport, Panels, fields, Modal, Menu, icons
 src/desktop/        Toolbar, CueTable, Inspector, AudioInspector, Setup, FileBrowser, LiveDashboard
 src/routes/         RemoteApp, ViewApp
 ```
@@ -97,4 +101,14 @@ src/routes/         RemoteApp, ViewApp
   Space never scrolls and never "clicks" a focused button.
 - **Connection loss**: full-width red banner; the socket reconnects with 250 ms → 2 s backoff, a `rev` gap
   or 5 s of silence forces a resync. Commands sent while offline are rejected, never queued.
+- **Deleting cues** (Edit mode): toolbar *Delete* / *Duplicate* act on the selection, the inspector has the same
+  buttons, the Delete key **and Backspace** (the Mac "delete" key) delete when no text field has focus, and a
+  toast offers *Undo* (Ctrl/Cmd+Z works too; Cmd stands in for Ctrl when the Cmd combo is unbound). Right-click –
+  or long-press on touch screens – a cue row for Set NEXT, Preview, Move up/down, Duplicate, Delete.
+- **Screen sizes**: wide screens (≥ 1200 px) show everything as before. Tablets get File / Add-cue drop-down
+  menus, fewer table columns (values stay in the inspector) and a collapsible inspector; phones get a compact
+  toolbar with a ⋯ menu (bottom sheet), a single-column inspector, full-screen dialogs and a tabbed live
+  dashboard with the transport block always at the bottom. Landscape phones put the list left and NEXT /
+  transport (or the inspector) right. On touch screens (`pointer: coarse`) targets are ≥ 44 px, inputs use
+  16 px text (no iOS zoom), and PANIC needs press-and-hold everywhere. Safe-area insets are respected.
 - **High contrast**: `settings.high_contrast` sets `data-contrast="high"` on `<html>`.

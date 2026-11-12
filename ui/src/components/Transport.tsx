@@ -114,11 +114,15 @@ export function PanicButton({ hold = false, className = "" }: { hold?: boolean; 
   );
 }
 
-export function Transport({ touch = false }: { touch?: boolean }) {
+/**
+ * `hold`: PANIC needs press-and-hold (touch screens). `grid`: compact block with a big GO on the left
+ * (phones / narrow screens); wide layouts stack GO, rows of buttons and PANIC.
+ */
+export function Transport({ touch = false, hold = touch, grid = touch }: { touch?: boolean; hold?: boolean; grid?: boolean }) {
   const paused = useApp((s) => s.doc?.paused_all ?? false);
   const [confirmReset, setConfirmReset] = useState(false);
   return (
-    <section className={`transport${touch ? " touch" : ""}`} aria-label="Transport" data-testid="transport">
+    <section className={`transport${grid ? " touch" : ""}`} aria-label="Transport" data-testid="transport">
       <GoButton />
       <div className="transport-row">
         <button type="button" className={`btn tbtn t-pause ${paused ? "is-paused" : ""}`} data-testid="pause" onClick={() => void transport.togglePause()}>
@@ -145,7 +149,7 @@ export function Transport({ touch = false }: { touch?: boolean }) {
         </button>
       </div>
       <div className="transport-panic">
-        <PanicButton hold={touch} />
+        <PanicButton hold={hold} />
       </div>
       {confirmReset ? (
         <Confirm

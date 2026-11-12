@@ -8,7 +8,8 @@ import { NextPanel } from "../components/NextPanel";
 import { ConnDot, Notes } from "../components/Panels";
 import { Transport } from "../components/Transport";
 import { cueLabel, findCue } from "../cues";
-import { keepScreenAwake } from "../platform";
+import { IconChevronDown, IconUp } from "../components/icons";
+import { keepScreenAwake, loadFlag, saveFlag } from "../platform";
 import { currentListId, useApp } from "../store";
 
 type Tab = "cues" | "mix" | "notes";
@@ -24,6 +25,12 @@ export function RemoteApp() {
     return l != null ? s.doc?.playheads[String(l)] ?? null : null;
   });
   const selected = findCue(show, selectedId);
+  // Phones: the four clocks fold into one line unless the user unfolds them (remembered per device).
+  const [folded, setFoldedState] = useState(() => loadFlag("sm.remote.clocksFolded", true));
+  const setFolded = (v: boolean) => {
+    setFoldedState(v);
+    saveFlag("sm.remote.clocksFolded", v);
+  };
   useEffect(() => keepScreenAwake(), []);
 
   return (
@@ -32,8 +39,11 @@ export function RemoteApp() {
         <ConnDot />
         <span className="r-title ellipsis">{show?.name ?? "Show Master"}</span>
         <span className={`mode-badge ${mode}`}>{mode === "live" ? "LIVE" : "EDIT"}</span>
+        <button className="btn ghost r-clock-toggle" aria-expanded={!folded} onClick={() => setFolded(!folded)} data-testid="clocks-toggle">
+          Clocks {folded ? <IconChevronDown size={14} /> : <IconUp size={14} />}
+        </button>
       </header>
-      <div className="r-clocks">
+      <div className={`r-clocks${folded ? " folded" : ""}`}>
         <Clocks canControl={false} compact />
       </div>
       <div className="r-next">
@@ -63,7 +73,7 @@ export function RemoteApp() {
           {tab === "notes" ? <Notes editable /> : null}
         </div>
         {tab === "cues" ? (
-          <div className="r-selbar" data-testid="selbar">
+          <div className={`r-selbar${selected ? "" : " is-empty"}`} data-testid="selbar">
             <span className="r-sel ellipsis">{selected ? <>Selected: <b>{cueLabel(selected)}</b></> : <span className="muted">Tap a cue to select it</span>}</span>
             <button className="btn big" data-testid="set-next" disabled={!selected || selected.id === playhead} onClick={() => selected && void transport.setPlayhead(selected.id)}>
               Set NEXT

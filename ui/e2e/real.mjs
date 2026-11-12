@@ -109,6 +109,26 @@ try {
     await page.screenshot({ path: join(SHOTS, "real-desktop-edit.png") });
   });
 
+  await step("Delete button and Backspace delete the selected cue on the real engine; undo restores it", async () => {
+    const count = async () => (await api("/api/v1/state")).show.cue_lists[0].cues.length;
+    const before = await count();
+    const id = (await api("/api/v1/state")).show.cue_lists[0].cues.at(-1).id;
+    await page.click(`[data-cue="${id}"] .t-name`);
+    await page.click('[data-testid="tb-delete"]');
+    await page.waitForSelector(`[data-cue="${id}"]`, { state: "detached" });
+    if ((await count()) !== before - 1) throw new Error("server did not delete the cue");
+    await page.waitForSelector('[data-testid="toast"]:has-text("Deleted 1 cue")');
+    await page.click('[data-testid="tb-undo"]');
+    await page.waitForSelector(`[data-cue="${id}"]`);
+    await page.click(`[data-cue="${id}"] .t-name`);
+    await page.keyboard.press("Backspace");
+    await page.waitForSelector(`[data-cue="${id}"]`, { state: "detached" });
+    if ((await count()) !== before - 1) throw new Error("Backspace did not delete the cue");
+    await page.keyboard.press("Control+KeyZ");
+    await page.waitForSelector(`[data-cue="${id}"]`);
+    if ((await count()) !== before) throw new Error("undo did not restore the cue");
+  });
+
   await step("setup dialog opens with real devices and the QR code", async () => {
     await page.click('[data-testid="tb-setup"]');
     await page.waitForFunction(() => document.body.textContent.includes("Null output (no sound)"));

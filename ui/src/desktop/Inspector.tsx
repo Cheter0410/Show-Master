@@ -7,8 +7,11 @@ import {
 } from "../api";
 import { run } from "../commands";
 import { Check, DbField, DraftField, NumField, Row, Select, TcField, TextField, TimeField } from "../components/fields";
-import { allCues, cueLabel, findCue, TYPE_LABELS } from "../cues";
+import { allCues, cueCount, cueLabel, findCue, TYPE_LABELS } from "../cues";
 import { useApp } from "../store";
+import { IconChevronDown, IconCopy, IconError, IconTrash, IconUp } from "../components/icons";
+import { deleteCues, duplicateCues } from "../editing";
+import { COARSE_POINTER, loadFlag, saveFlag, useMedia } from "../platform";
 import { validateSysex } from "../time";
 import { AudioTab, RoutingTab } from "./AudioInspector";
 
@@ -421,8 +424,8 @@ function BulkEdit({ cues }: { cues: Cue[] }) {
         </Row>
         <Row label="Actions">
           <button className="btn small" onClick={() => void run({ cmd: "group_cues", cues: ids })}>Group</button>
-          <button className="btn small" onClick={() => void run({ cmd: "duplicate_cues", cues: ids })}>Duplicate</button>
-          <button className="btn small danger" onClick={() => void run({ cmd: "delete_cues", cues: ids })}>Delete</button>
+          <button className="btn small" onClick={() => void duplicateCues(ids)}>Duplicate</button>
+          <button className="btn small danger" onClick={() => void deleteCues(ids)}>Delete</button>
         </Row>
       </div>
     </div>
@@ -433,24 +436,67 @@ function BulkEdit({ cues }: { cues: Cue[] }) {
 
 type Tab = "basic" | "timing" | "kind" | "routing";
 
+const COLLAPSE_KEY = "sm.inspector.collapsed";
+
+/** Duplicate / Delete for the inspected cue(s) – always visible, also on touch screens. */
+function CueActions({ ids }: { ids: number[] }) {
+  const n = ids.length;
+  return (
+    <span className="insp-actions">
+      <button className="btn small" onClick={() => void duplicateCues(ids)} data-testid="insp-duplicate" aria-label={n > 1 ? `Duplicate ${cueCount(n)}` : "Duplicate cue"}>
+        <IconCopy /> <span className="insp-act-text">Duplicate</span>
+      </button>
+      <button className="btn small danger" onClick={() => void deleteCues(ids)} data-testid="insp-delete" aria-label={n > 1 ? `Delete ${cueCount(n)}` : "Delete cue"}>
+        <IconTrash /> <span className="insp-act-text">Delete</span>
+      </button>
+    </span>
+  );
+}
+
 export function Inspector() {
   const show = useApp((s) => s.doc?.show ?? null);
   const selection = useApp((s) => s.selection);
+  const errors = useApp((s) => s.doc?.errors);
+  const coarse = useMedia(COARSE_POINTER);
   const [tab, setTab] = useState<Tab>("basic");
+  const [collapsed, setCollapsedState] = useState(() => loadFlag(COLLAPSE_KEY, false));
+  const setCollapsed = (v: boolean) => {
+    setCollapsedState(v);
+    saveFlag(COLLAPSE_KEY, v);
+  };
   if (!show) return null;
   const cues = selection.map((id) => findCue(show, id)).filter((c): c is Cue => c != null);
   if (cues.length === 0) {
     return (
       <section className="inspector empty" data-testid="inspector">
-        <span className="muted">Select a cue to edit it. Shift / Ctrl-click selects several cues for bulk editing.</span>
+        <span className="muted">
+          {coarse
+            ? "Tap a cue to edit it. Long-press a cue for more actions (move, duplicate, delete)."
+            : "Select a cue to edit it. Shift / Ctrl-click selects several cues for bulk editing. Right-click a cue for more actions."}
+        </span>
       </section>
     );
   }
+  const toggle = (
+    <button
+      className="btn ghost icon-only insp-toggle"
+      onClick={() => setCollapsed(!collapsed)}
+      aria-expanded={!collapsed}
+      aria-label={collapsed ? "Show inspector" : "Hide inspector"}
+      data-testid="insp-toggle"
+    >
+      {collapsed ? <IconUp size={18} /> : <IconChevronDown size={18} />}
+    </button>
+  );
+  const cls = `inspector${collapsed ? " collapsed" : ""}`;
   if (cues.length > 1) {
     return (
-      <section className="inspector" data-testid="inspector">
+      <section className={cls} data-testid="inspector">
         <div className="insp-tabs">
-          <span className="insp-title">{cues.length} cues selected</span>
+          <span className="insp-title">{cueCount(cues.length)} selected</span>
+          <span className="spacer" />
+          <CueActions ids={cues.map((c) => c.id)} />
+          {toggle}
         </div>
         <div className="insp-body">
           <BulkEdit cues={cues} />
@@ -459,6 +505,7 @@ export function Inspector() {
     );
   }
   const cue = cues[0];
+  const error = errors?.[String(cue.id)];
   const k = cue.kind;
   const hasKindTab = k.type !== "memo";
   const cur: Tab = (tab === "kind" && !hasKindTab) || (tab === "routing" && k.type !== "audio") ? "basic" : tab;
@@ -470,15 +517,35 @@ export function Inspector() {
     ...(k.type === "audio" ? [{ id: "routing" as Tab, label: "Routing" }] : []),
   ];
   return (
-    <section className="inspector" data-testid="inspector">
-      <div className="insp-tabs" role="tablist">
+    <section className={cls} data-testid="inspector">
+      <div className="insp-tabs">
         <span className="insp-title ellipsis">{cueLabel(cue)}</span>
-        {tabs.map((t) => (
-          <button key={t.id} role="tab" aria-selected={cur === t.id} className={`insp-tab${cur === t.id ? " on" : ""}`} data-testid={`insp-tab-${t.id}`} onClick={() => setTab(t.id)}>
-            {t.label}
-          </button>
-        ))}
+        <span className="insp-tablist" role="tablist">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={cur === t.id}
+              className={`insp-tab${cur === t.id ? " on" : ""}`}
+              data-testid={`insp-tab-${t.id}`}
+              onClick={() => {
+                setTab(t.id);
+                if (collapsed) setCollapsed(false);
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </span>
+        <span className="spacer" />
+        <CueActions ids={[cue.id]} />
+        {toggle}
       </div>
+      {error ? (
+        <div className="insp-error" role="alert" data-testid="insp-error">
+          <IconError /> <span>{error}</span>
+        </div>
+      ) : null}
       <div className="insp-body" key={cue.id}>
         {cur === "basic" ? <BasicTab cue={cue} /> : null}
         {cur === "timing" ? <TimingTab cue={cue} rate={rate} /> : null}

@@ -4,9 +4,11 @@ import type { ActiveCue, Cue, Show } from "../api";
 import { run, transport } from "../commands";
 import { rowState, StatusIcon } from "../components/CueList";
 import { TextField } from "../components/fields";
-import { IconChevronDown, IconChevronRight, TypeIcon } from "../components/icons";
-import { activeMap, CONTINUE_GLYPH, cueDuration, cueTarget, findCue, findList, flattenCues, isWithin, TYPE_LABELS, type CueRow } from "../cues";
-import { isAudioPath, isTauri, onNativeFileDrop } from "../platform";
+import { Menu, useLongPress } from "../components/Menu";
+import { IconChevronDown, IconChevronRight, IconCopy, IconNext, IconPlay, IconTrash, IconUp, TypeIcon } from "../components/icons";
+import { activeMap, CONTINUE_GLYPH, cueCount, cueDuration, cueLabel, cueTarget, findCue, findList, flattenCues, isWithin, stepMove, TYPE_LABELS, type CueRow } from "../cues";
+import { deleteCues, duplicateCues, moveCueStep } from "../editing";
+import { COARSE_POINTER, isAudioPath, isTauri, onNativeFileDrop, useMedia } from "../platform";
 import { currentListId, getApp, setApp, toast, useApp } from "../store";
 import { formatDuration, formatSeconds } from "../time";
 import { addCue } from "./Toolbar";
@@ -35,6 +37,8 @@ interface RowProps {
   onDragStart: (id: number, e: React.DragEvent) => void;
   onDragOver: (row: CueRow, e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent) => void;
+  onMenu: (id: number, x: number, y: number) => void;
+  canDrag: boolean;
 }
 
 const EditRow = memo(function EditRow(p: RowProps) {
@@ -45,6 +49,7 @@ const EditRow = memo(function EditRow(p: RowProps) {
   const isGroup = cue.kind.type === "group";
   const cls = ["trow", `is-${st}`, p.isPlayhead ? "is-playhead" : "", p.selected ? "is-selected" : "", cue.armed ? "" : "is-disarmed", isGroup ? "is-group" : "", p.drop ? `drop-${p.drop}` : "", cue.color ? `c-${cue.color}` : ""].join(" ");
   const progress = p.active && p.active.duration ? Math.min(1, p.active.elapsed / p.active.duration) : null;
+  const longPress = useLongPress((x, y) => p.onMenu(cue.id, x, y));
   return (
     <div
       className={cls}
@@ -53,8 +58,14 @@ const EditRow = memo(function EditRow(p: RowProps) {
       data-cue={cue.id}
       data-state={st}
       data-playhead={p.isPlayhead ? "1" : undefined}
-      draggable={p.editing == null}
+      draggable={p.canDrag && p.editing == null}
       onClick={(e) => p.onClick(cue.id, e)}
+      onContextMenu={(e) => {
+        if (p.editing != null) return;
+        e.preventDefault();
+        p.onMenu(cue.id, e.clientX, e.clientY);
+      }}
+      {...(p.editing == null ? longPress : {})}
       onDragStart={(e) => p.onDragStart(cue.id, e)}
       onDragOver={(e) => p.onDragOver(p.row, e)}
       onDrop={p.onDrop}
@@ -71,7 +82,7 @@ const EditRow = memo(function EditRow(p: RowProps) {
       >
         {p.isPlayhead ? <span className="tag tag-next">NEXT</span> : null}
       </button>
-      <span className="tcell t-status" title={p.error}>
+      <span className="tcell t-status" title={p.error ?? undefined}>
         <StatusIcon state={st} armed={cue.armed} />
       </span>
       <span className="tcell t-num num" onDoubleClick={() => p.onEdit(cue.id, "number")}>
@@ -108,8 +119,8 @@ const EditRow = memo(function EditRow(p: RowProps) {
       <span className={`tcell t-target ellipsis${p.error ? " t-err" : ""}`} title={p.error ?? (cue.kind.type === "audio" ? cue.kind.file : undefined)}>
         {p.error ? p.error : cueTarget(cue, p.show)}
       </span>
-      <span className="tcell t-time num">{formatSeconds(cue.pre_wait)}</span>
-      <span className="tcell t-time num">
+      <span className="tcell t-time t-pre num">{formatSeconds(cue.pre_wait)}</span>
+      <span className="tcell t-time t-dur num">
         {p.active && p.active.phase === "running" ? (
           <b className="t-run">{p.active.duration != null ? `-${formatDuration(Math.max(0, p.active.duration - p.active.elapsed), false)}` : formatDuration(p.active.elapsed, false)}</b>
         ) : dur != null ? (
@@ -120,7 +131,7 @@ const EditRow = memo(function EditRow(p: RowProps) {
           ""
         )}
       </span>
-      <span className="tcell t-time num">{formatSeconds(cue.post_wait)}</span>
+      <span className="tcell t-time t-post num">{formatSeconds(cue.post_wait)}</span>
       <span className="tcell t-cont" title={cont.title}>{cont.glyph}</span>
       <span className="tcell t-tc num">{cue.tc_trigger ?? ""}</span>
       <span className="tcell t-armed">
@@ -151,12 +162,22 @@ export function CueTable() {
   const [editing, setEditing] = useState<{ id: number; field: "number" | "name" } | null>(null);
   const [drop, setDrop] = useState<DropTarget | null>(null);
   const [fileHint, setFileHint] = useState(false);
+  const [menu, setMenu] = useState<{ id: number; x: number; y: number } | null>(null);
+  const coarse = useMedia(COARSE_POINTER);
   const anchor = useRef<number | null>(null);
   const list = findList(show, listId);
   const rows = useMemo(() => (list ? flattenCues(list.cues, collapsed) : []), [list, collapsed]);
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
   const amap = useMemo(() => activeMap(active), [active]);
+
+  // Keep the (last) selected row visible when the inspector opens below it and shrinks the table.
+  const lastSelected = selection[selection.length - 1];
+  useEffect(() => {
+    if (lastSelected == null) return;
+    const raf = requestAnimationFrame(() => document.querySelector(`.cuetable [data-cue="${lastSelected}"]`)?.scrollIntoView({ block: "nearest" }));
+    return () => cancelAnimationFrame(raf);
+  }, [lastSelected]);
 
   // Tauri shell: real paths are available for OS file drops.
   useEffect(
@@ -221,7 +242,15 @@ export function CueTable() {
       const pos: DropPos = isGroup ? (f < 0.25 ? "before" : f > 0.75 ? "after" : "into") : f < 0.5 ? "before" : "after";
       setDrop((d) => (d && d.id === row.cue.id && d.pos === pos ? d : { id: row.cue.id, pos }));
     };
-    return { onClick, onToggle, onEdit, onDragStart, onDragOver };
+    const onMenu = (id: number, x: number, y: number) => {
+      // act on the selection when the row is part of it, otherwise on this row alone
+      if (!getApp().selection.includes(id)) {
+        anchor.current = id;
+        setApp({ selection: [id] });
+      }
+      setMenu({ id, x, y });
+    };
+    return { onClick, onToggle, onEdit, onDragStart, onDragOver, onMenu };
   }, []);
 
   const onDrop = (e: React.DragEvent) => {
@@ -293,9 +322,9 @@ export function CueTable() {
         <span className="tcell t-type" />
         <span className="tcell t-name">Name</span>
         <span className="tcell t-target">Target / file</span>
-        <span className="tcell t-time">Pre</span>
-        <span className="tcell t-time">Duration</span>
-        <span className="tcell t-time">Post</span>
+        <span className="tcell t-time t-pre">Pre</span>
+        <span className="tcell t-time t-dur"><span className="th-long">Duration</span><span className="th-short">Time</span></span>
+        <span className="tcell t-time t-post">Post</span>
         <span className="tcell t-cont" title="Continue mode">↓</span>
         <span className="tcell t-tc">TC trigger</span>
         <span className="tcell t-armed">Arm</span>
@@ -328,9 +357,12 @@ export function CueTable() {
             onDragStart={handlers.onDragStart}
             onDragOver={handlers.onDragOver}
             onDrop={onDropStable}
+            onMenu={handlers.onMenu}
+            canDrag={!coarse}
           />
         ))}
       </div>
+      {menu ? <RowMenu id={menu.id} x={menu.x} y={menu.y} onClose={() => setMenu(null)} /> : null}
       {fileHint ? (
         <div className="file-hint" role="status">
           Files cannot be dropped from this computer: the browser hides their real paths.
@@ -340,4 +372,25 @@ export function CueTable() {
       ) : null}
     </div>
   );
+}
+
+/** Context menu of a cue row (right-click, or long-press on touch screens). */
+function RowMenu({ id, x, y, onClose }: { id: number; x: number; y: number; onClose: () => void }) {
+  const show = useApp((s) => s.doc?.show ?? null);
+  const listId = useApp((s) => currentListId(s));
+  const selection = useApp((s) => s.selection);
+  const cue = findCue(show, id);
+  if (!cue) return null;
+  const ids = selection.includes(id) ? selection : [id];
+  const many = ids.length > 1;
+  const list = findList(show, listId);
+  const items = [
+    { label: "Set NEXT (playhead) here", icon: <IconNext />, onSelect: () => void transport.setPlayhead(id), testId: "ctx-playhead", disabled: many },
+    { label: "Preview (start this cue)", icon: <IconPlay />, onSelect: () => void transport.startCue(id), testId: "ctx-preview", disabled: many },
+    { label: "Move up", icon: <IconUp />, onSelect: () => void moveCueStep(id, -1), testId: "ctx-up", disabled: many || !stepMove(list, id, -1), separator: true },
+    { label: "Move down", icon: <IconChevronDown />, onSelect: () => void moveCueStep(id, 1), testId: "ctx-down", disabled: many || !stepMove(list, id, 1) },
+    { label: many ? `Duplicate ${cueCount(ids.length)}` : "Duplicate", icon: <IconCopy />, onSelect: () => void duplicateCues(ids), testId: "ctx-duplicate", separator: true },
+    { label: many ? `Delete ${cueCount(ids.length)}` : "Delete", icon: <IconTrash />, onSelect: () => void deleteCues(ids), testId: "ctx-delete", danger: true },
+  ];
+  return <Menu at={{ x, y }} items={items} onClose={onClose} heading={many ? `${cueCount(ids.length)} selected` : cueLabel(cue)} testId="row-menu" />;
 }

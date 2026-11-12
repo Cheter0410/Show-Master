@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { errorCode, errorText, send } from "../commands";
 import { Confirm, Modal } from "../components/Modal";
 import { toast, useApp } from "../store";
@@ -76,8 +76,8 @@ export function UpdateButton() {
   );
 }
 
-/** Quits the application (the engine, not just this browser tab). */
-export function QuitButton() {
+/** Quit flow (confirmations) without the button, so a menu item can start it too. */
+export function useQuit(): { ask: () => void; dialogs: ReactNode } {
   const [ask, setAsk] = useState<null | "plain" | "cues_running" | "unsaved_changes">(null);
   const [gone, setGone] = useState(false);
   const quit = async (force: boolean) => {
@@ -91,11 +91,8 @@ export function QuitButton() {
       else toast(`Quit: ${errorText(e)}`, "error");
     }
   };
-  return (
+  const dialogs = (
     <>
-      <button className="btn" onClick={() => setAsk("plain")} data-testid="tb-quit" title="Quit Show Master">
-        Quit
-      </button>
       {ask === "plain" ? (
         <Confirm title="Quit Show Master?" confirmLabel="Quit" danger onConfirm={() => void quit(false)} onCancel={() => setAsk(null)}>
           The engine stops and all audio ends. Tablets lose their connection.
@@ -116,6 +113,20 @@ export function QuitButton() {
           <p>You can close this window.</p>
         </Modal>
       ) : null}
+    </>
+  );
+  return { ask: () => setAsk("plain"), dialogs };
+}
+
+/** Quits the application (the engine, not just this browser tab). */
+export function QuitButton({ className = "" }: { className?: string }) {
+  const q = useQuit();
+  return (
+    <>
+      <button className={`btn${className ? ` ${className}` : ""}`} onClick={q.ask} data-testid="tb-quit" title="Quit Show Master">
+        Quit
+      </button>
+      {q.dialogs}
     </>
   );
 }

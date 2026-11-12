@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assignHotkey, clearHotkey, comboFromEvent, DEFAULT_HOTKEYS, findConflict, formatCombo, HOTKEY_ACTIONS, keyForAction,
-  matchHotkey, normalizeCombo, type KeyLike,
+  matchHotkey, normalizeCombo, resolveHotkey, type KeyLike,
 } from "./hotkeys";
 
 const ev = (code: string, mods: Partial<KeyLike> = {}): KeyLike => ({ code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods });
@@ -90,5 +90,40 @@ describe("formatCombo", () => {
     expect(formatCombo("Escape")).toBe("Esc");
     expect(formatCombo("Shift+Digit1")).toBe("Shift + 1");
     expect(formatCombo("ArrowDown")).toBe("↓");
+  });
+});
+
+describe("resolveHotkey", () => {
+  it("returns direct bindings first", () => {
+    expect(resolveHotkey(DEFAULT_HOTKEYS, ev("Delete"))).toBe("delete");
+    expect(resolveHotkey(DEFAULT_HOTKEYS, ev("Space"))).toBe("go");
+    expect(resolveHotkey({ ...DEFAULT_HOTKEYS, Backspace: "panic" }, ev("Backspace"))).toBe("panic");
+  });
+  it("treats Backspace (Mac 'delete') like the Delete binding", () => {
+    expect(resolveHotkey(DEFAULT_HOTKEYS, ev("Backspace"))).toBe("delete");
+    expect(resolveHotkey(DEFAULT_HOTKEYS, ev("Backspace", { metaKey: true }))).toBe("delete");
+    expect(resolveHotkey(DEFAULT_HOTKEYS, ev("Backspace", { shiftKey: true }))).toBeNull();
+    expect(resolveHotkey(DEFAULT_HOTKEYS, ev("Backspace", { ctrlKey: true }))).toBeNull();
+  });
+  it("does not alias Backspace when delete is unbound or bound to a custom combo", () => {
+    expect(resolveHotkey(clearHotkey(DEFAULT_HOTKEYS, "delete"), ev("Backspace"))).toBeNull();
+    const custom = assignHotkey(DEFAULT_HOTKEYS, "delete", "Ctrl+Delete");
+    if (!custom.ok) throw new Error("assign failed");
+    expect(resolveHotkey(custom.hotkeys, ev("Backspace"))).toBeNull();
+  });
+  it("lets Cmd stand in for Ctrl when the Cmd combo is unbound", () => {
+    expect(resolveHotkey(DEFAULT_HOTKEYS, ev("KeyZ", { metaKey: true }))).toBe("undo");
+    expect(resolveHotkey(DEFAULT_HOTKEYS, ev("KeyZ", { metaKey: true, shiftKey: true }))).toBe("redo");
+    expect(resolveHotkey({ ...DEFAULT_HOTKEYS, "Meta+KeyZ": "panic" }, ev("KeyZ", { metaKey: true }))).toBe("panic");
+    expect(resolveHotkey(DEFAULT_HOTKEYS, ev("KeyQ", { metaKey: true }))).toBeNull();
+    // DOM events keep their fields in prototype getters – the alias must not rely on own properties
+    class FakeEvent {
+      get code() { return "KeyZ"; }
+      get ctrlKey() { return false; }
+      get shiftKey() { return false; }
+      get altKey() { return false; }
+      get metaKey() { return true; }
+    }
+    expect(resolveHotkey(DEFAULT_HOTKEYS, new FakeEvent())).toBe("undo");
   });
 });

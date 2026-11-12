@@ -1,5 +1,6 @@
 // Platform adapter: the only place that knows about an optional Tauri shell.
 // In a plain browser none of this is active (browsers never expose real file paths).
+import { useSyncExternalStore } from "react";
 
 interface TauriEventApi {
   listen: (event: string, cb: (e: { payload: unknown }) => void) => Promise<() => void>;
@@ -58,6 +59,41 @@ export function onNativeFileDrop(cb: (paths: string[]) => void): () => void {
 const AUDIO_EXT = /\.(wav|wave|aif|aiff|flac|mp3|ogg|oga|opus|m4a|aac|caf)$/i;
 export function isAudioPath(path: string): boolean {
   return AUDIO_EXT.test(path);
+}
+
+// ---- media queries (layout decisions that CSS alone cannot make) ----
+
+/** True while the CSS media query matches; re-renders on change (rotation, window resize). */
+export function useMedia(query: string): boolean {
+  const subscribe = (cb: () => void) => {
+    if (typeof matchMedia === "undefined") return () => {};
+    const m = matchMedia(query);
+    m.addEventListener("change", cb);
+    return () => m.removeEventListener("change", cb);
+  };
+  return useSyncExternalStore(subscribe, () => (typeof matchMedia === "undefined" ? false : matchMedia(query).matches));
+}
+
+/** Primary input is a finger (phones, tablets): PANIC needs press-and-hold, targets get bigger. */
+export const COARSE_POINTER = "(pointer: coarse)";
+/** Phone-sized screens in either orientation. */
+export const PHONE = "(max-width: 599px), (max-height: 500px) and (orientation: landscape)";
+
+/** Per-viewer convenience flag in localStorage (never required to work). */
+export function loadFlag(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v == null ? fallback : v === "1";
+  } catch {
+    return fallback;
+  }
+}
+export function saveFlag(key: string, value: boolean): void {
+  try {
+    localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    /* storage blocked – fine */
+  }
 }
 
 // ---- Screen Wake Lock (keeps the iPad awake during the show) ----

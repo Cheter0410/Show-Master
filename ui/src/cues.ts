@@ -140,3 +140,40 @@ export const CONTINUE_GLYPH: Record<Cue["continue_mode"], { glyph: string; title
   auto_continue: { glyph: "↓", title: "Auto-continue (next cue starts together with this one)" },
   auto_follow: { glyph: "⤓", title: "Auto-follow (next cue starts when this one ends)" },
 };
+
+/**
+ * Selected ids reduced to the top-most cues (children travel with a selected group), in list order.
+ * Unknown ids are dropped.
+ */
+export function topLevelSelection(list: CueList | null, ids: readonly number[]): number[] {
+  if (!list || ids.length === 0) return [];
+  const want = new Set(ids);
+  const picked: Cue[] = [];
+  for (const r of flattenCues(list.cues)) {
+    if (want.has(r.cue.id) && !picked.some((g) => isWithin(g, r.cue.id))) picked.push(r.cue);
+  }
+  const out = picked.map((c) => c.id);
+  return out;
+}
+
+/**
+ * `move_cues` arguments that move one cue a step up or down among its siblings (index counts
+ * positions BEFORE the cue is taken out, as in the contract). null when it already is at that end.
+ */
+export function stepMove(list: CueList | null, id: number, dir: -1 | 1): { parent: number | null; index: number } | null {
+  if (!list) return null;
+  const row = flattenCues(list.cues).find((r) => r.cue.id === id);
+  if (!row) return null;
+  const siblings = row.parent == null ? list.cues : (findInList(list, row.parent)?.kind as { children?: Cue[] } | undefined)?.children ?? [];
+  if (dir < 0) return row.index > 0 ? { parent: row.parent, index: row.index - 1 } : null;
+  return row.index < siblings.length - 1 ? { parent: row.parent, index: row.index + 2 } : null;
+}
+
+function findInList(list: CueList, id: number): Cue | null {
+  return flattenCues(list.cues).find((r) => r.cue.id === id)?.cue ?? null;
+}
+
+/** "1 cue" / "3 cues" */
+export function cueCount(n: number): string {
+  return `${n} cue${n === 1 ? "" : "s"}`;
+}

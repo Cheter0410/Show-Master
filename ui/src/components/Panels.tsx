@@ -102,19 +102,23 @@ export function StatusBar() {
   const connectedPeers = peers?.filter((p) => p.state === "connected").length ?? 0;
   return (
     <footer className="statusbar num" data-testid="statusbar">
-      <span className={audio?.error ? "sb-err" : audio?.is_null ? "sb-warn" : ""} title={audio?.error ?? "Audio device"}>
+      <span
+        className={`${audio?.error ? "sb-err sb-click" : audio?.is_null ? "sb-warn" : ""}`}
+        title={audio?.error ?? "Audio device"}
+        onClick={audio?.error ? () => toast(`Audio error: ${audio.error}`, "error", 8000) : undefined}
+      >
         {audio?.error ? `Audio error: ${audio.error}` : audio?.is_null ? "NO AUDIO DEVICE (silent)" : audio?.device ?? "–"}
       </span>
-      <span>{audio ? `${(audio.sample_rate / 1000).toFixed(audio.sample_rate % 1000 ? 1 : 0)} kHz` : ""}</span>
-      <span>{audio ? `${audio.buffer_frames} frames` : ""}</span>
-      <span>{audio ? `${audio.channels} out` : ""}</span>
+      <span className="sb-minor">{audio ? `${(audio.sample_rate / 1000).toFixed(audio.sample_rate % 1000 ? 1 : 0)} kHz` : ""}</span>
+      <span className="sb-minor">{audio ? `${audio.buffer_frames} frames` : ""}</span>
+      <span className="sb-minor">{audio ? `${audio.channels} out` : ""}</span>
       <span className={cpu != null && cpu > 70 ? "sb-warn" : ""}>CPU {cpu ?? "–"}%</span>
       <span className={underruns > 0 ? "sb-err" : ""}>Underruns {underruns}</span>
-      <span>Voices {voices}</span>
+      <span className="sb-minor">Voices {voices}</span>
       <span className="sb-spacer" />
-      <span>MIDI ports {midiPorts}</span>
-      <span>RTP peers {connectedPeers}/{peers?.length ?? 0}</span>
-      <span>Remote clients {clients}</span>
+      <span className="sb-minor">MIDI ports {midiPorts}</span>
+      <span className="sb-minor">RTP peers {connectedPeers}/{peers?.length ?? 0}</span>
+      <span className="sb-minor">Remote clients {clients}</span>
       <span className={conn === "open" ? (latency != null && latency > 150 ? "sb-warn" : "sb-ok") : "sb-err"} data-testid="latency">
         {conn === "open" ? `Link ${latency ?? "–"} ms` : "OFFLINE"}
       </span>
@@ -142,7 +146,7 @@ export function GoToBox() {
       }}
     >
       <label htmlFor={GOTO_INPUT_ID}>Go to cue</label>
-      <input id={GOTO_INPUT_ID} className="input mono" data-testid="goto" value={v} placeholder="#" inputMode="decimal" autoComplete="off" onChange={(e) => setV(e.target.value)} onKeyDown={(e) => {
+      <input id={GOTO_INPUT_ID} className="input mono" data-testid="goto" value={v} placeholder="#" aria-label="Go to cue number" inputMode="decimal" autoComplete="off" onChange={(e) => setV(e.target.value)} onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();
           setV("");
@@ -215,6 +219,18 @@ export function Toasts() {
       {toasts.map((t) => (
         <div key={t.id} className={`toast lv-${t.level}`} role={t.level === "error" || t.level === "alarm" ? "alert" : "status"} data-testid="toast">
           <span>{t.level === "alarm" ? "⏰ " : ""}{t.text}</span>
+          {t.action ? (
+            <button
+              className="btn toast-action"
+              data-testid="toast-action"
+              onClick={() => {
+                dismissToast(t.id);
+                t.action?.run();
+              }}
+            >
+              {t.action.label}
+            </button>
+          ) : null}
           <button className="btn ghost icon-only" aria-label="Dismiss" onClick={() => dismissToast(t.id)}>
             <IconX />
           </button>
