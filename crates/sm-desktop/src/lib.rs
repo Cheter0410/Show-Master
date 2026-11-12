@@ -8,6 +8,7 @@
 pub mod app;
 pub mod client;
 pub mod edit;
+pub mod global_hotkeys;
 pub mod live;
 pub mod model;
 pub mod open_files;
@@ -67,6 +68,7 @@ pub fn run(
             let mut app = App::new(&cc.egui_ctx, client, open);
             app.recent = recent::Recent::load();
             app.prefs = prefs::Prefs::load();
+            app.global_hotkeys = global_hotkeys::GlobalHotkeys::native();
             Ok(Box::new(Window(app)))
         }),
     )

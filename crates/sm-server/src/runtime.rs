@@ -318,7 +318,17 @@ pub struct Config {
     pub update_check: bool,
     /// The log file this process writes (shown in the UI, read for diagnostics).
     pub log_file: Option<PathBuf>,
+    /// MIDI input backend override (tests, virtual ports).
+    pub midi_input_backend: Option<Box<dyn sm_io::midi_in::MidiInputBackend>>,
+    /// Audio input backend override for LTC input (tests, virtual devices).
+    pub audio_input_backend: Option<Box<dyn sm_audio::input::AudioInputBackend>>,
+    /// mDNS/Bonjour status (sm-mdns, run by the binary): returns
+    /// `{ "mdns": {...}, "discovered": [...] }` for the state document. Must not block.
+    pub net_status: Option<NetStatusFn>,
 }
+
+/// See [`Config::net_status`].
+pub type NetStatusFn = Arc<dyn Fn() -> Value + Send + Sync>;
 
 struct Probe;
 impl MediaProbe for Probe {
@@ -427,9 +437,12 @@ struct Runtime {
     handle: Handle,
     port_override: Option<u16>,
     log_file: Option<PathBuf>,
+    net_status: Option<NetStatusFn>,
     /// The port the server actually listens on (set by the binary after bind).
     urls: (Option<Instant>, Vec<String>),
     state_dirty: bool,
+    /// Incoming MIDI: mapping state, last message, when the UI last saw it.
+    inputs: crate::inputs::InputState,
     last_state: Value,
     rev: u64,
     lookahead: u64,
@@ -504,6 +517,20 @@ impl Runtime {
             Some(m) => Io::with_midi_backend(&doc.show, dir, m),
             None => Io::new(&doc.show, dir),
         };
+        let mut io = io;
+        if config.midi_input_backend.is_some() || config.audio_input_backend.is_some() {
+            io.set_input_backends(
+                &doc.show,
+                config
+                    .midi_input_backend
+                    .take()
+                    .unwrap_or_else(sm_io::midi_in::default_input_backend),
+                config
+                    .audio_input_backend
+                    .take()
+                    .unwrap_or_else(sm_audio::input::default_input_backend),
+            );
+        }
         let engine = Engine::new(doc.show.clone(), io.sample_rate());
         let mut rt = Self {
             doc,
@@ -520,8 +547,10 @@ impl Runtime {
             handle,
             port_override: config.port,
             log_file: config.log_file.clone(),
+            net_status: config.net_status.take(),
             urls: (None, Vec::new()),
             state_dirty: true,
+            inputs: crate::inputs::InputState::default(),
             last_state: Value::Null,
             rev: 0,
             lookahead: 0,
@@ -593,6 +622,7 @@ impl Runtime {
                     self.state_dirty = true;
                     pending = rx.try_recv().ok();
                 }
+                self.process_inputs();
                 self.pump();
             }));
             if step.is_err() {
@@ -630,6 +660,33 @@ impl Runtime {
             }
         }
         self.autosave();
+    }
+
+    /// Incoming MIDI and timecode: timecode feeds the chaser, mapped MIDI
+    /// and MSC become commands on the bus (origin `midi`).
+    fn process_inputs(&mut self) {
+        let batch = self.io.poll_inputs();
+        for (level, m) in batch.log {
+            self.note(level, m);
+        }
+        for ev in batch.tc {
+            match ev {
+                sm_io::inputs::TcInEvent::Frame(o) => self.engine.external_tc(o),
+                sm_io::inputs::TcInEvent::Stopped(f) => self.engine.external_tc_stopped(f),
+            }
+        }
+        let (notes, commands) = self.inputs.handle(&self.doc.show, batch.midi);
+        for (level, m) in notes {
+            self.note(level, m);
+        }
+        for c in commands {
+            if let Err(e) = self.handle_request(AnyCommand::Engine(c), Role::Control, "midi") {
+                self.note("warn", format!("MIDI remote control: {e}"));
+            }
+        }
+        if self.inputs.take_ui_update() {
+            self.state_dirty = true;
+        }
     }
 
     /// Move engine output to the I/O layer and collect events.
@@ -726,7 +783,14 @@ impl Runtime {
             EventKind::ResumedAll => ("info", "Resumed all".into()),
             EventKind::Reset => ("info", "Reset".into()),
             EventKind::Timecode { action, position } => {
-                ("info", format!("Timecode {action} at {position}"))
+                let level = if action.contains("LOST") {
+                    "error"
+                } else if action.contains("freewheel") || action.contains("jump") {
+                    "warn"
+                } else {
+                    "info"
+                };
+                (level, format!("Timecode {action} at {position}"))
             }
             EventKind::Master { .. } => return,
             EventKind::Info { message } => ("warn", message),
@@ -741,12 +805,17 @@ impl Runtime {
     fn run_preflight(&mut self) {
         let status = self.io.audio_status();
         let ports = self.io.midi.ports();
+        let inputs = self.io.input_status();
         let dir = self.doc.show_dir().map(Path::to_path_buf);
         let env = preflight::Environment {
             show_dir: dir.as_deref(),
             audio_device: (!status.is_null).then(|| status.device.clone()),
             audio_channels: status.channels,
             midi_ports: ports,
+            midi_inputs: inputs.midi_ports,
+            audio_inputs: inputs
+                .audio_inputs
+                .map(|d| d.into_iter().map(|e| e.id).collect()),
         };
         self.preflight = preflight::check(&self.doc.show, &env);
     }
@@ -1073,6 +1142,7 @@ impl Runtime {
                     "name": p.name, "addr": p.addr.to_string(),
                     "state": format!("{:?}", p.state).to_lowercase(),
                     "latency_ms": p.latency_us.map(|u| u as f64 / 1000.0),
+                    "lost": p.packets_lost, "recovered": p.recovered,
                 })
             })
             .collect();
@@ -1097,6 +1167,7 @@ impl Runtime {
             self.urls = (Some(Instant::now()), urls);
         }
         let rtp = &self.doc.show.rtp_midi;
+        let net = self.net_status.as_ref().map(|f| f()).unwrap_or(Value::Null);
         json!({
             "version": VERSION,
             "log_file": self.log_file,
@@ -1115,9 +1186,10 @@ impl Runtime {
             "audio": audio,
             "midi": {
                 "ports": self.io.midi.ports(),
-                "rtp": { "enabled": rtp.enabled, "name": rtp.session_name, "port": self.io.midi.rtp_local_port().unwrap_or(rtp.port), "peers": peers },
+                "rtp": { "enabled": rtp.enabled, "name": rtp.session_name, "port": self.io.midi.rtp_local_port().unwrap_or(rtp.port), "peers": peers, "discovered": net.get("discovered").cloned().unwrap_or_else(|| json!([])) },
             },
-            "remote": { "urls": self.urls.1, "port": port, "clients": clients },
+            "remote": { "urls": self.urls.1, "port": port, "clients": clients, "mdns": net.get("mdns").cloned().unwrap_or(Value::Null) },
+            "inputs": self.inputs.json(self.io.input_status(), snap.tc_status),
             "preflight": self.preflight,
             "layouts": LAYOUTS,
             "update": self.updater.as_ref().map(|u| u.json()).unwrap_or_else(|| crate::update::disabled_json(VERSION)),
@@ -1146,7 +1218,8 @@ impl Runtime {
             "frame": snap.frame,
             "wall_ms": now_ms(),
             "show_elapsed": snap.show_elapsed,
-            "tc": { "position": snap.tc_position, "running": snap.tc.running, "rate": snap.tc.rate, "ltc": tc.ltc_enabled, "mtc": tc.mtc_enabled },
+            "tc": { "position": snap.tc_position, "running": snap.tc.running, "rate": snap.tc.rate, "ltc": tc.ltc_enabled, "mtc": tc.mtc_enabled,
+                    "source": crate::inputs::tc_source_name(tc), "status": snap.tc_status },
             "active": snap.active,
             "next_auto": snap.next_auto,
             "meters": { "peak": meters.peak, "rms": meters.rms, "clip": meters.clip },

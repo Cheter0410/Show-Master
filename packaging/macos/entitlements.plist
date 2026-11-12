@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the Developer ID signature with hardened runtime
+  (packaging/macos/build-dmg.sh, only used when SIGN_IDENTITY is set).
+
+  Show Master is NOT sandboxed, so the com.apple.security.network.* and
+  file-access entitlements do not apply: network (remote control, OSC, MIDI,
+  rtp-midi, mDNS) and file access work without them. Audio output, CoreMIDI,
+  Metal and the system-wide hotkeys (Carbon RegisterEventHotKey) need nothing.
+  Rust code needs no JIT / unsigned-memory exceptions, and no third-party
+  libraries are loaded at run time (no disable-library-validation).
+
+  The hardened runtime blocks the microphone unless this key is present: it is
+  needed for reading LTC timecode from an audio input (the user is asked once;
+  the text is NSMicrophoneUsageDescription in Info.plist).
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.device.audio-input</key><true/>
+</dict>
+</plist>

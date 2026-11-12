@@ -41,6 +41,17 @@ impl ClockMap {
         }
     }
 
+    /// Audio clock frame rendered at `at` (inverse of [`ClockMap::instant_of`]).
+    pub fn frame_of(&self, at: Instant) -> u64 {
+        let offset = self.best.map(|b| b.0).unwrap_or(0.0);
+        let secs = if at >= self.base {
+            at.duration_since(self.base).as_secs_f64()
+        } else {
+            -self.base.duration_since(at).as_secs_f64()
+        };
+        ((secs - offset) * self.sample_rate).round().max(0.0) as u64
+    }
+
     /// Wall-clock instant at which `frame` is (or was) rendered.
     pub fn instant_of(&self, frame: u64) -> Instant {
         let offset = self.best.map(|b| b.0).unwrap_or(0.0);
@@ -68,5 +79,7 @@ mod tests {
             expect - at
         };
         assert!(diff < Duration::from_micros(50), "{diff:?}");
+        assert!(m.frame_of(expect).abs_diff(48_000) <= 2);
+        assert_eq!(m.frame_of(m.instant_of(123_456)), 123_456);
     }
 }

@@ -41,6 +41,49 @@ pub struct UiState {
     pub preflight: Vec<Issue>,
     pub layouts: Vec<String>,
     pub update: UpdateInfo,
+    /// MIDI input and timecode input status.
+    pub inputs: InputsInfo,
+}
+
+/// The last incoming MIDI message (`inputs.midi_last`).
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct MidiLast {
+    pub seq: u64,
+    pub port: String,
+    pub text: String,
+    /// note_on | note_off | control_change | program_change | msc | other
+    pub kind: String,
+    pub channel: u8,
+    pub number: u8,
+    pub value: u8,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct AudioInputEntry {
+    pub id: String,
+    pub name: String,
+    pub channels: usize,
+    pub is_default: bool,
+}
+
+/// `state.inputs`.
+#[derive(Deserialize, Clone, Debug, Default)]
+#[serde(default)]
+pub struct InputsInfo {
+    /// MIDI inputs that can be listened to (system ports and `rtp:` session).
+    pub midi_ports: Vec<String>,
+    pub midi_open: Vec<String>,
+    pub midi_count: u64,
+    pub midi_last: Option<MidiLast>,
+    /// Audio capture devices; `None` until scanned (LTC input selected).
+    pub audio_inputs: Option<Vec<AudioInputEntry>>,
+    pub ltc_open: bool,
+    pub ltc_level_db: Option<f32>,
+    pub mtc_rate: Option<String>,
+    /// Same values as tick `tc.status`.
+    pub tc_status: String,
 }
 
 impl UiState {
@@ -96,6 +139,34 @@ pub struct RtpInfo {
     pub name: String,
     pub port: u16,
     pub peers: Vec<Peer>,
+    /// Other RTP-MIDI sessions found via mDNS/Bonjour.
+    pub discovered: Vec<DiscoveredPeer>,
+}
+
+/// An RTP-MIDI session found on the network (`midi.rtp.discovered`).
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct DiscoveredPeer {
+    pub name: String,
+    /// `ip:port` of its control port.
+    pub addr: String,
+    pub host: String,
+}
+
+/// mDNS/Bonjour status (`remote.mdns`).
+#[derive(Deserialize, Clone, Debug, Default)]
+#[serde(default)]
+pub struct MdnsInfo {
+    /// The `remote.mdns` setting.
+    pub enabled: bool,
+    pub active: bool,
+    pub host: String,
+    /// `http://showmaster.local:7400` while the web interface is advertised.
+    pub url: Option<String>,
+    pub rtp_advertised: bool,
+    /// Advertised RTP-MIDI instance name ("Name (2)" after a conflict).
+    pub rtp_instance: Option<String>,
+    pub error: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]
@@ -122,6 +193,8 @@ pub struct RemoteInfo {
     pub urls: Vec<String>,
     pub port: u16,
     pub clients: Vec<Client>,
+    /// `None` when the binary runs without mDNS (tests).
+    pub mdns: Option<MdnsInfo>,
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -203,6 +276,12 @@ pub struct TcInfo {
     pub rate: String,
     pub ltc: bool,
     pub mtc: bool,
+    /// `generator` | `mtc` | `ltc`
+    #[serde(default)]
+    pub source: String,
+    /// `generator` | `no_signal` | `locking` | `locked` | `freewheel` | `lost` | `stopped` | `held`
+    #[serde(default)]
+    pub status: String,
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]

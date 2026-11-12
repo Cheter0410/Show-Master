@@ -22,6 +22,7 @@
             <key>LSHandlerRank</key><string>Owner</string>
         </dict>
     </array>
+    <key>NSMicrophoneUsageDescription</key><string>Show Master reads LTC timecode from an audio input when you choose one in Setup.</string>
     <key>NSLocalNetworkUsageDescription</key><string>Show Master serves its remote control to tablets and sends MIDI and timecode to devices on your network.</string>
 </dict>
 </plist>

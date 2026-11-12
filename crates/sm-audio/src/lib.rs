@@ -87,6 +87,7 @@
 
 pub mod backend;
 mod controller;
+pub mod input;
 mod ramp;
 mod renderer;
 pub mod source;

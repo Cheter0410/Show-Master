@@ -2,6 +2,7 @@
 # One-stop Mac build: installs what is missing (Xcode command line tools, Rust),
 # then builds dist/ShowMaster-x.y.z.dmg and shows it in the Finder.
 #   bash packaging/macos/setup-and-build.sh
+# Signing / notarization: set SIGN_IDENTITY (and NOTARY_PROFILE), see build-dmg.sh.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 

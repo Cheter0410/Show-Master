@@ -8,9 +8,11 @@
 //! timecode I/O, the native desktop window and the embedded web server for
 //! tablets and other remote devices on the local network.
 //! The only internet access is the update check (see `sm_server::update`),
-//! which can be switched off with `--no-update-check`.
+//! which can be switched off with `--no-update-check`. Optional mDNS/Bonjour
+//! advertisement (`discovery`, `sm-mdns`) uses local-link multicast only.
 
 mod demo;
+mod discovery;
 
 use sm_server::runtime::{self, Config};
 use std::fs::{self, File, OpenOptions};
@@ -314,11 +316,13 @@ fn main() -> std::process::ExitCode {
         }
     };
 
+    let net = discovery::Shared::default();
     let (handle, engine_thread) = runtime::spawn(Config {
         show_path: args.show.clone(),
         port: args.port,
         update_check: args.update_check,
         log_file: Some(log_path.clone()),
+        net_status: Some(net.status_fn()),
         ..Config::default()
     });
     let state = handle.state();
@@ -386,6 +390,9 @@ fn main() -> std::process::ExitCode {
             open_browser(&format!("http://127.0.0.1:{local}"));
         }
     }
+    // mDNS/Bonjour (optional comfort, also in headless mode). The web interface
+    // is only advertised when it listens on the network.
+    let advertiser = discovery::start(handle.clone(), net, bound.filter(|_| lan));
 
     // Ctrl+C (terminal) quits like the Quit button.
     let ctrl_c_handle = handle.clone();
@@ -424,6 +431,9 @@ fn main() -> std::process::ExitCode {
         }
     };
     tracing::info!("shutting down");
+    if let Some(a) = advertiser {
+        a.stop();
+    }
     server.abort();
     // Stop the engine thread; it autosaves on the way out.
     handle.shutdown();

@@ -306,7 +306,15 @@ impl MidiHub {
 
     /// Start, stop or reconfigure the RTP-MIDI session to match the show.
     pub fn configure_rtp(&mut self, cfg: &RtpMidiSettings) -> Result<(), String> {
-        if self.rtp_cfg.as_ref() == Some(cfg) {
+        // `advertise` only concerns mDNS (sm-mdns): toggling it keeps the session.
+        let same = |c: &RtpMidiSettings| {
+            RtpMidiSettings {
+                advertise: cfg.advertise,
+                ..c.clone()
+            } == *cfg
+        };
+        if self.rtp_cfg.as_ref().is_some_and(same) {
+            self.rtp_cfg = Some(cfg.clone());
             return Ok(());
         }
         self.rtp_cfg = Some(cfg.clone());
@@ -348,6 +356,11 @@ impl MidiHub {
             .and_then(|g| g.clone())
             .ok_or("RTP-MIDI is not enabled")?;
         session.connect(addr).map_err(|e| e.to_string())
+    }
+
+    /// The running RTP-MIDI session (to receive from its peers).
+    pub fn rtp_session(&self) -> Option<Arc<Session>> {
+        self.rtp.lock().ok().and_then(|g| g.clone())
     }
 
     pub fn rtp_peers(&self) -> Vec<PeerInfo> {
@@ -489,6 +502,7 @@ mod tests {
             port: 0,
             connect_to: vec![],
             journal: false,
+            advertise: false,
         };
         hub.configure_rtp(&cfg).unwrap();
         assert_eq!(hub.ports(), vec!["rtp:T".to_string()]);

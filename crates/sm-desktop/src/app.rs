@@ -86,6 +86,8 @@ pub struct App {
     style_key: Option<(bool, bool)>,
     /// Per-machine preferences (touch mode).
     pub prefs: crate::prefs::Prefs,
+    /// System-wide hotkeys of this machine (inactive unless started by `run`).
+    pub global_hotkeys: crate::global_hotkeys::GlobalHotkeys,
     /// A touch event was seen this session (drives touch mode "Auto").
     pub touch_seen: bool,
     /// Size class of the window this frame.
@@ -121,6 +123,7 @@ impl App {
             allow_close: false,
             style_key: None,
             prefs: crate::prefs::Prefs::default(),
+            global_hotkeys: Default::default(),
             touch_seen: false,
             screen: crate::responsive::Screen::default(),
             recovery_asked: false,
@@ -827,6 +830,7 @@ impl App {
         self.handle_close_request(ctx);
         self.handle_dropped_files(ctx);
         crate::setup::capture_keys(self, ctx);
+        crate::global_hotkeys::process(self, ctx);
         self.hotkeys(ctx);
         self.toasts.retain(|t| t.until > Instant::now());
         // Clocks, meters and running cues move continuously; when nothing

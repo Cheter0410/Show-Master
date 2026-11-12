@@ -5,7 +5,9 @@
 #   2. static: the built web UI references no external origin,
 #   3. dynamic (Linux): the app is started with --no-update-check inside an empty network namespace
 #      (loopback only), driven through its API, and strace shows that it never
-#      tried to connect to a non-loopback address.
+#      tried to connect to a non-loopback address. The only exception is
+#      mDNS/Bonjour (optional, on by default): UDP to the local-link multicast
+#      group 224.0.0.251 / ff02::fb on port 5353, which routers never forward.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -54,7 +56,7 @@ flags = struct.unpack("16sH", fcntl.ioctl(s, 0x8913, struct.pack("16sH", b"lo", 
 fcntl.ioctl(s, 0x8914, struct.pack("16sH", b"lo", flags | 1))
 PY
 TRACE=""
-if command -v strace >/dev/null 2>&1; then TRACE="strace -f -e trace=connect,sendto -o $WORK/trace.log"; fi
+if command -v strace >/dev/null 2>&1; then TRACE="strace -f -e trace=connect,sendto,sendmsg,sendmmsg -o $WORK/trace.log"; fi
 $TRACE "$BIN" --headless --no-update-check --port 7499 --log-dir "$WORK/logs" "$WORK/offline.smshow" > "$WORK/app.log" 2>&1 &
 PID=$!
 for i in $(seq 1 50); do curl -fs --noproxy '*' http://127.0.0.1:7499/api/session >/dev/null 2>&1 && break; sleep 0.2; done
@@ -78,11 +80,13 @@ export BIN WORK
 unshare -r -n bash "$WORK/inner.sh"
 test -s "$WORK/offline.smshow"
 if [ -s "$WORK/trace.log" ]; then
-  # Any connect()/sendto() to an address that is not loopback / unix / netlink is a failure.
-  if grep -E "sin_addr=inet_addr\(\"|inet_pton\(AF_INET6" "$WORK/trace.log" | grep -vE '127\.0\.0\.1|"::1"|0\.0\.0\.0' | head -5 | grep . ; then
+  # Any connect()/send*() to an address that is not loopback / unix / netlink is a failure,
+  # except mDNS: port 5353 to the local-link multicast groups 224.0.0.251 / ff02::fb.
+  MDNS='sin6?_port=htons\(5353\).*(sin_addr=inet_addr\("224\.0\.0\.251"\)|inet_pton\(AF_INET6, "ff02::fb")'
+  if grep -E "sin_addr=inet_addr\(\"|inet_pton\(AF_INET6" "$WORK/trace.log" | grep -vE '127\.0\.0\.1|"::1"|0\.0\.0\.0' | grep -vE "$MDNS" | head -5 | grep . ; then
     echo "FAIL: the app tried to reach a non-loopback address" >&2; exit 1
   fi
-  echo "ok: no outbound connection attempts (strace)"
+  echo "ok: no outbound connection attempts (strace); mDNS multicast packets (allowed): $(grep -cE "$MDNS" "$WORK/trace.log" || true)"
 else
   echo "note: strace not installed - skipped syscall check"
 fi

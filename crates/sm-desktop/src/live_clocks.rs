@@ -139,6 +139,27 @@ pub fn tc_text(tc: &TcInfo) -> &str {
     }
 }
 
+/// Badge for an external timecode source: text, colour, filled.
+/// `None` while the internal generator is the source.
+pub fn tc_source_badge(tc: &TcInfo) -> Option<(String, Color32, bool)> {
+    let src = match tc.source.as_str() {
+        "mtc" => "MTC",
+        "ltc" => "LTC",
+        _ => return None,
+    };
+    let (state, color, on) = match tc.status.as_str() {
+        "locked" => ("LOCKED", theme::NEXT, true),
+        "locking" => ("LOCKING", theme::WARN, true),
+        "freewheel" => ("FREEWHEEL", theme::PAUSED, true),
+        "lost" => ("LOST", theme::ERROR, true),
+        "no_signal" => ("NO SIGNAL", theme::ERROR, true),
+        "stopped" => ("STOPPED", theme::MUTED, false),
+        "held" => ("HELD", theme::WARN, false),
+        other => (other, theme::MUTED, false),
+    };
+    Some((format!("EXT {src} {state}"), color, on))
+}
+
 /// What the user asked for in the clock strip.
 #[derive(Default)]
 pub struct StripAction {
@@ -230,11 +251,16 @@ pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> StripAction {
 
     // Timecode.
     let tc = &tick.tc;
+    let external = tc_source_badge(tc);
     let free = clock_cell(
         ui,
         cells[2],
         &ClockCell {
-            caption: "Timecode",
+            caption: if external.is_some() {
+                "Timecode ext"
+            } else {
+                "Timecode"
+            },
             value: tc_text(tc),
             color: if tc.running { text } else { dim },
             accent: tc.running.then_some(theme::RUNNING),
@@ -249,6 +275,11 @@ pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> StripAction {
     }
     if !tc.rate.is_empty() && free.width() > 60.0 {
         right = badge(ui, right, cy, &tc.rate, false, theme::MUTED);
+    }
+    if let Some((text, color, on)) = &external {
+        if free.width() > 200.0 {
+            right = badge(ui, right, cy, text, *on, *color);
+        }
     }
     let _ = badge(
         ui,
@@ -266,6 +297,21 @@ pub fn clock_strip(ui: &mut egui::Ui, rect: Rect, tick: &Tick) -> StripAction {
         .on_hover_text("Right-click or long-press for timecode controls");
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Timecode controls"));
     resp.context_menu(|ui| {
+        if external.is_some() {
+            // Chasing: the source runs the clock; only following can be suspended.
+            if tc.status == "held" {
+                if ui.button("Follow external timecode again").clicked() {
+                    timecode = Some("tc_resume");
+                }
+            } else if ui
+                .button("Stop following (hold)")
+                .on_hover_text("Timecode triggers stop until you follow again")
+                .clicked()
+            {
+                timecode = Some("tc_pause");
+            }
+            return;
+        }
         if tc.running {
             if ui.button("Pause timecode").clicked() {
                 timecode = Some("tc_pause");

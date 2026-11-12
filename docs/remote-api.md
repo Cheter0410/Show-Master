@@ -84,13 +84,51 @@ that sees a `rev` gap must reconnect (the server then sends a fresh `state`).
                             "sample_rates": [44100, 48000], "is_default": true } ] },
   "midi": { "ports": ["IAC Bus 1", "rtp:Show Master"],
             "rtp": { "enabled": true, "name": "Show Master", "port": 5004,
-                     "peers": [ { "name": "iPad", "addr": "192.168.1.20:5004", "state": "connected", "latency_ms": 1.2 } ] } },
+                     "peers": [ { "name": "iPad", "addr": "192.168.1.20:5004", "state": "connected", "latency_ms": 1.2,
+                                  "lost": 3, "recovered": 2 } ],
+                     "discovered": [ { "name": "Studio Mac", "addr": "192.168.1.30:5004", "host": "studio-mac.local" } ] } },
   "remote": { "urls": ["http://192.168.1.10:7400"], "port": 7400,
-              "clients": [ { "id": 3, "role": "control", "addr": "192.168.1.20", "since_ms": 1731312000000, "agent": "Safari…" } ] },
+              "clients": [ { "id": 3, "role": "control", "addr": "192.168.1.20", "since_ms": 1731312000000, "agent": "Safari…" } ],
+              "mdns": { "enabled": true, "active": true, "host": "showmaster.local", "url": "http://showmaster.local:7400",
+                        "rtp_advertised": true, "rtp_instance": "Show Master", "error": null } },
   "preflight": [ { "severity": "error"|"warning"|"info", "cue": 17, "message": "…" } ],
   "layouts": ["mono","stereo","lcr","quad","5.1","7.1"]
 }
 ```
+
+mDNS/Bonjour fields (optional comfort, see `decisions.md`):
+
+- `midi.rtp.peers[].lost` – RTP packets from this peer detected as lost; `recovered` – MIDI messages
+  synthesised from the peer's recovery journal after a loss (note-offs, controller values, program
+  changes, recent note-ons).
+- `midi.rtp.discovered` – other RTP-MIDI sessions found via mDNS (`_apple-midi._udp`), sorted by name.
+  `addr` (`ip:port` of the control port) can be passed to `rtp_connect`. Empty while RTP-MIDI or
+  `rtp_midi.advertise` is off.
+- `remote.mdns` – `null` when the process runs without mDNS (tests, embedding). `enabled` mirrors
+  `settings.remote.mdns`; `active` = the mDNS responder runs; `host` = advertised host name
+  (`showmaster.local`, `showmaster-2.local` after a name conflict); `url` = base URL by name while the
+  web interface is advertised (`null` otherwise – e.g. with `--local-only`); `rtp_advertised` = the
+  RTP-MIDI session is advertised, `rtp_instance` = under which name (`Name (2)` if the name was taken); `error` = last problem (e.g. no multicast on this network). The IP
+  URLs in `remote.urls` always work and remain the primary way in.
+
+### Inputs (`state.inputs`)
+
+```jsonc
+"inputs": {
+  "midi_ports": ["USB Pad", "IAC Bus 1", "rtp:Show Master"],  // MIDI inputs that can be listened to
+  "midi_open": ["USB Pad", "rtp:Show Master"],                // open right now
+  "midi_count": 12,                                           // messages received (not MTC / clock)
+  "midi_last": { "seq": 12, "port": "USB Pad", "text": "Note on ch 1 note 60 vel 100",
+                 "kind": "note_on"|"note_off"|"control_change"|"program_change"|"msc"|"other",
+                 "channel": 1, "number": 60, "value": 100 } | null,   // for "learn" and troubleshooting
+  "audio_inputs": [ { "id": "…", "name": "…", "channels": 2, "is_default": true } ] | null,  // scanned only while LTC input is selected
+  "ltc_open": false, "ltc_level_db": -18.5 | null,            // LTC capture stream, peak of the last second
+  "mtc_rate": "25 fps" | null,                                // rate announced by the incoming MTC
+  "tc_status": "generator"                                    // same values as tick tc.status
+}
+```
+
+`inputs` is republished at most every 200 ms while MIDI arrives.
 
 ## Tick (fast-changing values)
 
@@ -98,7 +136,9 @@ that sees a `rev` gap must reconnect (the server then sends a fresh `state`).
 {
   "t": "tick", "frame": 123456, "wall_ms": 1731312000000,
   "show_elapsed": 12.5 | null,
-  "tc": { "position": "01:00:12:10", "running": true, "rate": "25", "ltc": true, "mtc": false },
+  "tc": { "position": "01:00:12:10", "running": true, "rate": "25", "ltc": true, "mtc": false,
+          "source": "generator"|"mtc"|"ltc",
+          "status": "generator"|"no_signal"|"locking"|"locked"|"freewheel"|"lost"|"stopped"|"held" },
   "active": [ { "cue": 5, "list": 1, "phase": "pre_wait"|"running"|"post_wait", "paused": false,
                 "elapsed": 1.2, "duration": 30.0 | null, "from_tc": false } ],
   "next_auto": 3.2 | null,                 // seconds until the next automatically fired cue
@@ -116,13 +156,24 @@ that sees a `rev` gap must reconnect (the server then sends a fresh `state`).
   "settings": { "go_debounce_ms": 250, "panic_fade_ms": 0, "stop_fade_ms": 500, "panic_double_tap": false,
                 "double_tap_ms": 600, "quit_lock": true, "high_contrast": false,
                 "audio": { "backend": null, "device": null, "sample_rate": 48000, "buffer_frames": 256, "channels": 2 },
-                "remote": { "enabled": true, "port": 7400, "control_pin": "1234", "view_pin": "", "osc_port": 0 },
+                "remote": { "enabled": true, "port": 7400, "control_pin": "1234", "view_pin": "", "osc_port": 0, "mdns": true },
                 "timer_alarms": [ { "at": 3600.0, "label": "Interval" } ] },
   "patch": { "outputs": [ { "name": "L", "channel": 0 } ], "groups": [ { "name": "stereo", "layout": "stereo", "outputs": [0, 1] } ] },
   "midi_ports": [ { "name": "Desk", "device": "IAC Bus 1" } ],
-  "rtp_midi": { "enabled": false, "session_name": "Show Master", "port": 5004, "connect_to": ["192.168.1.20:5004"], "journal": false },
+  "rtp_midi": { "enabled": false, "session_name": "Show Master", "port": 5004, "connect_to": ["192.168.1.20:5004"], "journal": false,
+                "advertise": true },
   "timecode": { "rate": "23.976"|"24"|"25"|"29.97df"|"29.97"|"30", "start": "01:00:00:00", "mode": "freerun"|"transport",
-                "ltc_enabled": false, "ltc_channel": 1, "ltc_level_db": -12.0, "mtc_enabled": false, "mtc_port": "" },
+                "ltc_enabled": false, "ltc_channel": 1, "ltc_level_db": -12.0, "mtc_enabled": false, "mtc_port": "",
+                "source": "generator"|"external",
+                "input": { "kind": "mtc"|"ltc", "mtc_port": "",            // alias / device / "rtp:…"; "" = any listened port
+                           "ltc_device": null, "ltc_channel": 0,           // audio input id (null = default), zero-based channel
+                           "lock_frames": 4, "freewheel_ms": 2000 } },
+  "midi_input": { "mode": "none"|"all"|"selected", "ports": ["Desk", "rtp:Show Master"],
+                  "mappings": [ { "port": "", "kind": "note_on"|"control_change"|"program_change", "channel": 0 /* 0 = any */,
+                                  "number": 60, "min_value": 1,
+                                  "action": "go"|"stop_all"|"panic"|"toggle_pause"|"pause_all"|"resume_all"|"next"|"previous"|"reset"|"goto_number"|"start_cue",
+                                  "cue_number": "" } ],
+                  "msc": { "enabled": false, "device_id": 1 /* 127 = any */, "command_format": 16 /* 0x10 sound, 127 = all */ } },
   "hotkeys": { "Space": "go", "Escape": "panic", "Ctrl+KeyZ": "undo" },   // KeyboardEvent.code with Ctrl+/Shift+/Alt+/Meta+ prefixes -> action
   "cue_lists": [ { "id": 1, "name": "Main", "tc_jump": "fire"|"skip"|"chase", "cues": [ /* Cue */ ] } ]
 }
@@ -151,6 +202,35 @@ Cue:
   // { "type": "memo" }
 }
 ```
+
+All `midi_input` and `timecode.source` / `timecode.input` fields are optional in a showfile (defaults
+above); shows saved before they existed load unchanged (schema version stays 2).
+
+## External inputs
+
+**MIDI input.** `midi_input.mode` chooses the system input ports that are opened: `none` (default),
+`all` (every port except "Through" loopbacks, plus RTP-MIDI peers) or `selected` (`ports`, aliases or
+device names, `rtp:<session>` = RTP-MIDI peers). Ports are opened on a background thread and reopened
+when a device comes back. Incoming messages are handled on the engine thread:
+
+- **Mapping** (`mappings`, empty by default): note-on (velocity ≥ `min_value`, velocity 0 never),
+  control change (fires when the value rises to `min_value` or above; a repeated high value counts as a
+  new press after 250 ms) or program change, on `channel` (0 = any) from `port` (empty = any listened
+  port) → the transport command `action` (`goto_number` / `start_cue` use `cue_number`). Executed as
+  commands on the bus with role `control` and origin `midi`; every mapped message is logged.
+- **MSC** (`msc.enabled`, off by default): messages to `device_id` (or all-call 127; `device_id` 127
+  answers every id) with `command_format` (or 0x7F all-types). `GO` with a cue number = go to that cue
+  and fire it (a cue inside a group is started directly), `GO` without = `go`; `STOP` = stop that cue /
+  `stop_all`; `RESUME` = resume that cue / `resume_all`; `ALL_OFF` = `stop_all`; `RESET` = `reset`;
+  `LOAD` = playhead to that cue. Other commands and unknown cue numbers are logged and ignored.
+
+**Timecode input / chase.** With `timecode.source: "external"` the engine's timecode follows MTC (from
+`input.mtc_port`) or LTC (audio input `input.ltc_device`, channel `input.ltc_channel`; the frame rate
+is `timecode.rate`). It locks after `lock_frames` consistent frames, keeps running on its own for
+`freewheel_ms` when the input stops and then stops (`lost`); an MTC Full Frame or a repeated LTC frame
+stops it at that position. Jumps of the source apply each list's `tc_jump` policy. While chasing,
+`tc_start`/`tc_resume` and `tc_stop`/`tc_pause` (and timecode cues) only resume or suspend following
+(`held`; PANIC also holds), `tc_relocate` is ignored, and LTC/MTC outputs send the chased timecode.
 
 ## Commands
 
@@ -207,7 +287,7 @@ Every command is `{ "cmd": "<name>", …fields }`.
 | `collect_media` | | copy media into `<show dir>/media`, store hashes |
 | `recover` | `accept`: bool | load or discard the autosave |
 | `kick_client` | `id` | disconnect a remote client |
-| `rtp_connect` | `addr` | invite an RTP-MIDI peer now |
+| `rtp_connect` | `addr` | invite an RTP-MIDI peer now (`ip:port`, e.g. from `midi.rtp.discovered`) |
 | `clear_log` | | |
 
 Errors come back as `{ "ok": false, "error": "…" }`; permission problems use `forbidden`, live-mode

@@ -75,6 +75,38 @@ revidieren lassen.
 - Schließen des Fensters beendet das Programm. Im Live-Modus (Quit-Schutz), bei laufenden Cues oder
   ungespeicherten Änderungen wird vorher nachgefragt. Der Windows-Release-Build hat kein Konsolenfenster.
 
+## mDNS/Bonjour und RTP-MIDI-Recovery (nachträglich)
+
+- **mDNS ist eine optionale Komfortfunktion mit Rückfallebene.** Show Master meldet die Weboberfläche
+  als `_http._tcp` („Show Master on <Rechner>“, TXT `path=/remote`) unter dem Namen
+  `showmaster.local` an (bei Konflikt mit einem zweiten Show-Master-Rechner automatisch
+  `showmaster-2.local`) und die RTP-MIDI-Session als `_apple-midi._udp` auf ihrem Control-Port; andere
+  RTP-MIDI-Sessions werden gesucht und in *Setup → MIDI* mit „Connect“ angeboten. Zugriff per IP und
+  QR-Code bleibt der Hauptweg und funktioniert immer – auch wenn Multicast im Netz gesperrt ist,
+  Port 5353 nicht geöffnet werden kann oder der Dienst nicht startet (dann nur Log-Eintrag und Hinweis
+  in Setup, kein Fehler).
+- **Datenschutz/Offline:** mDNS sendet ausschließlich an die Link-lokalen Multicast-Gruppen
+  224.0.0.251 / ff02::fb, UDP 5353 (TTL 255, Router leiten das nicht weiter). Angekündigt werden nur
+  Rechnername, Instanzname, IP-Adressen und Ports – keine Show-Inhalte. `scripts/offline-test.sh`
+  erlaubt genau diese Pakete und sonst weiterhin nichts außer Loopback.
+- **Schalter:** `settings.remote.mdns` (Weboberfläche, Standard an) und `rtp_midi.advertise`
+  (RTP-MIDI ankündigen *und* suchen, Standard an). Beide wirken ohne Neustart (ein Hintergrund-Thread
+  gleicht jede Viertelsekunde mit den Einstellungen ab); sind beide aus, läuft kein mDNS-Dienst und
+  es wird nichts gesendet. Mit `--local-only` oder ausgeschaltetem Remote wird die Weboberfläche nicht
+  angekündigt. Auch `--headless` kündigt an.
+- **Bibliothek:** `mdns-sd` (reines Rust, eigener Thread, keine async-Runtime), Version fest gepinnt.
+  Der mDNS-Thread liest nur den veröffentlichten Zustand und blockiert weder Engine noch Audio.
+- **Recovery beim Empfang (RFC 6295 §4, Anhang A):** Bei einer Lücke in der Sequenznummer und J=1 im
+  nächsten Paket vergleicht der Empfänger das Journal mit seinem Wissen über den Strom des Peers
+  (Programm/Bank, Controller-Werte, klingende Noten je Kanal) und liefert die Differenz **vor** den
+  Befehlen des Pakets aus: Note-Offs für Noten, die laut Journal losgelassen wurden, abweichende
+  Controller- und Programmwerte, und Note-Ons nur, wenn der Sender sie als frisch markiert (Y=1) –
+  alte Trigger werden nie nachträglich ausgelöst. Bei genau einem verlorenen Paket werden nur
+  Strukturen mit S=0 (= das verlorene Paket) ausgewertet. Das Journal des ersten Pakets einer
+  Verbindung wird bewusst nicht ausgewertet (keine Vorgeschichte, sonst würden alte Befehle feuern).
+  Funktioniert unabhängig davon, ob wir selbst mit Journal senden. Zähler `lost`/`recovered` je Peer
+  im Zustand.
+
 ## Robustheit (nachträglich)
 
 - **Audio-Gerät verloren / zurück:** Ein Watcher-Thread hält die Geräteliste aktuell. Fällt das Gerät aus
@@ -86,6 +118,62 @@ revidieren lassen.
 - **Keine CI:** Gebaut wird lokal (Linux-PC: Linux + Windows, Mac: DMG). Die GitHub-Workflows wurden
   entfernt, damit keine Actions-Kosten entstehen.
 
+## Externe Eingänge: MIDI-Steuerung, MSC, Timecode-Chase (nachträglich)
+
+- **Nichts reagiert ungefragt.** MIDI-Eingang steht standardmäßig auf „Nothing“, die Zuordnungsliste
+  ist leer und MSC-Empfang aus. Erst was in *Setup → MIDI* eingerichtet ist, löst etwas aus. „All
+  ports“ lässt Ports mit „Through“ im Namen aus (Loopback: eigene MIDI-Cues kämen sonst als Eingang
+  zurück); ausdrücklich ausgewählt werden können sie trotzdem.
+- **Ein Weg für alles.** Zugeordnete Nachrichten und MSC werden zu normalen Transport-Commands (Rolle
+  *control*, Herkunft `midi`) und laufen über denselben Command-Bus wie Hotkeys und iPad, inklusive
+  GO-Entprellung. Jede ausgelöste Zuordnung und jede MSC-Nachricht an uns steht im Log.
+- **Controller (CC) lösen auf der steigenden Flanke aus** (Wert erreicht oder überschreitet
+  `min_value`); ein erneuter hoher Wert gilt nach 250 ms Pause als neuer Tastendruck (Taster, die nur
+  127 senden). Fader gehören nicht auf GO. Note-on mit Velocity 0 ist Note-off und löst nie aus.
+- **MSC:** `GO` mit Cue-Nummer = Playhead auf den Cue und GO (wie QLab); liegt der Cue in einer Gruppe,
+  wird er direkt gestartet. `STOP`/`RESUME` mit Nummer betreffen nur diesen Cue, ohne Nummer alles.
+  `Q_list`/`Q_path` werden ignoriert (Cue-Nummern sind showweit eindeutig). `TIMED_GO`, `SET`, `FIRE`,
+  `GO_OFF`, `RESTORE` werden protokolliert und ignoriert. Device-ID 127 in den Einstellungen = auf jede
+  ID antworten; All-Call (127) und Format 0x7F werden immer angenommen.
+- **Empfang blockiert nichts.** Ports öffnet ein eigener Thread (`sm-midi-in`, Rescan alle 2 s,
+  ausgesteckte Geräte werden geschlossen und beim Wiederkommen neu geöffnet); der MIDI-Callback stempelt
+  nur die Zeit und legt die Nachricht in einen Kanal. Die LTC-Eingabe läuft über einen eigenen
+  cpal-Eingangsstrom (`sm_audio::input`): Der Callback kopiert einen Kanal in einen lock-freien
+  Ringpuffer (2 s) – ohne Allokation, Lock oder I/O –, öffnen/schließen erledigt der Thread
+  `sm-audio-in`, dekodiert wird auf dem Engine-Thread.
+- **Chase-Verhalten:**
+  - *Zeitbezug:* Jedes empfangene Frame wird auf die Audio-Clock abgebildet: MTC über den
+    Empfangszeitpunkt des Viertelframes 0 (Beginn des gemeldeten Frames; Empfänger rechnen „+2 Frames“
+    beim kompletten Zyklus), LTC über das Ende des Sync-Worts (Beginn des nächsten Frames) und die
+    Zeitstempel der Eingangs-Callbacks. Der Engine-Transport wird auf genau diesen Sample-Zeitpunkt
+    verankert; von dort rechnen Trigger, LTC- und MTC-Ausgang mit derselben Ganzzahlarithmetik wie beim
+    Generator.
+  - *Lock* nach `lock_frames` (Standard 4) aufeinanderfolgenden, zueinander passenden Frames (±½ Frame).
+  - *Abweichung:* bis 1 Frame wird toleriert (Jitter), darüber muss ein zweites Frame die neue Lage
+    bestätigen. Bis 4 Frames gilt das als Drift: neu verankern, schon gefeuerte Trigger feuern nicht
+    erneut, übersprungene sofort. Darüber ist es ein **Sprung**: die Sprungregel der Cue-Liste
+    (fire/skip/chase) gilt wie beim Generator. Ein einzelnes Ausreißer-Frame ändert nichts.
+  - *Freewheel:* Bleibt das Signal aus (> 6 Frames + 50 ms), läuft der Timecode selbständig weiter
+    (Trigger feuern weiter) bis `freewheel_ms` (Standard 2000 ms) nach dem letzten gültigen Frame;
+    dann **lost**: der Timecode bleibt an der Position stehen, kein Trigger feuert mehr. Der Verlust ist
+    ein Zeitpunkt in der Engine (unabhängig von der Schrittweite).
+  - *Stopp:* MTC-Full-Frame (Quelle steht oder springt) und ein LTC-Standbild (dasselbe Frame dreimal)
+    halten den Timecode sofort an der gemeldeten Position an. Läuft die Quelle wieder, wird neu gelockt
+    – als Sprung mit der Sprungregel der Liste (*fire* feuert dabei nichts, weil vorher nichts lief).
+  - *Rückwärts* laufendes MTC/LTC wird nicht verfolgt (gilt als Aussetzer).
+  - *PANIC* hält das Verfolgen an („held“), damit keine Trigger mehr feuern; Fortsetzen per
+    Rechtsklick auf die Timecode-Uhr („Follow external timecode again“) oder `tc_resume`. Timecode-Cues,
+    `tc_start`/`tc_stop` und Transport-Modus bewegen den Timecode im Chase-Betrieb nicht.
+  - *Genauigkeit:* Trigger feuern auf dem Sample, das der Verankerung entspricht. Mit LTC ist das im
+    Test samplegenau zur Quelle (±2 Samples, gleiche Clock); real kommen der Versatz zwischen Eingangs-
+    und Ausgangsgerät (Puffer, Wandlerlatenz) und bei MTC der Empfangsjitter des Betriebssystems hinzu –
+    dokumentierte Toleranz: ±1 Frame, typisch wenige Millisekunden (an Hardware zu messen).
+- **LTC/MTC-Ausgang im Chase-Betrieb** senden den verfolgten Timecode neu (Konverter MTC↔LTC; bei
+  Freewheel läuft er weiter, bei *lost* steht er). Pre-Flight warnt, wenn MTC über denselben Port
+  empfangen und gesendet wird (Rückkopplung), und meldet fehlende Eingangs-Ports/-Geräte.
+- **Kein Schema-Sprung.** Alle neuen Felder (`midi_input`, `timecode.source`, `timecode.input`) haben
+  Standardwerte; Version-2-Shows ohne sie laden unverändert (Test in `showfile.rs`).
+
 ## Bekannte Grenzen
 
 - **Dateien öffnen im Hintergrund.** Audiodateien werden von zwei eigenen Threads geöffnet, nie von der
@@ -94,6 +182,10 @@ revidieren lassen.
 - **rtp-midi:** kein Bonjour/mDNS (Verbindung per IP:Port), kein empfangsseitiges Recovery, Journal
   (Kapitel P/C/N) standardmäßig aus, bis es gegen echte Gegenstellen geprüft ist.
 - **MIDI-Timing** ist nicht samplegenau, sondern über die Audio-Clock terminiert (siehe Architektur).
+- **Timecode-Eingang:** keine automatische Erkennung der Framerate (die Show-Rate muss zur Quelle
+  passen; abweichende MTC-Rate oder LTC-Drop-Frame-Flag wird einmal im Log gemeldet), keine
+  Varispeed-Verfolgung (Drift wird nur durch Neuverankern ab 1 Frame korrigiert), kein Rückwärtslauf,
+  keine Latenzkompensation für das Eingangsgerät.
 - **AAC/M4A:** Encoder-Vorlauf wird nicht abgeschnitten (ca. 1024 Frames). Für framegenaue Einsätze
   WAV/AIFF/FLAC verwenden.
 - **mDNS** für die Remote-URL gibt es nicht; Zugriff per IP/QR-Code.

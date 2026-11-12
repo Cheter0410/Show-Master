@@ -119,6 +119,31 @@ fn short_agent(agent: &str) -> &str {
     }
 }
 
+/// The `http://showmaster.local:7400` style address (mDNS), below the IP URLs.
+fn mdns_url(ui: &mut egui::Ui, s: &UiState) {
+    let Some(m) = s.remote.mdns.as_ref().filter(|m| m.enabled) else {
+        return;
+    };
+    match &m.url {
+        Some(url) => {
+            ui.horizontal(|ui| {
+                ui.monospace(format!("{url}/remote"));
+                unit(ui, "by name (Bonjour); the IP address always works");
+            });
+        }
+        None => {
+            if let Some(e) = &m.error {
+                ui.label(
+                    RichText::new(format!(
+                        "Bonjour name unavailable ({e}) - use the IP address."
+                    ))
+                    .color(theme::WARN),
+                );
+            }
+        }
+    }
+}
+
 pub(super) fn remote_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
     let r = &s.show.settings.remote;
     heading(ui, "Remote access");
@@ -167,6 +192,28 @@ pub(super) fn remote_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
                 unit(ui, note);
             });
         }
+        row(ui, "Bonjour", |ui| {
+            let mut on = r.mdns;
+            if ui
+                .checkbox(&mut on, "Advertise by name (mDNS)")
+                .on_hover_text(
+                    "Tablets can open the remote by name instead of the IP address. \
+                     Local network only (multicast); the IP address always works.",
+                )
+                .changed()
+            {
+                st.update_settings(json!({ "remote": { "mdns": on } }));
+            }
+            if let Some(host) = s
+                .remote
+                .mdns
+                .as_ref()
+                .filter(|m| m.active && r.mdns)
+                .map(|m| &m.host)
+            {
+                unit(ui, host);
+            }
+        });
         row(ui, "OSC port", |ui| {
             if let Some(v) = num_field(ui, &mut st.drafts, "osc_port", r.osc_port, 0, 65534, 70.0) {
                 st.update_settings(json!({ "remote": { "osc_port": v } }));
@@ -204,6 +251,7 @@ pub(super) fn remote_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
                 unit(ui, "view only");
             });
         }
+        mdns_url(ui, s);
         let base = s.remote.urls[0].clone();
         ui.add_space(6.0);
         ui.horizontal_top(|ui| {

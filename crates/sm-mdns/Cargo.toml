@@ -1,0 +1,18 @@
+[package]
+name = "sm-mdns"
+description = "Optional mDNS/DNS-SD (Bonjour) advertisement and discovery for Show Master (local-link multicast only)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Pure Rust, no async runtime; runs its own daemon thread. Pinned on purpose.
+mdns-sd = { version = "=0.21.7", default-features = false, features = ["logging"] }
+gethostname = "1"
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

@@ -20,6 +20,14 @@
 //!   by `RS` feedback. Opt-in through [`SessionConfig::journal`]; the default is
 //!   `false`, i.e. packets are sent with `J = 0`, which every known
 //!   implementation accepts.
+//! * **Recovery journal, receiver side** ([`recovery`]): always active,
+//!   independent of our own sender setting. When a sequence gap is detected and
+//!   the packet ending the loss carries a journal, chapters P, C and N are
+//!   compared with the per-peer receiver state (program/bank, controller values,
+//!   sounding notes) and the missing note-offs, controller values and program
+//!   changes - and NoteOns the sender marked as recent (Y=1) - are delivered
+//!   through the receiver callback *before* the packet's own commands. Counted
+//!   in [`PeerInfo::recovered`]. Stale NoteOns (Y=0) are never replayed.
 //! * **[`Session`]**: binds a control port `P` and a data port `P + 1`, accepts
 //!   invitations (responder), initiates connections ([`Session::connect`]) with
 //!   retry and optional automatic reconnect, keeps clocks in sync, times out
@@ -27,17 +35,22 @@
 //!
 //! ## Limitations (deliberate)
 //!
-//! * **No discovery.** Peers connect by `IP:port`. mDNS/Bonjour
-//!   (`_apple-midi._udp`) advertisement is an optional comfort feature for later;
-//!   a macOS/iOS/rtpMIDI peer can always be pointed at this session manually, or
-//!   this session can [`Session::connect`] to it.
-//! * **No receiver-side recovery.** A received recovery journal is skipped. Packet
-//!   loss is detected from the RTP sequence number and counted in
-//!   [`PeerInfo::packets_lost`], but no state is reconstructed from the journal.
+//! * **No discovery in this crate.** Peers connect by `IP:port`. mDNS/Bonjour
+//!   (`_apple-midi._udp`) advertisement and browsing live in the separate
+//!   `sm-mdns` crate (optional comfort); a macOS/iOS/rtpMIDI peer can always be
+//!   pointed at this session manually, or this session can [`Session::connect`]
+//!   to it.
 //! * **Journal chapters:** only P, C and N are emitted. Pitch bend, aftertouch,
 //!   system messages (incl. MTC) and SysEx are not journalled. Chapter C always
 //!   uses the plain 7-bit value tool; RPN/NRPN are not treated specially
 //!   (no chapter M).
+//! * **Recovery on receive** evaluates only chapters P, C (value tool) and N.
+//!   Lost pitch bend, aftertouch, RPN/NRPN (chapter M), system messages and
+//!   SysEx are not repaired; the system journal is skipped. Controller logs
+//!   using the toggle/count tools and channel mode controllers (120-127) are
+//!   not replayed. The journal of the first packet of a link is not evaluated
+//!   (no history to compare with; replaying it could fire stale commands).
+//!   Packet loss is counted in [`PeerInfo::packets_lost`] in any case.
 //! * **Timestamps:** all messages of one [`Session::send`] call carry the session
 //!   time of the call (delta time 0). The session clock runs at 10 kHz
 //!   (100 µs units) like Apple's implementation. Received timestamps and delta
@@ -61,6 +74,7 @@
 
 pub mod applemidi;
 pub mod journal;
+pub mod recovery;
 pub mod rtp;
 mod session;
 

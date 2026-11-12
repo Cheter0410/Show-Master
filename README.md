@@ -19,7 +19,10 @@ cargo run --release -p showmaster -- --make-demo ~/showmaster-demo
 Das Programm öffnet sein eigenes Fenster (native Rust-App, egui). Parallel läuft ein lokaler Webserver
 nur für Fernsteuerung: Tablets im selben lokalen Netz erreichen die Fernsteuerung unter
 `http://<IP>:7400/remote` (PIN, Standard `1234`) und die reine Anzeige unter `/view`; URL und QR-Code
-stehen in *Setup → Remote*.
+stehen in *Setup → Remote*. Wo das Netz Multicast erlaubt, geht es auch per Name:
+`http://showmaster.local:7400/remote` (mDNS/Bonjour, abschaltbar; die IP-Adresse funktioniert immer).
+Die RTP-MIDI-Session erscheint per Bonjour in Audio-MIDI-Setup (Mac), auf dem iPad und in rtpMIDI;
+gefundene Sessions lassen sich in *Setup → MIDI* direkt verbinden.
 
 ```text
 showmaster [OPTIONEN] [SHOW.smshow]
@@ -97,7 +100,8 @@ Eine neue Version veröffentlichen: siehe [`docs/release-anleitung.md`](docs/rel
 | Crate | Aufgabe |
 |---|---|
 | `sm-timecode` | Framerates, sample-verankerter Transport, LTC-Encoder + unabhängiger Decoder, MTC |
-| `sm-rtpmidi` | eigene AppleMIDI/RTP-MIDI-Implementierung (UDP, ohne Treiber) |
+| `sm-rtpmidi` | eigene AppleMIDI/RTP-MIDI-Implementierung (UDP, ohne Treiber), Recovery-Journal senden + empfangen |
+| `sm-mdns` | optionales mDNS/Bonjour: Weboberfläche + RTP-MIDI ankündigen, RTP-MIDI-Sessions finden (nur lokales Multicast) |
 | `sm-audio` | Echtzeit-Mixer (Routing-Matrix, Fades, Streaming), Backends hinter Traits (cpal, Null) |
 | `sm-core` | Show-Modell, Showfile (Migration, Atomic Write, Backups), deterministische Cue-Engine, Pre-Flight |
 | `sm-io` | Engine-Aktionen → Audio, MIDI, LTC, MTC |

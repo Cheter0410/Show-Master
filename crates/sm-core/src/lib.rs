@@ -3,8 +3,10 @@
 //! threads; the engine runs purely on the audio sample clock handed to it,
 //! which makes it fully testable with simulated time.
 
+pub mod chase;
 pub mod engine;
 pub mod midi;
+pub mod midi_in;
 pub mod model;
 pub mod preflight;
 pub mod showfile;

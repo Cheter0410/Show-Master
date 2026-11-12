@@ -16,6 +16,7 @@ tracing = "0.1"
 rtrb = "0.3"
 sm-timecode = { path = "crates/sm-timecode" }
 sm-rtpmidi = { path = "crates/sm-rtpmidi" }
+sm-mdns = { path = "crates/sm-mdns" }
 sm-audio = { path = "crates/sm-audio", default-features = false }
 sm-core = { path = "crates/sm-core" }
 sm-io = { path = "crates/sm-io" }
@@ -36,5 +37,10 @@ lto = "thin"
 codegen-units = 4
 panic = "unwind"
 
+[profile.dev]
+# Line tables are enough for backtraces; full debug info makes target/ huge.
+debug = "line-tables-only"
+
 [profile.dev.package."*"]
 opt-level = 2
+debug = false

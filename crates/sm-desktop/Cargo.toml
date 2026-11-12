@@ -21,6 +21,8 @@ tokio = { version = "1", features = ["rt"] }
 sm-core.workspace = true
 sm-server.workspace = true
 sm-audio.workspace = true
+# System-wide hotkeys (X11, Windows RegisterHotKey, macOS RegisterEventHotKey).
+global-hotkey = "=0.10.0"
 
 # Receiving "open documents" events (double-click on a .smshow file).
 [target.'cfg(target_os = "macos")'.dependencies]

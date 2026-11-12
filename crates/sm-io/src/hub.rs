@@ -59,6 +59,8 @@ pub struct Io {
     started: std::collections::HashSet<VoiceId>,
     show_dir: Option<PathBuf>,
     underruns_before: u64,
+    /// MIDI input, MTC and LTC input.
+    inputs: crate::inputs::Inputs,
 }
 
 impl Io {
@@ -102,6 +104,10 @@ impl Io {
             started: Default::default(),
             show_dir,
             underruns_before: 0,
+            inputs: crate::inputs::Inputs::new(
+                crate::midi_in::default_input_backend(),
+                sm_audio::input::default_input_backend(),
+            ),
         };
         io.configure(show);
         io
@@ -156,7 +162,29 @@ impl Io {
         if let Err(e) = self.midi.configure_rtp(&show.rtp_midi) {
             warnings.push(e);
         }
+        self.inputs.configure(show, self.midi.rtp_session());
         warnings
+    }
+
+    /// Replace the input backends (tests, virtual devices) and apply the show.
+    pub fn set_input_backends(
+        &mut self,
+        show: &Show,
+        midi: Box<dyn crate::midi_in::MidiInputBackend>,
+        audio: Box<dyn sm_audio::input::AudioInputBackend>,
+    ) {
+        self.inputs = crate::inputs::Inputs::new(midi, audio);
+        self.inputs.configure(show, self.midi.rtp_session());
+    }
+
+    /// Everything received on the inputs since the last call, stamped in
+    /// engine time. Never blocks.
+    pub fn poll_inputs(&mut self) -> crate::inputs::InputBatch {
+        self.inputs.poll(&self.clock, self.base)
+    }
+
+    pub fn input_status(&self) -> crate::inputs::InputStatus {
+        self.inputs.status()
     }
 
     /// Does the stream need reopening for these settings?

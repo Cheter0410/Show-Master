@@ -7,10 +7,12 @@
 
 pub mod ltc;
 pub mod mtc;
+pub mod mtc_in;
 mod queue;
 mod types;
 
 pub use ltc::{encode_frame_bits, DecodedLtcFrame, LtcDecoder, LtcEncoder};
 pub use mtc::{full_frame_message, MtcGenerator};
+pub use mtc_in::{MtcEvent, MtcReceiver};
 pub use queue::PENDING_CAPACITY;
 pub use types::{FrameRate, TcTransport, Timecode, TimecodeParseError};

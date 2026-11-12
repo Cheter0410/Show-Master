@@ -6,7 +6,10 @@
 
 pub mod audio;
 pub mod clock;
+pub mod inputs;
 pub mod midi;
+pub mod midi_in;
+pub mod tc_in;
 
 mod hub;
 pub use hub::{Io, IoStatus};

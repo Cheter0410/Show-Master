@@ -361,6 +361,35 @@ mod tests {
     }
 
     #[test]
+    fn v2_without_input_settings_loads_with_defaults() {
+        // A v2 showfile written before MIDI input / timecode chase existed.
+        let v2 = r#"{
+          "schema_version": 2, "name": "Before inputs", "next_id": 3,
+          "timecode": { "rate": "25", "start": "01:00:00:00", "mode": "freerun",
+                        "ltc_enabled": true, "ltc_channel": 1, "ltc_level_db": -12.0,
+                        "mtc_enabled": false, "mtc_port": "" },
+          "cue_lists": [{ "id": 1, "name": "Main", "tc_jump": "skip", "cues": [] }]
+        }"#;
+        let show = parse(v2).unwrap();
+        assert_eq!(show.midi_input, crate::model::MidiInputSettings::default());
+        assert!(show.midi_input.mappings.is_empty());
+        assert!(!show.midi_input.msc.enabled);
+        assert_eq!(show.timecode.source, crate::model::TcSource::Generator);
+        assert_eq!(
+            show.timecode.input,
+            crate::model::TcInputSettings::default()
+        );
+        assert!(show.timecode.ltc_enabled);
+        // ... and the new fields survive a save / load round trip.
+        let mut show = show;
+        show.timecode.source = crate::model::TcSource::External;
+        show.midi_input
+            .mappings
+            .push(crate::model::MidiMapping::default());
+        assert_eq!(parse(&to_string(&show).unwrap()).unwrap(), show);
+    }
+
+    #[test]
     fn rejects_newer_and_malformed() {
         assert!(matches!(
             parse(r#"{"schema_version": 999}"#),

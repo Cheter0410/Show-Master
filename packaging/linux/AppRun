@@ -1,0 +1,5 @@
+#!/bin/sh
+# AppImage entry point: start the bundled program. Audio (ALSA), GTK 3 (file
+# dialogs), libxkbcommon-x11 and the GL/Vulkan drivers come from the host system.
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/bin/showmaster" "$@"

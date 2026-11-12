@@ -26,6 +26,13 @@ ls ~/.wine/drive_c/InnoSetup/ISCC.exe
 
 Optional für Debian/Ubuntu-Pakete: `cargo install cargo-deb --locked`.
 
+Optional für das AppImage: `appimagetool` aus dem AUR (`appimagetool-bin`, z. B. `yay -S appimagetool-bin`)
+– oder gar nichts installieren und beim Bauen `APPIMAGE=1` setzen, dann lädt das Skript `appimagetool` einmal
+nach `~/.cache/showmaster-build/`.
+
+Optional zum Signieren der Windows-Dateien: `sudo pacman -S osslsigncode` und ein Code-Signing-Zertifikat als
+`.pfx` (siehe unten).
+
 ## Einmalig: Mac einrichten
 
 Nichts außer Git – das Skript installiert die Xcode-Werkzeuge und Rust selbst, wenn sie fehlen. Für das
@@ -43,11 +50,43 @@ Versionsnummer: `Cargo.toml` (`[workspace.package] version`) und ein Abschnitt `
 cd ~/Show-Master && git pull && ./packaging/build-on-linux.sh
 ```
 
+Mit AppImage (lädt `appimagetool` beim ersten Mal herunter, falls es nicht installiert ist):
+
+```bash
+APPIMAGE=1 ./packaging/build-on-linux.sh
+```
+
 **Mac** (DMG):
 
 ```bash
 cd ~/Desktop/dev/show-master && git pull && bash packaging/macos/setup-and-build.sh
 ```
+
+## Signieren (optional)
+
+Ohne diese Variablen bleibt alles wie bisher (Mac ad hoc signiert, Windows unsigniert). Details:
+[`packaging/README.md`](../packaging/README.md#code-signing-optional).
+
+**Windows** (Arch-PC): Authenticode-Zertifikat (OV, als `.pfx`) bei einer Zertifizierungsstelle wie Certum,
+Sectigo oder SSL.com kaufen; `osslsigncode` installieren. Dann:
+
+```bash
+WIN_SIGN_PFX=~/keys/showmaster.pfx WIN_SIGN_PASSWORD='…' ./packaging/build-on-linux.sh
+# optional: WIN_SIGN_TIMESTAMP_URL=http://timestamp.sectigo.com
+```
+
+**Mac**: Im Apple Developer Program (99 USD/Jahr) ein Zertifikat *Developer ID Application* erzeugen (Xcode →
+Settings → Accounts → Manage Certificates → +). Einmalig die Zugangsdaten für die Notarisierung speichern
+(app-spezifisches Passwort von appleid.apple.com):
+
+```bash
+xcrun notarytool store-credentials showmaster --apple-id du@example.com --team-id TEAMID --password xxxx-xxxx-xxxx-xxxx
+security find-identity -v -p codesigning   # zeigt den genauen Namen der Identität
+SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" NOTARY_PROFILE=showmaster \
+  bash packaging/macos/setup-and-build.sh
+```
+
+Zeitstempel und Notarisierung brauchen Internet auf dem Build-Rechner, nie auf den Show-Rechnern.
 
 ## Veröffentlichen
 
@@ -67,7 +106,8 @@ github.com/Cheter0410/show-master-releases → *Releases* → das Release öffne
 mit Tag `vX.Y.Z` → Dateien hineinziehen.
 
 Prüfen: `gh release view "v$V" -R Cheter0410/show-master-releases` – vollständig sind: `.dmg`,
-`ShowMaster-Setup-….exe`, `.pkg.tar.zst`, `linux-x86_64.tar.gz` und die drei `showmaster-…gz`.
+`ShowMaster-Setup-….exe`, `.pkg.tar.zst`, `linux-x86_64.tar.gz` und die drei `showmaster-…gz` (dazu, falls
+gebaut, `.AppImage` und `.deb`).
 
 ## Updater einmal komplett testen
 

@@ -2,6 +2,7 @@
 
 use crate::applemidi::{self, Exchange, SessionPacket, Sync, PROTOCOL_VERSION};
 use crate::journal::JournalHistory;
+use crate::recovery::{self, ReceiverState};
 use crate::rtp::{self, RtpHeader, SysexAssembler};
 use crate::Error;
 use std::hash::{BuildHasher, Hasher};
@@ -126,6 +127,9 @@ pub struct PeerInfo {
     pub initiated_by_us: bool,
     /// Packets from this peer detected as lost (RTP sequence gaps).
     pub packets_lost: u64,
+    /// MIDI messages synthesised from the peer's recovery journal after a
+    /// loss (delivered before the commands of the packet that ended the loss).
+    pub recovered: u64,
 }
 
 /// Callback for incoming MIDI, see [`Session::set_receiver`].
@@ -182,6 +186,10 @@ struct Peer {
     offset: Option<i64>,
     last_seq: Option<u16>,
     lost: u64,
+    /// Corrective messages synthesised from recovery journals.
+    recovered: u64,
+    /// What we know about the peer's MIDI stream (for journal recovery).
+    rx: ReceiverState,
     sysex: SysexAssembler,
     feedback_due: Option<Instant>,
     /// Highest of our (extended) sequence numbers acknowledged with `RS`.
@@ -208,6 +216,8 @@ impl Peer {
             offset: None,
             last_seq: None,
             lost: 0,
+            recovered: 0,
+            rx: ReceiverState::new(),
             sysex: SysexAssembler::new(),
             feedback_due: None,
             acked: None,
@@ -223,6 +233,7 @@ impl Peer {
         self.syncs_sent = 0;
         self.syncs_unanswered = 0;
         self.last_seq = None;
+        self.rx = ReceiverState::new();
         self.sysex.reset();
         self.feedback_due = None;
         self.acked = None;
@@ -582,6 +593,7 @@ impl Session {
                 clock_offset_us: peer.offset.map(|units| units.saturating_mul(100)),
                 initiated_by_us: peer.initiated,
                 packets_lost: peer.lost,
+                recovered: peer.recovered,
             })
             .collect()
     }
@@ -1042,11 +1054,26 @@ fn on_midi(
             // Duplicate or reordered packet: playing it late would be wrong.
             0 | 0x8000..=0xFFFF => return,
             gap => {
-                // The recovery journal (if any) is not evaluated; the loss is
-                // only counted and a SysEx in progress is abandoned.
-                peer.lost += u64::from(gap - 1);
+                // Count the loss, abandon a SysEx in progress and repair the
+                // stream from the recovery journal if the packet carries one.
+                let lost = gap - 1;
+                peer.lost += u64::from(lost);
                 peer.sysex.reset();
-                debug!(%from, lost = gap - 1, "rtp-midi packet loss detected");
+                let recovered = match packet.journal.map(recovery::parse_journal) {
+                    Some(Ok(journal)) => {
+                        if !recovery::covers_loss(journal.checkpoint, last) {
+                            debug!(%from, "rtp-midi journal does not cover the whole loss");
+                        }
+                        peer.rx.recover(&journal, lost == 1, incoming)
+                    }
+                    Some(Err(err)) => {
+                        debug!(%from, %err, "ignoring malformed recovery journal");
+                        0
+                    }
+                    None => 0,
+                };
+                peer.recovered += recovered as u64;
+                debug!(%from, lost, recovered, "rtp-midi packet loss detected");
             }
         }
     }
@@ -1054,6 +1081,7 @@ fn on_midi(
     peer.feedback_due.get_or_insert(now + FEEDBACK_DELAY);
     for command in packet.commands {
         if let Some(message) = peer.sysex.push(command) {
+            peer.rx.record(&message);
             incoming.push(message);
         }
     }

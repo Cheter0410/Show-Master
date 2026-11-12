@@ -27,6 +27,9 @@ pub struct Show {
     pub notes: String,
     /// Hotkey map: key combination (e.g. `Space`, `Ctrl+KeyS`) -> action name.
     pub hotkeys: BTreeMap<String, String>,
+    /// MIDI input: listened ports, remote-control mapping, MSC receive.
+    #[serde(default)]
+    pub midi_input: MidiInputSettings,
     pub cue_lists: Vec<CueList>,
 }
 
@@ -43,6 +46,7 @@ impl Default for Show {
             timecode: TimecodeSettings::default(),
             notes: String::new(),
             hotkeys: default_hotkeys(),
+            midi_input: MidiInputSettings::default(),
             cue_lists: Vec::new(),
         };
         let id = show.alloc_id();
@@ -153,6 +157,9 @@ pub struct RemoteSettings {
     pub view_pin: String,
     /// Optional OSC command listener (UDP), 0 = disabled.
     pub osc_port: u16,
+    /// Advertise the web interface via mDNS/Bonjour (`showmaster.local`).
+    /// Local-link multicast only; access by IP always works.
+    pub mdns: bool,
 }
 
 impl Default for RemoteSettings {
@@ -163,6 +170,7 @@ impl Default for RemoteSettings {
             control_pin: "1234".into(),
             view_pin: String::new(),
             osc_port: 0,
+            mdns: true,
         }
     }
 }
@@ -261,6 +269,9 @@ pub struct RtpMidiSettings {
     /// Peers (`ip:port`) we actively invite.
     pub connect_to: Vec<String>,
     pub journal: bool,
+    /// Advertise the session via mDNS/Bonjour (`_apple-midi._udp`) and list
+    /// other sessions found on the local network.
+    pub advertise: bool,
 }
 
 impl Default for RtpMidiSettings {
@@ -271,6 +282,7 @@ impl Default for RtpMidiSettings {
             port: 5004,
             connect_to: Vec::new(),
             journal: false,
+            advertise: true,
         }
     }
 }
@@ -299,6 +311,12 @@ pub struct TimecodeSettings {
     pub mtc_enabled: bool,
     /// MIDI port alias (or device name) for MTC.
     pub mtc_port: String,
+    /// Where the engine's timecode comes from (internal generator or chase).
+    #[serde(default)]
+    pub source: TcSource,
+    /// External timecode input (used when `source` is `external`).
+    #[serde(default)]
+    pub input: TcInputSettings,
 }
 
 impl Default for TimecodeSettings {
@@ -312,6 +330,202 @@ impl Default for TimecodeSettings {
             ltc_level_db: -12.0,
             mtc_enabled: false,
             mtc_port: String::new(),
+            source: TcSource::Generator,
+            input: TcInputSettings::default(),
+        }
+    }
+}
+
+/// Source of the engine's timecode.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TcSource {
+    /// The built-in generator (timecode cues, `tc_*` commands, transport mode).
+    #[default]
+    Generator,
+    /// Chase an incoming timecode (MTC or LTC, see [`TcInputSettings`]).
+    External,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TcInputKind {
+    /// MIDI timecode from a MIDI input port.
+    #[default]
+    Mtc,
+    /// Linear timecode from an audio input channel.
+    Ltc,
+}
+
+/// External timecode input and chase behaviour.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct TcInputSettings {
+    pub kind: TcInputKind,
+    /// MTC: port alias or device name (`rtp:<session>` for RTP-MIDI peers);
+    /// empty = any MIDI input port that is open.
+    pub mtc_port: String,
+    /// LTC: audio input device id; `None` = the system's default input.
+    pub ltc_device: Option<String>,
+    /// LTC: zero-based input channel.
+    pub ltc_channel: u16,
+    /// Consecutive valid frames needed before the engine locks.
+    pub lock_frames: u32,
+    /// How long the timecode keeps running on its own after the input
+    /// stops before it is reported lost and stops (milliseconds).
+    pub freewheel_ms: u32,
+}
+
+impl Default for TcInputSettings {
+    fn default() -> Self {
+        Self {
+            kind: TcInputKind::Mtc,
+            mtc_port: String::new(),
+            ltc_device: None,
+            ltc_channel: 0,
+            lock_frames: 4,
+            freewheel_ms: 2000,
+        }
+    }
+}
+
+/// Which MIDI input ports are listened to for remote control and MSC.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MidiInputMode {
+    /// No port (the MTC input port is still opened when chasing MTC).
+    #[default]
+    None,
+    /// Every system input port (except "Through" loopbacks) and RTP-MIDI peers.
+    All,
+    /// The ports in [`MidiInputSettings::ports`].
+    Selected,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct MidiInputSettings {
+    pub mode: MidiInputMode,
+    /// Port aliases or device names for `selected` (`rtp:<session>` = RTP-MIDI peers).
+    pub ports: Vec<String>,
+    /// Remote-control mapping; empty = incoming MIDI does nothing.
+    pub mappings: Vec<MidiMapping>,
+    pub msc: MscInputSettings,
+}
+
+impl Default for MidiInputSettings {
+    fn default() -> Self {
+        Self {
+            mode: MidiInputMode::None,
+            ports: Vec::new(),
+            mappings: Vec::new(),
+            msc: MscInputSettings::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MidiTriggerKind {
+    #[default]
+    NoteOn,
+    ControlChange,
+    ProgramChange,
+}
+
+/// What a mapped MIDI message does (a transport command).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MidiMapAction {
+    #[default]
+    Go,
+    StopAll,
+    Panic,
+    TogglePause,
+    PauseAll,
+    ResumeAll,
+    Next,
+    Previous,
+    Reset,
+    /// Move the playhead to the cue `cue_number`.
+    GotoNumber,
+    /// Fire the cue `cue_number` without moving the playhead.
+    StartCue,
+}
+
+impl MidiMapAction {
+    pub const ALL: [MidiMapAction; 11] = [
+        MidiMapAction::Go,
+        MidiMapAction::StopAll,
+        MidiMapAction::Panic,
+        MidiMapAction::TogglePause,
+        MidiMapAction::PauseAll,
+        MidiMapAction::ResumeAll,
+        MidiMapAction::Next,
+        MidiMapAction::Previous,
+        MidiMapAction::Reset,
+        MidiMapAction::GotoNumber,
+        MidiMapAction::StartCue,
+    ];
+
+    /// The action needs a cue number.
+    pub fn needs_cue(self) -> bool {
+        matches!(self, MidiMapAction::GotoNumber | MidiMapAction::StartCue)
+    }
+}
+
+/// One remote-control mapping: trigger message -> action.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct MidiMapping {
+    /// Port alias or device name; empty = any listened port.
+    pub port: String,
+    pub kind: MidiTriggerKind,
+    /// MIDI channel 1-16; 0 = any channel.
+    pub channel: u8,
+    /// Note, controller or program number.
+    pub number: u8,
+    /// Note-on: minimum velocity. Controller: the mapping fires when the
+    /// value rises to or above this threshold. Ignored for program change.
+    pub min_value: u8,
+    pub action: MidiMapAction,
+    /// Cue number for `goto_number` / `start_cue`.
+    pub cue_number: String,
+}
+
+impl Default for MidiMapping {
+    fn default() -> Self {
+        Self {
+            port: String::new(),
+            kind: MidiTriggerKind::NoteOn,
+            channel: 0,
+            number: 60,
+            min_value: 1,
+            action: MidiMapAction::Go,
+            cue_number: String::new(),
+        }
+    }
+}
+
+/// MIDI Show Control receive.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct MscInputSettings {
+    pub enabled: bool,
+    /// Device id 0-111 this show answers to; 127 = answer to every id.
+    /// Messages sent to the all-call id 127 are always accepted.
+    pub device_id: u8,
+    /// Command format: 0x10 sound (default), 0x7F all types (any format is
+    /// accepted). Messages sent with format 0x7F are always accepted.
+    pub command_format: u8,
+}
+
+impl Default for MscInputSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            device_id: 1,
+            command_format: 0x10,
         }
     }
 }

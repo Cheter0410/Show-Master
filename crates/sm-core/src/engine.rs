@@ -12,10 +12,11 @@
 //! and pre-wait / post-wait / auto-follow / timecode triggers are exact to
 //! the sample because they are computed, not polled.
 
+use crate::chase::{ChaseStep, Chaser, TcObservation, TcStatus};
 use crate::db_to_lin;
 use crate::model::{
     ContinueMode, ControlAction, Crosspoint, Cue, CueId, CueKind, Curve, GroupMode, ListId, Show,
-    TcAction, TcJumpPolicy, TcMode,
+    TcAction, TcJumpPolicy, TcMode, TcSource,
 };
 use serde::{Deserialize, Serialize};
 use sm_timecode::{TcTransport, Timecode};
@@ -244,6 +245,8 @@ pub struct Snapshot {
     pub master_db: f32,
     pub tc: TcTransport,
     pub tc_position: String,
+    /// Generator, or the state of the external timecode being chased.
+    pub tc_status: TcStatus,
     /// Seconds until the next automatically fired cue (auto-continue,
     /// auto-follow with known duration, or timecode trigger).
     pub next_auto: Option<f64>,
@@ -364,12 +367,19 @@ pub struct Engine {
     tc_pos_fired: bool,
     tc_paused_by_transport: bool,
     tc_triggers: Vec<(u64, CueId, ListId)>,
+    /// External timecode follower (`timecode.source == external`).
+    chase: Option<Chaser>,
+    /// Settings the chaser was built from.
+    chase_key: Option<ChaseKey>,
     rng: u64,
     actions: Vec<Action>,
     events: Vec<Event>,
 }
 
 const MAX_STANDBY: usize = 8;
+
+/// Settings that require a new chaser when they change.
+type ChaseKey = (sm_timecode::FrameRate, crate::model::TcInputKind, u32, u32);
 
 impl Engine {
     pub fn new(show: Show, sample_rate: u32) -> Self {
@@ -395,6 +405,8 @@ impl Engine {
             tc_pos_fired: false,
             tc_paused_by_transport: false,
             tc_triggers: Vec::new(),
+            chase: None,
+            chase_key: None,
             rng: 0x9E37_79B9_7F4A_7C15,
             actions: Vec::new(),
             events: Vec::new(),
@@ -402,6 +414,9 @@ impl Engine {
         e.set_show(show);
         // A stopped generator rests at the configured start offset.
         e.tc.anchor_frame = e.show.timecode.start.to_frame_number(rate);
+        // Choosing the timecode source at start-up is not news.
+        e.events
+            .retain(|ev| !matches!(ev.kind, EventKind::Timecode { .. }));
         e
     }
 
@@ -454,6 +469,7 @@ impl Engine {
             self.tc.anchor_frame = self.show.timecode.start.to_frame_number(self.tc.rate);
             self.actions.push(Action::Timecode(self.tc));
         }
+        self.configure_chase(t);
         self.rebuild_tc_triggers();
         // Media or routing may have changed: re-prepare all standby voices.
         for (_, (voice, _)) in self.standby.drain() {
@@ -502,8 +518,19 @@ impl Engine {
         if until < self.now {
             return;
         }
+        // Losing the external timecode is an event in time: nothing that
+        // depends on the running timecode may happen after it.
+        if let Some(deadline) = self.chase.as_ref().and_then(Chaser::deadline) {
+            if deadline <= until {
+                let d = deadline.max(self.now);
+                self.process_due(d);
+                self.now = d;
+                self.chase_tick(d);
+            }
+        }
         self.process_due(until);
         self.now = until;
+        self.chase_tick(until);
         self.refresh_standby();
     }
 
@@ -1317,6 +1344,10 @@ impl Engine {
     }
 
     fn tc_action(&mut self, action: &TcAction, t: u64) {
+        if self.chase.is_some() {
+            self.tc_action_external(action, t);
+            return;
+        }
         let rate = self.show.timecode.rate;
         let pos = self.tc.frame_at(t, self.sr);
         let was_running = self.tc.running;
@@ -1494,6 +1525,234 @@ impl Engine {
     }
 
     // ------------------------------------------------------------------
+    // External timecode (chase)
+    // ------------------------------------------------------------------
+
+    /// The generator follows the show transport (start with GO etc.).
+    fn transport_coupled(&self) -> bool {
+        self.chase.is_none() && self.show.timecode.mode == TcMode::Transport
+    }
+
+    /// Generator, or the state of the external timecode input.
+    pub fn tc_status(&self) -> TcStatus {
+        self.chase
+            .as_ref()
+            .map_or(TcStatus::Generator, Chaser::status)
+    }
+
+    /// Build, keep or drop the chaser to match the show settings.
+    fn configure_chase(&mut self, t: u64) {
+        let tc = &self.show.timecode;
+        let key = (tc.source == TcSource::External).then_some((
+            tc.rate,
+            tc.input.kind,
+            tc.input.lock_frames,
+            tc.input.freewheel_ms,
+        ));
+        if key == self.chase_key {
+            return;
+        }
+        let was_external = self.chase_key.is_some();
+        self.chase_key = key;
+        let rate = tc.rate;
+        let start = tc.start.to_frame_number(rate);
+        self.chase =
+            key.map(|(rate, _, lock, freewheel)| Chaser::new(rate, self.sr, lock, freewheel));
+        // Switching source (or chase settings): the timecode stops; a
+        // generator rests at its start offset, a chaser where it was.
+        let anchor_frame = if self.chase.is_some() {
+            self.tc.frame_at(t, self.sr) % rate.frames_per_day()
+        } else {
+            start
+        };
+        if self.tc.running || was_external != self.chase.is_some() || self.tc.rate != rate {
+            self.tc = TcTransport {
+                rate,
+                running: false,
+                anchor_sample: t,
+                anchor_frame,
+            };
+            self.tc_next_k = 0;
+            self.tc_pos_fired = false;
+            self.tc_paused_by_transport = false;
+            self.actions.push(Action::Timecode(self.tc));
+            let action = if self.chase.is_some() {
+                "source external"
+            } else {
+                "source generator"
+            };
+            self.emit(
+                t,
+                EventKind::Timecode {
+                    action: action.into(),
+                    position: Timecode::from_frame_number(anchor_frame, rate).format(rate),
+                },
+            );
+        }
+    }
+
+    /// Feed one frame of external timecode (ignored in generator mode).
+    /// `obs.at` is engine time; values in the future count as "now".
+    pub fn external_tc(&mut self, mut obs: TcObservation) {
+        let t = self.now;
+        obs.at = obs.at.min(t);
+        let Some(chase) = self.chase.as_mut() else {
+            return;
+        };
+        let step = chase.observe(obs);
+        self.apply_chase(step, t);
+        self.process_due(t);
+    }
+
+    /// The external source stopped or located to `frame` (MTC Full Frame).
+    pub fn external_tc_stopped(&mut self, frame: u64) {
+        let t = self.now;
+        let Some(chase) = self.chase.as_mut() else {
+            return;
+        };
+        let step = chase.full_frame(frame);
+        self.apply_chase(step, t);
+    }
+
+    fn chase_tick(&mut self, now: u64) {
+        let Some(chase) = self.chase.as_mut() else {
+            return;
+        };
+        let step = chase.tick(now);
+        self.apply_chase(step, now);
+    }
+
+    fn tc_event(&mut self, t: u64, action: &str, frame: u64) {
+        let rate = self.tc.rate;
+        self.emit(
+            t,
+            EventKind::Timecode {
+                action: action.into(),
+                position: Timecode::from_frame_number(frame, rate).format(rate),
+            },
+        );
+    }
+
+    /// Stop the engine timecode at `frame` (shown, not running).
+    fn ext_stop(&mut self, frame: u64, t: u64) {
+        self.tc = TcTransport {
+            rate: self.tc.rate,
+            running: false,
+            anchor_sample: t,
+            anchor_frame: frame,
+        };
+        self.tc_next_k = 0;
+        self.actions.push(Action::Timecode(self.tc));
+    }
+
+    fn apply_chase(&mut self, step: ChaseStep, t: u64) {
+        match step {
+            ChaseStep::Nothing => {}
+            ChaseStep::Lock(new) => self.ext_transport(new, true, "ext locked", t),
+            ChaseStep::Jump(new) => self.ext_transport(new, true, "ext jump", t),
+            ChaseStep::Reanchor(new, _) => self.ext_transport(new, false, "ext re-anchored", t),
+            ChaseStep::Relocked => {
+                let pos = self.tc.frame_at(t, self.sr);
+                self.tc_event(t, "ext locked again", pos);
+            }
+            ChaseStep::Freewheel => {
+                let pos = self.tc.frame_at(t, self.sr);
+                self.tc_event(t, "ext input interrupted - freewheel", pos);
+            }
+            ChaseStep::Lost => {
+                let pos = self.tc.frame_at(t, self.sr);
+                self.ext_stop(pos, t);
+                self.tc_event(t, "ext LOST - stopped", pos);
+            }
+            ChaseStep::Stop(frame) => {
+                let moved = self.tc.running || self.tc.anchor_frame != frame;
+                self.ext_stop(frame, t);
+                if moved {
+                    self.tc_event(t, "ext stopped", frame);
+                }
+            }
+        }
+    }
+
+    /// Take over a transport from the chaser. `jump` = apply the lists'
+    /// jump policies (lock, discontinuity); otherwise it is a drift
+    /// correction: triggers already passed are not fired again and triggers
+    /// skipped by a forward correction fire now.
+    fn ext_transport(&mut self, new: TcTransport, jump: bool, what: &str, t: u64) {
+        let day = new.rate.frames_per_day();
+        let old = self.tc;
+        let old_pos = old.frame_at(t, self.sr);
+        let new_pos = new.frame_at(t, self.sr);
+        self.tc = new;
+        self.tc_pos_fired = false;
+        self.tc_paused_by_transport = false;
+        self.actions.push(Action::Timecode(new));
+        if jump {
+            // The trigger on the current frame fires through the normal path.
+            self.tc_next_k = (new_pos + day - new.anchor_frame) % day;
+            self.tc_event(t, what, new_pos);
+            self.tc_jump(old_pos, new_pos, old.running, t);
+            return;
+        }
+        let fired_upto = old_pos;
+        if new.anchor_frame > fired_upto + 1 {
+            let skipped: Vec<CueId> = self
+                .tc_triggers
+                .iter()
+                .filter(|(f, _, _)| *f > fired_upto && *f < new.anchor_frame)
+                .map(|(_, c, _)| *c)
+                .collect();
+            for cue in skipped {
+                self.trigger(
+                    cue,
+                    t,
+                    Trig {
+                        from_tc: true,
+                        ..Trig::default()
+                    },
+                );
+            }
+            self.tc_next_k = 0;
+        } else {
+            self.tc_next_k = fired_upto + 1 - new.anchor_frame;
+        }
+        self.tc_event(t, what, new_pos);
+    }
+
+    /// Timecode commands and cues while chasing: stop / pause suspend
+    /// following, start / resume continue it, relocation is not possible.
+    fn tc_action_external(&mut self, action: &TcAction, t: u64) {
+        let Some(chase) = self.chase.as_mut() else {
+            return;
+        };
+        match action {
+            TcAction::Stop | TcAction::Pause => {
+                if chase.held() {
+                    return;
+                }
+                chase.hold();
+                let pos = self.tc.frame_at(t, self.sr);
+                self.ext_stop(pos, t);
+                self.tc_event(t, "ext held (not following)", pos);
+            }
+            TcAction::Start | TcAction::StartFrom { .. } | TcAction::Resume => {
+                if !chase.held() {
+                    return;
+                }
+                chase.release();
+                let pos = self.tc.frame_at(t, self.sr);
+                self.tc_event(t, "ext following again", pos);
+            }
+            TcAction::Relocate { .. } => self.emit(
+                t,
+                EventKind::Info {
+                    message: "timecode follows an external source - relocate ignored".into(),
+                },
+            ),
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Commands
     // ------------------------------------------------------------------
 
@@ -1528,7 +1787,7 @@ impl Engine {
                 // A free-running generator would keep sending LTC/MTC and fire
                 // timecode-triggered cues again: hold it where it is (resume
                 // continues from there).
-                if self.tc.running {
+                if self.tc.running || self.chase.is_some() {
                     self.tc_action(&TcAction::Pause, t);
                 }
                 self.actions.push(Action::MidiPanic);
@@ -1631,9 +1890,10 @@ impl Engine {
                 for (list, head) in heads {
                     self.set_playhead(list, head, t);
                 }
-                if self.tc.running
-                    || self.tc.anchor_frame
-                        != self.show.timecode.start.to_frame_number(self.tc.rate)
+                if self.chase.is_none()
+                    && (self.tc.running
+                        || self.tc.anchor_frame
+                            != self.show.timecode.start.to_frame_number(self.tc.rate))
                 {
                     self.tc_action(&TcAction::Stop, t);
                 }
@@ -1719,7 +1979,7 @@ impl Engine {
         self.last_go = Some(t);
         if self.show_start.is_none() {
             self.show_start = Some(t);
-            if self.show.timecode.mode == TcMode::Transport && !self.tc.running {
+            if self.transport_coupled() && !self.tc.running {
                 self.tc_action(&TcAction::Start, t);
             }
         }
@@ -1759,9 +2019,7 @@ impl Engine {
             hard,
         });
         self.paused_all = false;
-        if self.show.timecode.mode == TcMode::Transport
-            && (self.tc.running || self.tc_paused_by_transport)
-        {
+        if self.transport_coupled() && (self.tc.running || self.tc_paused_by_transport) {
             self.tc_action(&TcAction::Stop, t);
         }
         self.standby_dirty = true;
@@ -1773,7 +2031,7 @@ impl Engine {
             self.pause_inst(id, t, pause);
         }
         self.paused_all = pause;
-        if self.show.timecode.mode == TcMode::Transport {
+        if self.transport_coupled() {
             if pause && self.tc.running {
                 self.tc_action(&TcAction::Pause, t);
                 self.tc_paused_by_transport = true;
@@ -1867,6 +2125,7 @@ impl Engine {
             master_db: self.master_db,
             tc: self.tc,
             tc_position: self.tc.timecode_at(t, self.sr).format(self.tc.rate),
+            tc_status: self.tc_status(),
             next_auto: next_auto.map(|g| self.secs(g.saturating_sub(t))),
         }
     }

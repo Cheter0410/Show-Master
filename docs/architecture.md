@@ -46,8 +46,11 @@ sie ausgibt, trägt den Frame, zu dem sie wirksam wird:
 | `sm-engine` | Dokument, Cue-Engine, Command-Bus, I/O-Hub; Takt 2 ms | einziger Schreiber des Zustands |
 | Streamer | füllt die Ringpuffer der Voices von Platte (Decoding, Resampling) | |
 | `sm-midi` | gibt terminierte MIDI-Nachrichten zum Zeitpunkt aus | |
+| `sm-midi-in` | öffnet/schließt MIDI-Eingänge (Rescan 2 s); Callbacks stempeln nur die Zeit und schicken in einen Kanal | Engine liest den Kanal, wartet nie auf Treiber |
+| `sm-audio-in` (+ Geräte-Thread) | LTC-Eingang: öffnet den Eingangsstrom, listet Eingabegeräte; der Callback schreibt einen Kanal in einen lock-freien Ring | Callback wie Audio: keine Allokation, kein Lock, kein I/O |
 | rtp-midi (3) | UDP-Empfang, Session-Zustand, Clock-Sync | |
 | `sm-net` (tokio, 2) | HTTP/WebSocket | redet mit der Engine nur über Kanäle |
+| `sm-mdns` + `mDNS_daemon` | optionales Bonjour: Ankündigung (Web, RTP-MIDI), Suche nach RTP-MIDI-Sessions | liest nur den veröffentlichten Zustand; nur Link-lokales Multicast |
 | Haupt-Thread | natives Fenster (egui), ~25 Bilder/s | liest den veröffentlichten Zustand, schickt Commands; blockiert nie Engine oder Audio |
 
 Fällt das Netzwerk, ein Client oder der ganze Webserver aus, läuft die Show weiter: Engine und Audio
@@ -90,6 +93,8 @@ kopiert sie nach `media/` und speichert BLAKE3-Hashes.
 
 - Neue Cue-Typen (OSC, Video, Script, HTTP): Variante in `CueKind` + Zweig in `Engine::start_action`
   + `Action`, die der I/O-Hub ausführt.
-- Timecode-Eingang: liefert einen `TcTransport` von außen; Trigger und Chase funktionieren unverändert.
+- Timecode-Eingang (umgesetzt, `sm_core::chase`): MTC/LTC werden zu Beobachtungen „Frame n begann bei
+  Sample s“; der Chaser liefert daraus den `TcTransport`, Trigger und Sprungregeln funktionieren
+  unverändert (siehe `decisions.md`, „Externe Eingänge“).
 - Lichtsteuerung (Art-Net/sACN): weiterer Sink im I/O-Hub, terminiert wie MIDI.
 - Systemweite Hotkeys (wenn das Fenster keinen Fokus hat): eigener Listener, der Commands auf den Bus legt.

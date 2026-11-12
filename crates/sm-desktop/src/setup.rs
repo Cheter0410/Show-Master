@@ -7,6 +7,8 @@
 
 #[path = "setup_audio.rs"]
 mod audio;
+#[path = "setup_discovery.rs"]
+mod discovery;
 #[path = "setup_general.rs"]
 mod general;
 #[path = "setup_hotkeys.rs"]

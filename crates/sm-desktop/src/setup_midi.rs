@@ -10,6 +10,9 @@ use sm_core::model::{MidiPortAlias, TcJumpPolicy, TcMode};
 use sm_core::timecode::{FrameRate, Timecode};
 use std::str::FromStr;
 
+#[path = "setup_inputs.rs"]
+mod inputs;
+
 /// `host:port` with a non-empty host and a port 1..=65535.
 pub(super) fn valid_peer_addr(addr: &str) -> bool {
     let a = addr.trim();
@@ -128,6 +131,8 @@ pub(super) fn midi_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
         ),
     );
 
+    inputs::midi_input_section(ui, st, s);
+
     // ------------------------------------------------------------------
     let rtp = &s.show.rtp_midi;
     heading(ui, "RTP-MIDI (network MIDI)");
@@ -208,6 +213,7 @@ pub(super) fn midi_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
         }
     });
 
+    super::discovery::rtp_discovered(ui, st, s);
     heading(ui, "Peers");
     let peers = &s.midi.rtp.peers;
     if !s.midi.rtp.enabled {
@@ -271,6 +277,7 @@ pub(super) fn parse_start(text: &str, rate: FrameRate) -> Result<Timecode, Strin
 
 pub(super) fn timecode_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
     let tc = &s.show.timecode;
+    inputs::timecode_source_section(ui, st, s);
     heading(ui, "Generator");
     form(ui, "tc_gen", |ui| {
         row(ui, "Frame rate", |ui| {
