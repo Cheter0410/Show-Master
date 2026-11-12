@@ -1,44 +1,32 @@
 # Packaging
 
-| Ziel | Datei | Wie |
+Gebaut wird lokal: Linux und Windows auf einem Linux-PC (Arch oder Debian/Ubuntu), macOS auf einem Mac.
+Es gibt keine CI.
+
+| Ziel | Datei | Wo / wie |
 |---|---|---|
-| macOS | `ShowMaster-x.y.z.dmg` (Universal: Apple Silicon + Intel) | Workflow `build`, Job `macos` |
-| Windows | `ShowMaster-Setup-x.y.z.exe` (Inno Setup, `packaging/windows/showmaster.iss`) | Workflow `build`, Job `windows` |
-| Debian/Ubuntu | `showmaster_x.y.z-1_amd64.deb` | Workflow `build`, Job `linux` (`cargo deb -p showmaster`) |
-| Portable | `showmaster-<version>-<os>-<arch>.tar.gz/.zip` | `./packaging/portable.sh`, auch im CI-Workflow |
-| Updater-Patches | `showmaster-macos-arm64.gz`, `showmaster-macos-x86_64.gz`, `showmaster-windows-x86_64.gz` | Workflow `build` |
+| macOS (Universal: Intel + Apple Silicon) | `ShowMaster-x.y.z.dmg` | Mac: `bash packaging/macos/setup-and-build.sh` |
+| Windows | `ShowMaster-Setup-x.y.z.exe` (Inno Setup, `packaging/windows/showmaster.iss`) | Linux-PC: `./packaging/build-on-linux.sh` (Cross-Build mit MinGW, Inno Setup unter Wine) |
+| Arch Linux | `showmaster-x.y.z-1-x86_64.pkg.tar.zst` (`packaging/arch/PKGBUILD`) | Linux-PC mit `makepkg` |
+| Debian/Ubuntu | `showmaster_x.y.z-1_amd64.deb` | Linux-PC mit `cargo-deb` |
+| jedes Linux | `showmaster-x.y.z-linux-x86_64.tar.gz` | Linux-PC |
+| Updater-Patches | `showmaster-macos-arm64.gz`, `showmaster-macos-x86_64.gz`, `showmaster-windows-x86_64.gz` | entstehen mit DMG bzw. Windows-Build |
 
-Jeder Job testet sein Paket nach dem Bau: installieren bzw. aus dem DMG kopieren, starten, API abfragen,
-über die API beenden.
-
-## DMG auf dem eigenen Mac bauen
-
-Ohne GitHub Actions, direkt auf einem Mac (Xcode-Kommandozeilenwerkzeuge, Rust und Node 22 nötig):
-
-```bash
-./packaging/macos/build-dmg.sh
-```
-
-Das Ergebnis liegt in `dist/ShowMaster-x.y.z.dmg`.
+Alles landet in `dist/`. Die gebaute Weboberfläche (`ui/dist`) liegt im Repository; Node.js wird zum
+Bauen nicht gebraucht.
 
 ## Veröffentlichen
 
-Der Updater liest `https://github.com/Cheter0410/show-master-releases` (öffentliches Repository nur für
-Downloads, wie `beamweave-releases`). Zwei Wege:
-
-1. **Automatisch:** In diesem Repository das Secret `RELEASES_TOKEN` anlegen (Token mit Schreibrecht auf
-   die Releases von `show-master-releases`). Ein Tag `vX.Y.Z` baut dann alles und veröffentlicht es.
-2. **Von Hand:** `scripts/release.sh` (braucht die `gh`-CLI): taggt, wartet auf den Build und lädt hoch.
-
-Die Release-Notizen kommen aus dem Abschnitt `## X.Y.Z` in `CHANGELOG.md`.
+Der Updater liest `https://github.com/Cheter0410/show-master-releases`. Ablauf und alle Befehle:
+[`docs/release-anleitung.md`](../docs/release-anleitung.md).
 
 ## Nicht signiert
 
 Für signierte und notarisierte macOS-Apps braucht es ein Apple-Developer-Zertifikat, für signierte
-Windows-Installer ein Code-Signing-Zertifikat. Beides fehlt; die App ist ad hoc signiert. Folge: macOS
+Windows-Installer ein Code-Signing-Zertifikat. Beides fehlt; die Mac-App ist ad hoc signiert. Folge: macOS
 verlangt beim ersten Start „Dennoch öffnen“, Windows zeigt SmartScreen.
 
-## Offen
+## Linux-Updates
 
-- AppImage für andere Linux-Distributionen.
-- Der Updater installiert unter Linux nicht selbst, sondern verweist auf die Download-Seite.
+Der Updater installiert unter Linux nicht selbst, sondern verweist auf die Download-Seite (Arch: neues Paket
+mit `pacman -U` installieren).

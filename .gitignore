@@ -2,3 +2,8 @@
 node_modules
 *.autosave
 .DS_Store
+/dist
+/stage
+packaging/arch/*.pkg.tar.*
+packaging/arch/pkg/
+packaging/arch/src/

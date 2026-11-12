@@ -71,11 +71,22 @@ revidieren lassen.
 - Schließen des Fensters beendet das Programm. Im Live-Modus (Quit-Schutz), bei laufenden Cues oder
   ungespeicherten Änderungen wird vorher nachgefragt. Der Windows-Release-Build hat kein Konsolenfenster.
 
+## Robustheit (nachträglich)
+
+- **Audio-Gerät verloren / zurück:** Ein Watcher-Thread hält die Geräteliste aktuell. Fällt das Gerät aus
+  und ist es wieder da, wird neu verbunden (alle Cues stoppen dabei – sie waren ohnehin stumm). Läuft die
+  App mangels Gerät auf dem stummen Ausgang, wird umgeschaltet, sobald ein Gerät da ist und **kein Cue
+  läuft**. Wiederholte Fehlversuche warten länger (bis 60 s).
+- **Undo:** die letzten 500 Schritte (jeder Schritt ist eine Kopie der Show).
+- **Fenster im Leerlauf:** 4 Bilder/s statt 25, sobald nichts läuft und kein Pegel anliegt.
+- **Keine CI:** Gebaut wird lokal (Linux-PC: Linux + Windows, Mac: DMG). Die GitHub-Workflows wurden
+  entfernt, damit keine Actions-Kosten entstehen.
+
 ## Bekannte Grenzen
 
-- **Dateien werden im Engine-Thread geöffnet.** Durch Standby passiert das vor dem GO; ein Cue, der
-  ohne Standby gefeuert wird (Vorschau, Chase), kann auf langsamen Platten wenige Millisekunden später
-  einsetzen (als Underrun gezählt).
+- **Dateien öffnen im Hintergrund.** Audiodateien werden von zwei eigenen Threads geöffnet, nie von der
+  Engine. Durch Standby passiert das vor dem GO; ein Cue ohne Standby (Vorschau, Chase, Control-Cue)
+  beginnt, sobald die Datei offen ist – eine Verspätung über 10 ms steht im Log.
 - **rtp-midi:** kein Bonjour/mDNS (Verbindung per IP:Port), kein empfangsseitiges Recovery, Journal
   (Kapitel P/C/N) standardmäßig aus, bis es gegen echte Gegenstellen geprüft ist.
 - **MIDI-Timing** ist nicht samplegenau, sondern über die Audio-Clock terminiert (siehe Architektur).

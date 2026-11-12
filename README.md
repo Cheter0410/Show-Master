@@ -4,9 +4,8 @@ Cue-basierte Playback- und Show-Control-Software für Theater, Events, Installat
 im Stil von QLab, geschrieben in Rust, für **macOS, Windows und Linux**. Läuft vollständig offline;
 einziger Internetzugriff ist die abschaltbare Update-Prüfung.
 
-> **Stand:** Alle hardwareunabhängigen Teile sind umgesetzt und automatisiert getestet (CI grün auf
-> Linux x86_64/aarch64, macOS Apple Silicon/Intel und Windows). Noch nicht
-> an echter Hardware validiert sind: Audio-Interfaces (Latenz, Multichannel), System-MIDI-Ports,
+> **Stand:** Alle hardwareunabhängigen Teile sind umgesetzt und automatisiert getestet (unter Linux;
+> Windows-Programm per Cross-Build und Wine geprüft). Noch nicht an echter Hardware validiert sind: Audio-Interfaces (Latenz, Multichannel), System-MIDI-Ports,
 > rtp-midi gegen macOS/iOS und die signierten Installer. Details: [`docs/hardware-checkliste.md`](docs/hardware-checkliste.md).
 
 ## Schnellstart
@@ -39,11 +38,12 @@ showmaster [OPTIONEN] [SHOW.smshow]
 |---|---|---|
 | macOS (Apple Silicon und Intel) | `ShowMaster-x.y.z.dmg` | öffnen, *Show Master* in den Ordner *Programme* ziehen, starten |
 | Windows | `ShowMaster-Setup-x.y.z.exe` | ausführen und durchklicken |
+| Arch Linux | `showmaster-x.y.z-1-x86_64.pkg.tar.zst` | `sudo pacman -U showmaster-*.pkg.tar.zst` |
 | Debian/Ubuntu | `showmaster_x.y.z-1_amd64.deb` | doppelklicken oder `sudo apt install ./showmaster_*.deb` |
-| alle | portables Archiv | entpacken, `showmaster` starten |
+| jedes Linux | `showmaster-x.y.z-linux-x86_64.tar.gz` | entpacken, `showmaster` starten |
 
 Die Installer liegen auf der [Download-Seite](https://github.com/Cheter0410/show-master-releases/releases/latest)
-(sobald dort eine Version veröffentlicht ist) und als Artefakte des `build`-Workflows.
+(sobald dort eine Version veröffentlicht ist). Gebaut werden sie lokal, siehe *Pakete bauen*.
 
 - Show Master ist eine **native App mit eigenem Fenster**. Die Weboberfläche (`/remote`, `/view`) ist für
   Tablets und andere Geräte im Netz gedacht. Ein zweiter Start holt das laufende Fenster nach vorn.
@@ -65,8 +65,7 @@ installiert und startet neu. Unter Linux führt der Knopf zur Download-Seite.
   „offline“; alles andere funktioniert unverändert.
 - Ganz abschalten: `--no-update-check` oder Umgebungsvariable `SHOWMASTER_NO_UPDATE_CHECK=1`.
 
-Eine neue Version veröffentlichen: Version in `Cargo.toml` und `CHANGELOG.md` anheben, dann
-`scripts/release.sh` (baut per GitHub Actions und lädt nach `show-master-releases` hoch).
+Eine neue Version veröffentlichen: siehe [`docs/release-anleitung.md`](docs/release-anleitung.md).
 
 ## Bedienkonzept
 
@@ -136,8 +135,14 @@ Optionale Cargo-Features: `--features sm-io/asio` (Windows, ASIO-SDK nötig), `-
 
 ## Pakete bauen
 
-Der Workflow `build` (Tag `v*` oder manuell) baut DMG, Setup-EXE und `.deb` und testet jedes Paket nach dem
-Bau an. `./packaging/portable.sh` erzeugt die portable Variante. Details: [`packaging/README.md`](packaging/README.md).
+Lokal, ohne CI:
+
+- **Linux-PC** (Arch oder Debian/Ubuntu): `./packaging/build-on-linux.sh` baut Linux-Archiv, Arch-Paket
+  (`.deb` falls `cargo-deb` installiert ist), Windows-Programm und Windows-Installer (Inno Setup unter Wine).
+- **Mac**: `bash packaging/macos/setup-and-build.sh` baut das DMG (Universal: Intel + Apple Silicon).
+
+Einrichtung und Veröffentlichung: [`docs/release-anleitung.md`](docs/release-anleitung.md),
+Details: [`packaging/README.md`](packaging/README.md).
 
 ## Lizenz
 

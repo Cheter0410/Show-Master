@@ -1,0 +1,23 @@
+# Arch Linux package for Show Master, built from this checkout.
+# Used by packaging/build-on-linux.sh (which builds the program first):
+#   SM_VERSION=0.1.0 makepkg -f
+pkgname=showmaster
+pkgver=${SM_VERSION:-0.1.0}
+pkgrel=1
+pkgdesc="Cue-based playback and show control for live production (runs fully offline)"
+arch=('x86_64')
+url="https://github.com/Cheter0410/show-master-releases"
+license=('MIT' 'Apache-2.0')
+depends=('alsa-lib' 'gtk3' 'libxkbcommon-x11' 'libglvnd' 'hicolor-icon-theme')
+optdepends=('vulkan-icd-loader: GPU rendering through Vulkan'
+            'pipewire-alsa: play through PipeWire'
+            'pipewire-jack: JACK routing through PipeWire')
+options=('!debug' '!strip')
+
+package() {
+    local root="$startdir/../.."
+    install -Dm755 "$root/target/release/showmaster" "$pkgdir/usr/bin/showmaster"
+    install -Dm644 "$root/packaging/linux/showmaster.desktop" "$pkgdir/usr/share/applications/showmaster.desktop"
+    install -Dm644 "$root/assets/icon.png" "$pkgdir/usr/share/icons/hicolor/512x512/apps/showmaster.png"
+    install -Dm644 "$root/README.md" "$pkgdir/usr/share/doc/showmaster/README.md"
+}

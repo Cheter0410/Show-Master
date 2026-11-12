@@ -1,34 +1,22 @@
 # Releases bauen und veröffentlichen
 
-Ohne GitHub Actions: Mac-Installer auf dem Mac, Linux-Paket und Windows-Installer auf dem Linux-PC,
-veröffentlicht mit der GitHub-Kommandozeile `gh` nach `Cheter0410/show-master-releases`.
+Ohne CI: Linux und Windows auf dem **Arch-Linux-PC**, das DMG auf dem **Mac**. Veröffentlicht wird mit
+der GitHub-Kommandozeile `gh` nach `Cheter0410/show-master-releases`, wo der eingebaute Updater nachsieht.
 
-## Einmalig: Mac einrichten
-
-Node.js ist auf dem Mac nicht nötig: Die gebaute Oberfläche liegt im Repository.
+## Einmalig: Arch-Linux-PC einrichten
 
 ```bash
-xcode-select --install
-brew install gh
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-gh auth login
-```
-
-## Einmalig: Linux-PC einrichten (Ubuntu/Debian)
-
-```bash
-sudo apt update
-sudo apt install -y build-essential pkg-config libasound2-dev libxkbcommon-dev libwayland-dev libgtk-3-dev curl git gh gcc-mingw-w64-x86-64 wine
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source "$HOME/.cargo/env"
+sudo pacman -S --needed base-devel git github-cli rustup alsa-lib gtk3 libxkbcommon-x11 mingw-w64-gcc wine
+rustup default stable
 rustup target add x86_64-pc-windows-gnu
-cargo install cargo-deb --locked
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt install -y nodejs
 gh auth login
+git clone -b claude/nifty-heisenberg-mcqrc9 https://github.com/Cheter0410/Show-Master.git ~/Show-Master
 ```
 
-Inno Setup (baut den Windows-Installer) unter Wine installieren:
+`wine` liegt im Repository *multilib*; falls pacman es nicht findet, in `/etc/pacman.conf` den Abschnitt
+`[multilib]` einkommentieren und `sudo pacman -Sy` ausführen.
+
+Inno Setup (baut den Windows-Installer) einmalig unter Wine installieren:
 
 ```bash
 curl -L -o /tmp/innosetup.exe https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe
@@ -36,60 +24,55 @@ WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" wine /tmp/innosetup.exe /VERYS
 ls ~/.wine/drive_c/InnoSetup/ISCC.exe
 ```
 
-(Heißt der Befehl auf deinem System `wine64` statt `wine`, dort entsprechend ersetzen.)
+Optional für Debian/Ubuntu-Pakete: `cargo install cargo-deb --locked`.
 
-## Eine Version veröffentlichen
+## Einmalig: Mac einrichten
 
-Versionsnummer: steht in `Cargo.toml` (`[workspace.package] version`). Für jede neue Version dort und
-in `CHANGELOG.md` (neuer Abschnitt `## x.y.z`) anheben, committen und pushen.
+Nichts außer Git – das Skript installiert die Xcode-Werkzeuge und Rust selbst, wenn sie fehlen. Für das
+Hochladen zusätzlich die GitHub-Kommandozeile (`brew install gh`, dann `gh auth login`) oder den Upload
+über die Website.
 
-### 1. Auf dem Mac
+## Eine Version bauen
+
+Versionsnummer: `Cargo.toml` (`[workspace.package] version`) und ein Abschnitt `## x.y.z` oben in
+`CHANGELOG.md`. Nach dem Ändern `cargo update -w`, committen, pushen.
+
+**Arch-PC** (Linux + Windows):
 
 ```bash
-cd Show-Master && git pull
-./packaging/macos/build-dmg.sh
+cd ~/Show-Master && git pull && ./packaging/build-on-linux.sh
+```
+
+**Mac** (DMG):
+
+```bash
+cd ~/Desktop/dev/show-master && git pull && bash packaging/macos/setup-and-build.sh
+```
+
+## Veröffentlichen
+
+Wer zuerst fertig ist, legt das Release an (`create`), der andere lädt dazu (`upload`). Auf dem Arch-PC:
+
+```bash
+cd ~/Show-Master
 V=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
 awk -v v="$V" '$0 ~ "^## " v "$" {on=1; next} /^## / {on=0} on' CHANGELOG.md > /tmp/notes.md
-gh release create "v$V" -R Cheter0410/show-master-releases --title "Show Master $V" --notes-file /tmp/notes.md \
-  "dist/ShowMaster-$V.dmg" dist/showmaster-macos-arm64.gz dist/showmaster-macos-x86_64.gz
+gh release view "v$V" -R Cheter0410/show-master-releases >/dev/null 2>&1 \
+  && gh release upload "v$V" -R Cheter0410/show-master-releases --clobber dist/* \
+  || gh release create "v$V" -R Cheter0410/show-master-releases --title "Show Master $V" --notes-file /tmp/notes.md dist/*
 ```
 
-### 2. Auf dem Linux-PC
+Auf dem Mac genauso (dort enthält `dist/` das DMG und die zwei macOS-`.gz`). Ohne `gh`: auf
+github.com/Cheter0410/show-master-releases → *Releases* → das Release öffnen bzw. *Draft a new release*
+mit Tag `vX.Y.Z` → Dateien hineinziehen.
 
-```bash
-cd Show-Master && git pull
-./packaging/build-on-linux.sh
-V=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
-gh release upload "v$V" -R Cheter0410/show-master-releases --clobber \
-  dist/showmaster_"$V"*.deb "dist/ShowMaster-Setup-$V.exe" dist/showmaster-windows-x86_64.gz
-```
+Prüfen: `gh release view "v$V" -R Cheter0410/show-master-releases` – vollständig sind: `.dmg`,
+`ShowMaster-Setup-….exe`, `.pkg.tar.zst`, `linux-x86_64.tar.gz` und die drei `showmaster-…gz`.
 
-### 3. Prüfen
+## Updater einmal komplett testen
 
-```bash
-gh release view "v$V" -R Cheter0410/show-master-releases
-```
-
-Es müssen sechs Dateien dabei sein: `.dmg`, `Setup-….exe`, `.deb` und die drei `showmaster-…gz`.
-
-## Updater testen (einmal komplett)
-
-1. Version `0.1.0` wie oben veröffentlichen und auf dem Mac (bzw. Windows) installieren.
-2. Version auf `0.1.1` anheben: in `Cargo.toml` `version = "0.1.0"` → `"0.1.1"`, in `CHANGELOG.md`
-   ganz oben einen Abschnitt `## 0.1.1` mit einer Zeile ergänzen. Dann:
-   ```bash
-   cargo update -w
-   git commit -am "Release 0.1.1" && git push
-   ```
-3. Schritte 1–2 von „Eine Version veröffentlichen“ für `0.1.1` ausführen.
-4. Installierte 0.1.0 starten: Oben erscheint **Update 0.1.1**. Klicken → *Update and restart*.
-   Danach muss die App von selbst neu starten und `0.1.1` anzeigen (`showmaster --version`).
-
-## Optional: Releases wieder automatisch über GitHub Actions
-
-Sobald Actions wieder läuft: Secret `RELEASES_TOKEN` (Token mit Schreibrecht auf
-`show-master-releases`) im Repository `Show-Master` anlegen. Dann reicht:
-
-```bash
-git tag v0.1.0 && git push origin v0.1.0
-```
+1. Version `0.1.0` wie oben veröffentlichen und installieren (Mac und/oder Windows).
+2. In `Cargo.toml` auf `0.1.1` anheben, `## 0.1.1` mit einer Zeile in `CHANGELOG.md`, `cargo update -w`,
+   committen, pushen; bauen und veröffentlichen wie oben.
+3. Die installierte 0.1.0 starten: oben erscheint **Update 0.1.1** → *Update and restart*. Danach muss die
+   App von selbst als 0.1.1 neu starten.

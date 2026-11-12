@@ -24,9 +24,8 @@ Anmerkungen:
   plus die bewusst unbegrenzte Undo-Historie (1790 Edits, je ein Show-Snapshot). Seitdem verwirft der
   Test beides; der Speicher bleibt konstant. Die Undo-Historie wächst im echten Betrieb mit jeder
   Änderung um die Größe der Show und wird beim Laden einer anderen Show geleert.
-- Mehrstündige Läufe stehen aus (längster Lauf: 30 min). Die CI kann den Dauertest über
-  „Run workflow“ mit frei wählbarer Dauer starten.
-- CI: grün auf Linux x86_64, Linux aarch64, macOS Apple Silicon, macOS Intel und Windows (Format,
-  Clippy, alle Tests, Release-Build, portables Paket; unter Linux zusätzlich der Offline-Nachweis), dazu
-  das `.deb`-Paket. Der erste macOS-Lauf deckte einen zu engen Timing-Test im MIDI-Sender auf
-  (Nachricht 75 ms zu spät auf einem virtuellen Runner); Sender und Test wurden daraufhin überarbeitet.
+- Mehrstündige Läufe stehen aus (längster Lauf: 30 min):
+  `SM_SOAK_SECONDS=14400 cargo test --release -p sm-server --test soak -- --ignored --nocapture`.
+- Plattformen: Ein früher GitHub-Actions-Lauf war auf Linux, macOS (Intel, Apple Silicon) und Windows grün
+  (Stand vor dem nativen Fenster). Seitdem wird lokal gebaut; das native Fenster ist nur unter Linux
+  getestet, das Windows-Programm zusätzlich unter Wine gestartet.

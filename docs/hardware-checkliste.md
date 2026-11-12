@@ -11,6 +11,8 @@ validiert werden.
 - [ ] Windows: WASAPI exklusiv/shared, ASIO-Build mit `--features sm-io/asio`
 - [ ] macOS: Aggregate Devices, Samplerate-Wechsel im laufenden Betrieb
 - [ ] Gerät im Betrieb abziehen: Fehler erscheint im Log, App bleibt bedienbar
+- [ ] Gerät wieder einstecken: nach wenigen Sekunden „Reconnecting audio“ im Log, Ton wieder da (Cues neu starten)
+- [ ] App ohne Interface starten, Interface einstecken: Umschalten vom stummen Ausgang, sobald kein Cue läuft
 - [ ] Gleichzeitig gestartete Cues an einem Messgerät/DAW: Versatz 0 Samples
 
 ## Timecode
@@ -23,7 +25,7 @@ validiert werden.
 - [ ] rtp-midi: Verbindung von macOS (Audio-MIDI-Setup), iOS und rtpMIDI (Windows) – beide Richtungen
 - [ ] rtp-midi mit `journal: true` gegen Wireshark-Dissector und echte Empfänger
 - [ ] MSC an einem Lichtpult
-- [ ] MIDI-/MTC-Jitter messen, besonders unter macOS (ein virtueller CI-Runner lieferte eine Nachricht 75 ms zu spät; auf echter Hardware zu prüfen)
+- [ ] MIDI-/MTC-Jitter messen, besonders unter macOS (ein virtueller Test-Rechner lieferte eine Nachricht 75 ms zu spät; auf echter Hardware zu prüfen)
 
 ## Bedienung
 - [ ] Oberfläche auf einem echten iPad (Safari, „Zum Home-Bildschirm“, Wake-Lock, Hoch-/Querformat)
@@ -33,6 +35,8 @@ validiert werden.
 
 ## Auslieferung
 - [ ] macOS: DMG auf einem echten Mac installieren und starten (Gatekeeper „Dennoch öffnen“, Fenster öffnet sich, Systemdialog zum Öffnen von Dateien, Drag & Drop aus dem Finder, Fenster schließen)
+- [ ] macOS: Doppelklick auf eine `.smshow`-Datei im Finder öffnet die Show (bei geschlossener und bei laufender App)
+- [ ] Windows/Arch: Windows-Installer (unter Wine gebaut) auf echtem Windows durchklicken, `.smshow` per Doppelklick öffnen
 - [ ] Windows: Setup-EXE durchklicken, Startmenü-Eintrag, Doppelklick auf `.smshow`
 - [ ] Updater von einer Version auf die nächste, auf macOS und Windows (bisher nur Unit-Tests; es gibt noch kein veröffentlichtes Release)
 - [ ] macOS: signieren und notarisieren (Apple-Developer-Zertifikat nötig)
