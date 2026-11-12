@@ -620,6 +620,7 @@ impl App {
             .collect();
         let typing = ctx.egui_wants_keyboard_input() || self.was_typing;
         let live = self.is_live();
+        let delete_action = "delete".to_string();
         let mut fired = Vec::new();
         ctx.input_mut(|i| {
             i.events.retain(|e| {
@@ -636,7 +637,14 @@ impl App {
                 let Some(combo) = Self::combo(*key, *modifiers) else {
                     return true;
                 };
-                let Some(action) = map.get(&combo) else {
+                // Delete and Backspace (the Mac "delete" key) always delete cues in
+                // Edit mode, even if the show's hotkey list does not name them.
+                let builtin =
+                    (*key == Key::Delete || *key == Key::Backspace) && modifiers.is_none() && !live;
+                let Some(action) =
+                    map.get(&combo)
+                        .or(if builtin { Some(&delete_action) } else { None })
+                else {
                     return true;
                 };
                 // While typing only Escape (panic) counts, and only in live mode.
@@ -698,7 +706,22 @@ impl App {
             }
             "delete" if editing && !self.view.selection.is_empty() => {
                 let cues = std::mem::take(&mut self.view.selection);
-                self.cmd(json!({ "cmd": "delete_cues", "cues": cues }));
+                let n = cues.len();
+                let undo = if cfg!(target_os = "macos") {
+                    "Cmd+Z"
+                } else {
+                    "Ctrl+Z"
+                };
+                self.cmd_then(
+                    json!({ "cmd": "delete_cues", "cues": cues }),
+                    move |app, r| match r {
+                        Ok(_) => app.toast(format!(
+                            "Deleted {n} cue{} - undo with {undo}",
+                            if n == 1 { "" } else { "s" }
+                        )),
+                        Err(e) => app.toast_error(App::error_text(&e)),
+                    },
+                );
             }
             "find" => self.focus_goto = true,
             _ => {}

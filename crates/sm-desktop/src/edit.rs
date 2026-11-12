@@ -75,6 +75,8 @@ pub(crate) enum Out {
     /// Native dialog: add audio cues.
     AddAudio,
     ShowList(u64),
+    /// Run an app action (delete, duplicate...) after drawing.
+    Action(&'static str),
 }
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
@@ -165,6 +167,7 @@ fn apply(app: &mut App, outs: Vec<Out>) {
                 app.view.list = Some(id);
                 app.view.selection.clear();
             }
+            Out::Action(a) => app.run_action(a),
         }
     }
 }
@@ -204,6 +207,31 @@ fn add_row(app: &mut App, ui: &mut egui::Ui, out: &mut Vec<Out>) {
                     })));
                 }
             }
+        }
+        ui.separator();
+        let has_sel = !app.view.selection.is_empty();
+        if ui
+            .add_enabled(has_sel, egui::Button::new("Duplicate"))
+            .accessible_name("Duplicate selected cues")
+            .on_hover_text("Duplicate the selected cues (Ctrl+D)")
+            .clicked()
+        {
+            out.push(Out::Action("duplicate"));
+        }
+        if ui
+            .add_enabled(
+                has_sel,
+                egui::Button::new(RichText::new("Delete").color(if has_sel {
+                    theme::ERROR
+                } else {
+                    theme::MUTED
+                })),
+            )
+            .accessible_name("Delete selected cues")
+            .on_hover_text("Delete the selected cues (Delete / Backspace key, undo with Ctrl+Z)")
+            .clicked()
+        {
+            out.push(Out::Action("delete"));
         }
         ui.separator();
         lists_menu(app, ui);

@@ -498,3 +498,27 @@ fn stepping_the_playhead_in_edit_mode_selects_that_cue() {
     settle(&mut h);
     assert_eq!(h.state().view.selection, vec![second]);
 }
+
+#[test]
+fn cues_can_be_deleted_with_the_toolbar_button_and_backspace() {
+    let env = Env::demo();
+    let mut h = harness(&env);
+    let seven = id_of(&env, "7");
+    let five = id_of(&env, "5");
+    // Toolbar button.
+    h.get_by_label("Cue 7 Note").click();
+    settle(&mut h);
+    h.get_by_label("Delete selected cues").click();
+    env.wait(&mut h, "cue 7 gone", |s| find_cue(s, seven).is_none());
+    // Backspace (the Mac "delete" key), not in the show's hotkey list.
+    h.get_by_label("Cue 5 Start TC").click();
+    settle(&mut h);
+    h.key_press(egui::Key::Backspace);
+    env.wait(&mut h, "cue 5 gone", |s| find_cue(s, five).is_none());
+    // Inspector button.
+    let four = id_of(&env, "4");
+    h.get_by_label("Cue 4 Long").click();
+    settle(&mut h);
+    h.get_by_label("Delete this cue").click();
+    env.wait(&mut h, "cue 4 gone", |s| find_cue(s, four).is_none());
+}

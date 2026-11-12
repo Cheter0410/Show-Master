@@ -116,6 +116,14 @@ fn single(
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
+                .button(RichText::new("Delete").color(theme::ERROR))
+                .accessible_name("Delete this cue")
+                .on_hover_text("Delete the selected cue(s) (Delete / Backspace key)")
+                .clicked()
+            {
+                out.push(Out::Action("delete"));
+            }
+            if ui
                 .add_enabled(running, egui::Button::new("Stop"))
                 .accessible_name("Stop cue")
                 .on_hover_text("Stop this cue")
