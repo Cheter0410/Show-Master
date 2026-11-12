@@ -120,7 +120,7 @@ fn short_agent(agent: &str) -> &str {
 }
 
 /// What to type on a tablet: `http://showmaster.local` without the scheme
-/// (`/` opens the remote for network devices).
+/// (`/` opens the read-only view for network devices, with a "Control" button).
 pub(crate) fn short_address(url: &str) -> &str {
     url.trim_start_matches("http://").trim_end_matches('/')
 }
@@ -144,7 +144,7 @@ fn mdns_url(ui: &mut egui::Ui, s: &UiState) {
             });
             unit(
                 ui,
-                "by name (Bonjour) - opens the remote; if the name does not work (some Android devices), use the IP address below",
+                "by name (Bonjour) - opens the view; its Control button asks for the control PIN. If the name does not work (some Android devices), use the IP address below",
             );
             ui.add_space(4.0);
         }

@@ -1,7 +1,7 @@
 // Small shared panels: notes, log, status bar, go-to box, banners, toasts, PIN pad.
 import { useEffect, useRef, useState } from "react";
 import { run, transport } from "../commands";
-import { submitPin } from "../session";
+import { route, submitPin } from "../session";
 import { dismissToast, toast, useApp } from "../store";
 import { formatWallClock } from "../time";
 import { IconLock, IconX } from "./icons";
@@ -304,6 +304,11 @@ export function PinPad() {
             OK
           </button>
         </div>
+        {role === "control" && route === "remote" ? (
+          <a className="pinpad-back" href="/view" data-testid="pin-to-view">
+            Back to view only
+          </a>
+        ) : null}
       </div>
     </div>
   );

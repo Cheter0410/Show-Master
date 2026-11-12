@@ -51,7 +51,7 @@ validiert werden.
 
 ## Bedienung
 - [ ] Oberfläche auf einem echten iPad (Safari, „Zum Home-Bildschirm“, Wake-Lock, Hoch-/Querformat)
-- [ ] iPad-Safari öffnet mit nur `showmaster.local` die Fernsteuerung (Bonjour-Name + Port 80) im
+- [ ] iPad-Safari öffnet mit nur `showmaster.local` die Anzeige, „Control“ fragt die PIN ab (Bonjour-Name + Port 80) im
       Show-WLAN – auf Mac, Windows (Firewall-Abfrage) und Linux-Paket (setcap); mit
       „Client Isolation“/Multicast-Filter im Access Point schlägt das erwartungsgemäß fehl, IP/QR geht
 - [ ] Zwei Show-Master-Rechner im selben Netz: der zweite wird zu `showmaster-2.local`, Setup → Remote

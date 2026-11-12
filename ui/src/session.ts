@@ -16,7 +16,9 @@ export const route: Route = typeof location === "undefined" ? "desktop" : routeF
 /** Role the PIN pad asks for on this route. `/` from a non-loopback machine can only ever be `control`. */
 const wantedRole: "control" | "view" = route === "view" ? "view" : "control";
 
-const KEY = "sm.session";
+// One stored login per page: going from /view to /remote must ask for the
+// control PIN instead of reusing the view token (and must not log /view out).
+const KEY = `sm.session.${wantedRole}`;
 
 interface Stored {
   token: string;
@@ -49,12 +51,17 @@ function ready(token: string, role: Role): void {
   connect();
 }
 
+/** A view login is not enough for the control page. */
+function usable(role: Role | null | undefined): role is Role {
+  return role != null && !(wantedRole === "control" && role === "view");
+}
+
 /** One attempt to obtain a usable token. Returns true when the app is (still) ready to connect. */
 async function establish(): Promise<boolean> {
   const stored = loadStored() ?? (getApp().token && getApp().role ? { token: getApp().token!, role: getApp().role! } : null);
   const info = await fetchSession(stored?.token);
   setApp({ viewNeedsPin: info.view_needs_pin, loginRole: wantedRole });
-  if (info.role) {
+  if (usable(info.role)) {
     ready(info.token, info.role);
     return true;
   }
@@ -67,7 +74,7 @@ async function establish(): Promise<boolean> {
       if (!(e instanceof HttpError)) throw e;
     }
   }
-  if (stored) {
+  if (stored && usable(stored.role)) {
     // The server did not confirm the stored token via /api/session; the WebSocket decides.
     setApp({ auth: "ready", token: stored.token, role: stored.role });
     return true;
@@ -94,7 +101,7 @@ export async function boot(): Promise<void> {
     try {
       const stored = loadStored();
       const info = await fetchSession(stored?.token ?? getApp().token);
-      if (info.role) {
+      if (usable(info.role)) {
         wsAuthFailures = 0;
         store({ token: info.token, role: info.role });
         setApp({ token: info.token, role: info.role });

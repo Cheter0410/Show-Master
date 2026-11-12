@@ -880,6 +880,8 @@ button.lrow-gutter:hover { box-shadow: inset 6px 0 0 var(--green-deep); }
 .pinpad { width: min(340px, 100%); display: flex; flex-direction: column; gap: 12px; align-items: stretch; text-align: center; }
 .pinpad-title { font-size: 22px; font-weight: 800; display: flex; gap: 8px; align-items: center; justify-content: center; }
 .pinpad-sub { color: var(--muted); font-size: 16px; }
+.pinpad-back { color: var(--muted); font-size: 15px; text-align: center; padding: 8px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+.r-switch { flex: none; text-decoration: none; min-height: 44px; min-width: 44px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; }
 .pin-display { min-height: 56px; display: flex; align-items: center; justify-content: center; font-size: 26px; letter-spacing: 0.3em; background: var(--panel); border: 2px solid var(--border-strong); border-radius: 10px; }
 .pin-display .muted { letter-spacing: 0.1em; font-size: 16px; }
 .pin-display.error { border-color: var(--red); color: var(--red); font-size: 17px; letter-spacing: 0; font-weight: 700; }

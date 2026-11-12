@@ -39,6 +39,9 @@ export function RemoteApp() {
         <ConnDot />
         <span className="r-title ellipsis">{show?.name ?? "Show Master"}</span>
         <span className={`mode-badge ${mode}`}>{mode === "live" ? "LIVE" : "EDIT"}</span>
+        <a className="btn ghost r-switch" href="/view" data-testid="to-view" title="Back to the read-only view">
+          View
+        </a>
         <button className="btn ghost r-clock-toggle" aria-expanded={!folded} onClick={() => setFolded(!folded)} data-testid="clocks-toggle">
           Clocks {folded ? <IconChevronDown size={14} /> : <IconUp size={14} />}
         </button>

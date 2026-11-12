@@ -1,4 +1,5 @@
-// /view – read-only monitor. This screen must never contain a control that sends a command.
+// /view – read-only monitor (what `showmaster.local` opens on a tablet). This screen must never
+// contain a control that sends a command; "Control" only navigates to /remote (control PIN).
 import { useEffect } from "react";
 import { Clocks } from "../components/Clocks";
 import { CueList } from "../components/CueList";
@@ -20,6 +21,9 @@ export function ViewApp() {
         {paused ? <span className="tag tag-paused">PAUSED</span> : null}
         <span className={`mode-badge ${mode}`}>{mode === "live" ? "LIVE" : "EDIT"}</span>
         <span className="mode-badge view">VIEW ONLY</span>
+        <a className="btn r-switch" href="/remote" data-testid="to-remote" title="Control the show (asks for the control PIN)">
+          Control
+        </a>
       </header>
       <div className="v-clocks">
         <Clocks canControl={false} compact />

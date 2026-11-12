@@ -87,7 +87,8 @@ revidieren lassen.
   in Setup, kein Fehler).
 - **Kurze Adresse `showmaster.local`:** Damit auf dem Handy nur der Name getippt werden muss, lauscht
   der Webserver im Netzwerkbetrieb zusätzlich auf Port 80 (Best Effort, neben dem eingestellten Port),
-  und `/` leitet Geräte aus dem Netz per 302 auf `/remote` um (der eigene Rechner bekommt weiter die
+  und `/` leitet Geräte aus dem Netz per 302 auf die Anzeige `/view` um (sicherer Standard: wer nur
+  den Namen tippt, kann nichts auslösen; der Knopf „Control“ führt mit Control-PIN zu `/remote`) (der eigene Rechner bekommt weiter die
   volle Oberfläche). Angekündigt und angezeigt (Setup → Remote, Statuszeile, QR-Codes) wird dann die
   Adresse ohne Port. macOS und Windows erlauben Port 80 ohne Rechte (Windows fragt ggf. die Firewall);
   unter Linux setzen Arch-Paket und .deb `cap_net_bind_service` per `setcap`. Fehlt die Berechtigung

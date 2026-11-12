@@ -237,6 +237,23 @@ try {
       }
       await vp.screenshot({ path: join(SHOTS, "real-view.png") });
     });
+
+    const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true });
+    const pp = await phone.newPage();
+    watch(pp);
+    await step("bare address opens the view; Control asks for the PIN, View goes back", async () => {
+      await pp.goto(LAN + "/");
+      await pp.waitForSelector('[data-testid="view-app"]');
+      if (!pp.url().endsWith("/view")) throw new Error(`landed on ${pp.url()}`);
+      await pp.tap('[data-testid="to-remote"]');
+      await pp.waitForSelector('[data-testid="pinpad"]');
+      for (const d of "1234") await pp.tap(`[data-testid="pin-${d}"]`);
+      await pp.tap('[data-testid="pin-ok"]');
+      await pp.waitForSelector('[data-testid="remote-app"]');
+      await pp.tap('[data-testid="to-view"]');
+      await pp.waitForSelector('[data-testid="view-app"]');
+      await pp.screenshot({ path: join(SHOTS, "real-phone-view.png") });
+    });
   }
 
   await step("no request left the machine / local network", async () => {

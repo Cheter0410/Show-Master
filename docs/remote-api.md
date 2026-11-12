@@ -112,7 +112,7 @@ mDNS/Bonjour fields (optional comfort, see `decisions.md`):
   URLs in `remote.urls` always work and remain the primary way in.
 - Port: besides the configured port the server also listens on the standard web port 80 when it can;
   then `remote.urls` and `remote.mdns.url` carry no port (`http://192.168.1.10`). Otherwise they use the
-  configured port. `GET /` from a network device redirects (302) to `/remote`; on this computer `/`
+  configured port. `GET /` from a network device redirects (302) to `/view` (its "Control" button links to `/remote`; a view login never counts there, the control PIN is asked); on this computer `/`
   is the full interface.
 
 ### Inputs (`state.inputs`)

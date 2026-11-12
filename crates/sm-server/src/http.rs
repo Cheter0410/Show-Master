@@ -514,13 +514,14 @@ async fn static_asset(ConnectInfo(addr): ConnectInfo<SocketAddr>, uri: Uri) -> R
     if path.starts_with("api/") {
         return (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))).into_response();
     }
-    // Tablets and phones only type `showmaster.local`: send them straight to
-    // the remote. This computer itself keeps the full interface.
+    // Tablets and phones only type `showmaster.local`: send them to the
+    // read-only view (it has a "Control" button that asks for the control PIN).
+    // This computer itself keeps the full interface.
     if path.is_empty() && !addr.ip().is_loopback() {
         return (
             StatusCode::FOUND,
             [
-                (header::LOCATION, "/remote"),
+                (header::LOCATION, "/view"),
                 (header::CACHE_CONTROL, "no-store"),
             ],
         )
@@ -708,14 +709,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn root_sends_network_devices_to_the_remote() {
+    async fn root_sends_network_devices_to_the_view() {
         let r = static_asset(peer([192, 168, 1, 30]), Uri::from_static("/")).await;
         assert_eq!(r.status(), StatusCode::FOUND);
-        assert_eq!(r.headers()[header::LOCATION], "/remote");
+        assert_eq!(r.headers()[header::LOCATION], "/view");
         // This computer keeps the full interface; other pages are not redirected.
         let r = static_asset(peer([127, 0, 0, 1]), Uri::from_static("/")).await;
         assert_ne!(r.status(), StatusCode::FOUND);
-        let r = static_asset(peer([192, 168, 1, 30]), Uri::from_static("/view")).await;
+        let r = static_asset(peer([192, 168, 1, 30]), Uri::from_static("/remote")).await;
         assert_ne!(r.status(), StatusCode::FOUND);
     }
 
