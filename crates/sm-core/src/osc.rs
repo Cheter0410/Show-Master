@@ -40,7 +40,107 @@ impl Default for OscMessage {
     }
 }
 
+/// Lantern (the presentation player) listens for OSC on this UDP port.
+pub const LANTERN_PORT: u16 = 53_100;
+
+/// What a Lantern cue tells the presentation to do. A Lantern cue is an
+/// OSC cue with one of these messages (address `/lantern/...`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LanternAction {
+    /// Next slide.
+    Go,
+    Back,
+    /// Slide number (from 1).
+    Slide(i32),
+    First,
+    BlackoutOn,
+    BlackoutOff,
+    BlackoutToggle,
+    /// Back to black before the first slide.
+    Clear,
+}
+
+impl LanternAction {
+    /// The choices of the editor (the slide number is edited separately).
+    pub const ALL: [LanternAction; 8] = [
+        LanternAction::Go,
+        LanternAction::Back,
+        LanternAction::Slide(1),
+        LanternAction::First,
+        LanternAction::BlackoutOn,
+        LanternAction::BlackoutOff,
+        LanternAction::BlackoutToggle,
+        LanternAction::Clear,
+    ];
+
+    pub fn label(self) -> String {
+        match self {
+            LanternAction::Go => "GO (next slide)".into(),
+            LanternAction::Back => "Back".into(),
+            LanternAction::Slide(n) => format!("Slide {n}"),
+            LanternAction::First => "First slide".into(),
+            LanternAction::BlackoutOn => "Blackout on".into(),
+            LanternAction::BlackoutOff => "Blackout off".into(),
+            LanternAction::BlackoutToggle => "Blackout toggle".into(),
+            LanternAction::Clear => "Clear (black)".into(),
+        }
+    }
+
+    /// Same choice, ignoring the slide number.
+    pub fn same_kind(self, other: LanternAction) -> bool {
+        std::mem::discriminant(&self) == std::mem::discriminant(&other)
+    }
+
+    pub fn address_args(self) -> (&'static str, Vec<OscArg>) {
+        match self {
+            LanternAction::Go => ("/lantern/go", vec![]),
+            LanternAction::Back => ("/lantern/back", vec![]),
+            LanternAction::Slide(n) => ("/lantern/slide", vec![OscArg::Int(n.max(1))]),
+            LanternAction::First => ("/lantern/first", vec![]),
+            LanternAction::BlackoutOn => ("/lantern/blackout", vec![OscArg::Int(1)]),
+            LanternAction::BlackoutOff => ("/lantern/blackout", vec![OscArg::Int(0)]),
+            LanternAction::BlackoutToggle => ("/lantern/blackout", vec![]),
+            LanternAction::Clear => ("/lantern/clear", vec![]),
+        }
+    }
+}
+
 impl OscMessage {
+    /// A message for Lantern on this computer.
+    pub fn lantern(action: LanternAction) -> Self {
+        let (address, args) = action.address_args();
+        Self {
+            host: "127.0.0.1".into(),
+            port: LANTERN_PORT,
+            address: address.into(),
+            args,
+        }
+    }
+
+    /// The Lantern action this message is, if it is one.
+    pub fn lantern_action(&self) -> Option<LanternAction> {
+        let int = |a: &OscArg| match a {
+            OscArg::Int(i) => Some(*i),
+            OscArg::Float(f) => Some(f.round() as i32),
+            OscArg::Bool(b) => Some(i32::from(*b)),
+            OscArg::String(s) => s.trim().parse().ok(),
+        };
+        let first = self.args.first().and_then(int);
+        Some(match self.address.trim_end_matches('/') {
+            "/lantern/go" | "/lantern/next" => LanternAction::Go,
+            "/lantern/back" | "/lantern/prev" => LanternAction::Back,
+            "/lantern/slide" => LanternAction::Slide(first.unwrap_or(1)),
+            "/lantern/first" => LanternAction::First,
+            "/lantern/clear" => LanternAction::Clear,
+            "/lantern/blackout" => match first {
+                None => LanternAction::BlackoutToggle,
+                Some(0) => LanternAction::BlackoutOff,
+                Some(_) => LanternAction::BlackoutOn,
+            },
+            _ => return None,
+        })
+    }
+
     /// `host:port` (IPv6 literals in brackets), as handed to the sender.
     pub fn target(&self) -> String {
         let host = self.host.trim();
@@ -103,6 +203,9 @@ impl OscMessage {
 
     /// Short description for lists: `/cue/1/start 1 "x" -> 10.0.0.5:53000`.
     pub fn summary(&self) -> String {
+        if let Some(a) = self.lantern_action() {
+            return format!("Lantern · {} -> {}", a.label(), self.target());
+        }
         let args = format_args(&self.args);
         if args.is_empty() {
             format!("{} -> {}", self.address, self.target())
@@ -304,5 +407,21 @@ mod tests {
             .target(),
             "[::1]:9"
         );
+    }
+
+    #[test]
+    fn lantern_messages_round_trip() {
+        for a in LanternAction::ALL
+            .into_iter()
+            .chain([LanternAction::Slide(12)])
+        {
+            let m = OscMessage::lantern(a);
+            assert_eq!(m.lantern_action(), Some(a), "{a:?}");
+            assert!(m.encode().is_ok());
+        }
+        assert_eq!(OscMessage::default().lantern_action(), None);
+        assert!(OscMessage::lantern(LanternAction::Slide(3))
+            .summary()
+            .starts_with("Lantern · Slide 3"));
     }
 }

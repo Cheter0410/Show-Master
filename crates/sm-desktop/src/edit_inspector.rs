@@ -211,6 +211,12 @@ fn single(
                 CueKind::Fade(_) => fade_tab(ui, show, cue, edit, out),
                 CueKind::Midi(_) => midi_tab(ui, state, cue, edit, out),
                 CueKind::Http(r) => http_tab(ui, cue.id, r, edit, out),
+                CueKind::Osc(m) if m.lantern_action().is_some() => {
+                    let id = cue.id;
+                    grid(("insp_lantern", id)).show(ui, |ui| {
+                        lantern_rows(ui, &mut edit.drafts, id, m, out);
+                    });
+                }
                 CueKind::Osc(m) => {
                     let id = cue.id;
                     grid(("insp_osc", id)).show(ui, |ui| {
@@ -1513,6 +1519,115 @@ pub(crate) fn osc_rows(
         } else {
             theme::WARN
         }),
+    );
+    ui.end_row();
+}
+
+/// A Lantern cue: what the presentation should do, and which computer runs Lantern.
+fn lantern_rows(
+    ui: &mut Ui,
+    drafts: &mut fields::Drafts,
+    id: u64,
+    m: &sm_core::osc::OscMessage,
+    out: &mut Vec<Out>,
+) {
+    use sm_core::osc::LanternAction;
+    let Some(cur) = m.lantern_action() else {
+        return;
+    };
+    let set = |a: LanternAction| {
+        let (address, args) = a.address_args();
+        kind_patch(id, json!({ "address": address, "args": args }))
+    };
+    label(ui, "Lantern");
+    let mut picked = None;
+    egui::ComboBox::from_id_salt(("lantern_action", id))
+        .selected_text(match cur {
+            LanternAction::Slide(_) => "Go to slide".to_string(),
+            a => a.label(),
+        })
+        .width(200.0)
+        .show_ui(ui, |ui| {
+            for a in LanternAction::ALL {
+                let text = match a {
+                    LanternAction::Slide(_) => "Go to slide".to_string(),
+                    a => a.label(),
+                };
+                if ui.selectable_label(cur.same_kind(a), text).clicked() && !cur.same_kind(a) {
+                    picked = Some(a);
+                }
+            }
+        });
+    if let Some(a) = picked {
+        out.push(Out::Cmd(set(a)));
+    }
+    ui.end_row();
+    if let LanternAction::Slide(n) = cur {
+        label(ui, "Slide");
+        fields::field(
+            ui,
+            drafts,
+            Id::unique(("lantern_slide", id)),
+            &n.to_string(),
+            Opts::new("Slide number in the presentation (from 1)", 80.0).mono(),
+            out,
+            move |t| match t.trim().parse::<i32>() {
+                Ok(n) if n >= 1 => {
+                    let (address, args) = LanternAction::Slide(n).address_args();
+                    Ok(Some(kind_patch(
+                        id,
+                        json!({ "address": address, "args": args }),
+                    )))
+                }
+                _ => Err("Slide: 1 or more".into()),
+            },
+        );
+        ui.end_row();
+    }
+    label(ui, "Computer");
+    fields::field(
+        ui,
+        drafts,
+        Id::unique(("lantern_host", id)),
+        &m.host,
+        Opts::new(
+            "Where Lantern runs: 127.0.0.1 = this computer, else its IP address or name",
+            200.0,
+        )
+        .mono(),
+        out,
+        move |t| {
+            let t = t.trim();
+            if t.is_empty() {
+                return Err("Enter 127.0.0.1 or the IP address of the Lantern computer".into());
+            }
+            Ok(Some(kind_patch(id, json!({ "host": t }))))
+        },
+    );
+    ui.end_row();
+    label(ui, "Port");
+    fields::field(
+        ui,
+        drafts,
+        Id::unique(("lantern_port", id)),
+        &m.port.to_string(),
+        Opts::new(
+            "Lantern's OSC port (Lantern settings, normally 53100)",
+            80.0,
+        )
+        .mono(),
+        out,
+        move |t| match t.trim().parse::<u16>() {
+            Ok(n) if n > 0 => Ok(Some(kind_patch(id, json!({ "port": n })))),
+            _ => Err("Port: 1-65535".into()),
+        },
+    );
+    ui.end_row();
+    ui.label("");
+    ui.label(
+        RichText::new(format!("Sends {}", m.summary()))
+            .small()
+            .color(theme::MUTED),
     );
     ui.end_row();
 }

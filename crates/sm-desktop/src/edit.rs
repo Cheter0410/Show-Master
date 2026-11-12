@@ -22,12 +22,13 @@ use serde_json::{json, Value};
 use sm_core::model::{ControlAction, Cue, CueKind, Show, TcAction};
 
 /// Cue types offered in the add row (command name, button text).
-pub const ADD_TYPES: [(&str, &str); 9] = [
+pub const ADD_TYPES: [(&str, &str); 10] = [
     ("audio", "Audio…"),
     ("memo", "Memo"),
     ("fade", "Fade"),
     ("midi", "MIDI"),
     ("osc", "OSC"),
+    ("lantern", "Lantern"),
     ("http", "HTTP"),
     ("timecode", "Timecode"),
     ("control", "Control"),
@@ -629,6 +630,7 @@ pub fn type_label_of(kind: &str) -> &'static str {
         "fade" => "Fade",
         "midi" => "MIDI",
         "osc" => "OSC",
+        "lantern" => "Lantern",
         "http" => "HTTP",
         "timecode" => "Timecode",
         "control" => "Control",
@@ -638,7 +640,10 @@ pub fn type_label_of(kind: &str) -> &'static str {
 }
 
 pub fn type_label(cue: &Cue) -> &'static str {
-    type_label_of(cue.type_name())
+    match &cue.kind {
+        CueKind::Osc(m) if m.lantern_action().is_some() => "Lantern",
+        _ => type_label_of(cue.type_name()),
+    }
 }
 
 /// `12 Intro`, or the type name for an unnamed cue.

@@ -489,6 +489,9 @@ impl Document {
                     "fade" => CueKind::Fade(FadeCue::default()),
                     "midi" => CueKind::Midi(MidiCue::default()),
                     "osc" => CueKind::Osc(sm_core::osc::OscMessage::default()),
+                    "lantern" => CueKind::Osc(sm_core::osc::OscMessage::lantern(
+                        sm_core::osc::LanternAction::Go,
+                    )),
                     "http" => CueKind::Http(sm_core::http_cue::HttpRequest::default()),
                     "timecode" => CueKind::Timecode(TimecodeCue::default()),
                     "control" => CueKind::Control(ControlCue::default()),

@@ -98,6 +98,7 @@ pub fn type_label(cue: &Cue) -> &'static str {
         CueKind::Audio(_) => "Audio",
         CueKind::Fade(_) => "Fade",
         CueKind::Midi(_) => "MIDI",
+        CueKind::Osc(m) if m.lantern_action().is_some() => "Lantern",
         CueKind::Osc(_) => "OSC",
         CueKind::Http(_) => "HTTP",
         CueKind::Timecode(_) => "Timecode",
