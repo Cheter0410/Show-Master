@@ -119,17 +119,34 @@ fn short_agent(agent: &str) -> &str {
     }
 }
 
-/// The `http://showmaster.local:7400` style address (mDNS), below the IP URLs.
+/// What to type on a tablet: `http://show-master.local` without the scheme
+/// (`/` opens the remote for network devices).
+pub(crate) fn short_address(url: &str) -> &str {
+    url.trim_start_matches("http://").trim_end_matches('/')
+}
+
+/// The `show-master.local` address (mDNS), shown big above the IP URLs.
 fn mdns_url(ui: &mut egui::Ui, s: &UiState) {
     let Some(m) = s.remote.mdns.as_ref().filter(|m| m.enabled) else {
         return;
     };
     match &m.url {
         Some(url) => {
-            ui.horizontal(|ui| {
-                ui.monospace(format!("{url}/remote"));
-                unit(ui, "by name (Bonjour); the IP address always works");
+            ui.horizontal_wrapped(|ui| {
+                ui.label("On a phone or tablet simply type");
+                ui.label(
+                    RichText::new(short_address(url))
+                        .monospace()
+                        .strong()
+                        .size(20.0)
+                        .color(theme::RUNNING),
+                );
             });
+            unit(
+                ui,
+                "by name (Bonjour) - opens the remote; if the name does not work (some Android devices), use the IP address below",
+            );
+            ui.add_space(4.0);
         }
         None => {
             if let Some(e) = &m.error {
@@ -242,6 +259,7 @@ pub(super) fn remote_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
             "No network address found - is this computer connected to the show network?",
         );
     } else {
+        mdns_url(ui, s);
         for u in &s.remote.urls {
             ui.horizontal(|ui| {
                 ui.monospace(format!("{u}/remote"));
@@ -251,7 +269,6 @@ pub(super) fn remote_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
                 unit(ui, "view only");
             });
         }
-        mdns_url(ui, s);
         let base = s.remote.urls[0].clone();
         ui.add_space(6.0);
         ui.horizontal_top(|ui| {
@@ -313,6 +330,18 @@ mod tests {
         // Quiet zone is white, the finder pattern's corner is dark.
         assert!(!m[0]);
         assert!(m[QUIET * n + QUIET]);
+    }
+
+    #[test]
+    fn short_addresses() {
+        assert_eq!(
+            short_address("http://show-master.local"),
+            "show-master.local"
+        );
+        assert_eq!(
+            short_address("http://show-master.local:7400"),
+            "show-master.local:7400"
+        );
     }
 
     #[test]

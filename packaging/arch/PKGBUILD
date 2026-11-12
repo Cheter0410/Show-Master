@@ -8,11 +8,12 @@ pkgdesc="Cue-based playback and show control for live production (runs fully off
 arch=('x86_64')
 url="https://github.com/Cheter0410/show-master-releases"
 license=('MIT' 'Apache-2.0')
-depends=('alsa-lib' 'gtk3' 'libxkbcommon-x11' 'libglvnd' 'hicolor-icon-theme')
+depends=('alsa-lib' 'gtk3' 'libxkbcommon-x11' 'libglvnd' 'hicolor-icon-theme' 'libcap')
 optdepends=('vulkan-icd-loader: GPU rendering through Vulkan'
             'pipewire-alsa: play through PipeWire'
             'pipewire-jack: JACK routing through PipeWire')
 options=('!debug' '!strip')
+install=showmaster.install
 
 package() {
     local root="$startdir/../.."

@@ -321,6 +321,9 @@ function RemoteSetup({ doc, token }: { doc: State; token: string }) {
       </div>
       <div className="setup-col">
         <h4>Open on the iPad</h4>
+        {doc.remote.mdns?.enabled && doc.remote.mdns.url ? (
+          <p data-testid="short-address">On a phone or tablet simply type <strong className="mono">{doc.remote.mdns.url.replace(/^http:\/\//, "")}</strong></p>
+        ) : null}
         {doc.remote.urls.length === 0 ? <p className="muted">No network address found – is this computer connected to the show network?</p> : null}
         <ul className="plain-list urls">
           {doc.remote.urls.map((u) => (

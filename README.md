@@ -17,10 +17,13 @@ cargo run --release -p showmaster -- --make-demo ~/showmaster-demo
 ```
 
 Das Programm öffnet sein eigenes Fenster (native Rust-App, egui). Parallel läuft ein lokaler Webserver
-nur für Fernsteuerung: Tablets im selben lokalen Netz erreichen die Fernsteuerung unter
-`http://<IP>:7400/remote` (PIN, Standard `1234`) und die reine Anzeige unter `/view`; URL und QR-Code
-stehen in *Setup → Remote*. Wo das Netz Multicast erlaubt, geht es auch per Name:
-`http://showmaster.local:7400/remote` (mDNS/Bonjour, abschaltbar; die IP-Adresse funktioniert immer).
+nur für Fernsteuerung: Auf Handy oder iPad im selben lokalen Netz reicht im Browser
+**`show-master.local`** – das öffnet direkt die Fernsteuerung (PIN, Standard `1234`); die reine Anzeige
+liegt unter `show-master.local/view`. Dafür meldet sich Show Master per mDNS/Bonjour unter diesem Namen
+an und lauscht zusätzlich auf dem Standard-Webport 80. Geht Port 80 nicht (belegt, oder unter Linux ohne
+Berechtigung – die Pakete setzen sie per `setcap`), lautet die Adresse `show-master.local:7400`.
+Die IP-Adresse (`http://<IP>`, bzw. `http://<IP>:7400/remote`) und der QR-Code in *Setup → Remote*
+funktionieren immer, auch wo Multicast gesperrt ist oder ein Android-Gerät `.local` nicht kennt.
 Die RTP-MIDI-Session erscheint per Bonjour in Audio-MIDI-Setup (Mac), auf dem iPad und in rtpMIDI;
 gefundene Sessions lassen sich in *Setup → MIDI* direkt verbinden.
 

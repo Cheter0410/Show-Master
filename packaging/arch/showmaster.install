@@ -1,0 +1,9 @@
+# Allow the standard web port 80, so tablets only type `show-master.local`.
+# Without it Show Master falls back to its own port (show-master.local:7400).
+post_install() {
+    setcap 'cap_net_bind_service=+ep' usr/bin/showmaster 2>/dev/null || true
+}
+
+post_upgrade() {
+    post_install
+}

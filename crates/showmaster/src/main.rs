@@ -258,6 +258,15 @@ fn open_browser(url: &str) {
     }
 }
 
+/// True when the first listener really is on the network (not the localhost
+/// fallback of [`bind`]).
+fn listener_on_lan(listeners: &[tokio::net::TcpListener]) -> bool {
+    listeners
+        .first()
+        .and_then(|l| l.local_addr().ok())
+        .is_some_and(|a| !a.ip().is_loopback())
+}
+
 async fn bind(addr: IpAddr, port: u16) -> std::io::Result<tokio::net::TcpListener> {
     match tokio::net::TcpListener::bind(SocketAddr::new(addr, port)).await {
         Ok(l) => Ok(l),
@@ -358,7 +367,7 @@ fn main() -> std::process::ExitCode {
     // The web server (tablets, API) runs in the background in both modes.
     let server_handle = handle.clone();
     let open = args.open;
-    let (bound_tx, bound_rx) = std::sync::mpsc::channel::<Option<u16>>();
+    let (bound_tx, bound_rx) = std::sync::mpsc::channel::<Option<(u16, u16)>>();
     let server = tokio_rt.spawn(async move {
         let listener = match bind(addr, port).await {
             Ok(l) => l,
@@ -369,14 +378,34 @@ fn main() -> std::process::ExitCode {
             }
         };
         let local = listener.local_addr().map(|a| a.port()).unwrap_or(port);
-        let _ = bound_tx.send(Some(local));
+        let mut listeners = vec![listener];
+        // Also the standard web port, so tablets only type `show-master.local`
+        // (or the bare IP address). Best effort: it may be taken or need
+        // privileges (Linux without CAP_NET_BIND_SERVICE).
+        let mut public = local;
+        if lan && local != 80 && listener_on_lan(&listeners) {
+            match tokio::net::TcpListener::bind(SocketAddr::new(addr, 80)).await {
+                Ok(l) => {
+                    tracing::info!("also listening on the standard web port 80");
+                    listeners.push(l);
+                    public = 80;
+                }
+                Err(e) => tracing::info!(
+                    "standard web port 80 not available ({e}); tablets use port {local}"
+                ),
+            }
+        }
+        server_handle
+            .web_port
+            .store(public, std::sync::atomic::Ordering::Relaxed);
+        let _ = bound_tx.send(Some((local, public)));
         tracing::info!("web interface: http://127.0.0.1:{local}");
         if lan {
-            for u in sm_server::http::local_urls(local) {
+            for u in sm_server::http::local_urls(public) {
                 tracing::info!("remote (tablet): {u}/remote   view only: {u}/view");
             }
         }
-        if let Err(e) = sm_server::http::serve(server_handle, listener).await {
+        if let Err(e) = sm_server::http::serve_all(server_handle, listeners).await {
             tracing::error!("web server stopped: {e}");
         }
     });
@@ -384,7 +413,7 @@ fn main() -> std::process::ExitCode {
         .recv_timeout(std::time::Duration::from_secs(10))
         .ok()
         .flatten();
-    if let Some(local) = bound {
+    if let Some((local, _)) = bound {
         println!("Show Master is running. Web interface: http://127.0.0.1:{local}");
         if open {
             open_browser(&format!("http://127.0.0.1:{local}"));
@@ -392,7 +421,11 @@ fn main() -> std::process::ExitCode {
     }
     // mDNS/Bonjour (optional comfort, also in headless mode). The web interface
     // is only advertised when it listens on the network.
-    let advertiser = discovery::start(handle.clone(), net, bound.filter(|_| lan));
+    let advertiser = discovery::start(
+        handle.clone(),
+        net,
+        bound.filter(|_| lan).map(|(_, public)| public),
+    );
 
     // Ctrl+C (terminal) quits like the Quit button.
     let ctrl_c_handle = handle.clone();

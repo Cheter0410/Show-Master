@@ -190,6 +190,10 @@ pub struct Handle {
     pub quit_requested: Arc<std::sync::atomic::AtomicBool>,
     /// Set when another program start asks the window to come to the front.
     pub raise: Arc<std::sync::atomic::AtomicBool>,
+    /// Port tablets should use, set by whoever opened the web server (0 =
+    /// unknown, use the configured port). 80 when the standard web port could
+    /// be opened, so addresses need no `:port`.
+    pub web_port: Arc<std::sync::atomic::AtomicU16>,
     stop: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -460,6 +464,7 @@ pub fn spawn(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         quit: Arc::new(tokio::sync::Notify::new()),
         quit_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         raise: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        web_port: Arc::new(std::sync::atomic::AtomicU16::new(0)),
         stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
     let h = handle.clone();
@@ -1153,7 +1158,14 @@ impl Runtime {
             .map(|c| c.clone())
             .unwrap_or_default();
         let remote = &self.doc.show.settings.remote;
-        let port = self.port_override.unwrap_or(remote.port);
+        let port = match self
+            .handle
+            .web_port
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            0 => self.port_override.unwrap_or(remote.port),
+            p => p,
+        };
         if self
             .urls
             .0

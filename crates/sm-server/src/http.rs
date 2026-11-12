@@ -46,13 +46,22 @@ fn random_token() -> String {
 }
 
 /// Non-loopback IPv4 addresses of this machine (for URL display / QR codes).
+/// `http://host:port`, without the port when it is the standard web port 80.
+pub fn base_url(host: &str, port: u16) -> String {
+    if port == 80 {
+        format!("http://{host}")
+    } else {
+        format!("http://{host}:{port}")
+    }
+}
+
 pub fn local_urls(port: u16) -> Vec<String> {
     let mut urls: Vec<String> = if_addrs::get_if_addrs()
         .unwrap_or_default()
         .into_iter()
         .filter(|i| !i.is_loopback())
         .filter_map(|i| match i.ip() {
-            IpAddr::V4(ip) => Some(format!("http://{ip}:{port}")),
+            IpAddr::V4(ip) => Some(base_url(&ip.to_string(), port)),
             IpAddr::V6(_) => None,
         })
         .collect();
@@ -85,11 +94,29 @@ pub fn router(handle: Handle) -> Router {
 
 /// Serve until the listener fails or the task is aborted.
 pub async fn serve(handle: Handle, listener: tokio::net::TcpListener) -> std::io::Result<()> {
-    axum::serve(
-        listener,
-        router(handle).into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .await
+    serve_all(handle, vec![listener]).await
+}
+
+/// Serve the same application (shared logins) on several listeners, e.g. the
+/// configured port and the standard web port 80. Returns when the first
+/// listener fails.
+pub async fn serve_all(
+    handle: Handle,
+    listeners: Vec<tokio::net::TcpListener>,
+) -> std::io::Result<()> {
+    let app = router(handle);
+    let mut tasks = tokio::task::JoinSet::new();
+    for listener in listeners {
+        let service = app
+            .clone()
+            .into_make_service_with_connect_info::<SocketAddr>();
+        tasks.spawn(async move { axum::serve(listener, service).await });
+    }
+    match tasks.join_next().await {
+        Some(Ok(result)) => result,
+        Some(Err(e)) => Err(std::io::Error::other(e)),
+        None => Ok(()),
+    }
 }
 
 fn pins(app: &AppState) -> (String, String) {
@@ -482,10 +509,22 @@ async fn api_diagnostics(
         .into_response()
 }
 
-async fn static_asset(uri: Uri) -> Response {
+async fn static_asset(ConnectInfo(addr): ConnectInfo<SocketAddr>, uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
     if path.starts_with("api/") {
         return (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))).into_response();
+    }
+    // Tablets and phones only type `show-master.local`: send them straight to
+    // the remote. This computer itself keeps the full interface.
+    if path.is_empty() && !addr.ip().is_loopback() {
+        return (
+            StatusCode::FOUND,
+            [
+                (header::LOCATION, "/remote"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+        )
+            .into_response();
     }
     let (file, name) = match Assets::get(path) {
         Some(f) if !path.is_empty() => (f, path),
@@ -657,4 +696,32 @@ async fn client(
         c.retain(|c| c.id != id);
     }
     tracing::info!("client {origin} disconnected");
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn peer(ip: [u8; 4]) -> ConnectInfo<SocketAddr> {
+        ConnectInfo(SocketAddr::from((ip, 50000)))
+    }
+
+    #[tokio::test]
+    async fn root_sends_network_devices_to_the_remote() {
+        let r = static_asset(peer([192, 168, 1, 30]), Uri::from_static("/")).await;
+        assert_eq!(r.status(), StatusCode::FOUND);
+        assert_eq!(r.headers()[header::LOCATION], "/remote");
+        // This computer keeps the full interface; other pages are not redirected.
+        let r = static_asset(peer([127, 0, 0, 1]), Uri::from_static("/")).await;
+        assert_ne!(r.status(), StatusCode::FOUND);
+        let r = static_asset(peer([192, 168, 1, 30]), Uri::from_static("/view")).await;
+        assert_ne!(r.status(), StatusCode::FOUND);
+    }
+
+    #[test]
+    fn base_urls() {
+        assert_eq!(base_url("192.168.1.2", 80), "http://192.168.1.2");
+        assert_eq!(base_url("192.168.1.2", 7400), "http://192.168.1.2:7400");
+    }
 }

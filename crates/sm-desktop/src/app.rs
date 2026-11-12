@@ -1220,9 +1220,17 @@ impl App {
             ));
         }
         items.push((format!("Remotes {}", s.remote.clients.len()), None, 6, None));
-        if let Some(url) = s.remote.urls.first() {
+        let by_name = s
+            .remote
+            .mdns
+            .as_ref()
+            .filter(|m| m.enabled)
+            .and_then(|m| m.url.as_deref())
+            .map(|u| crate::setup::remote::short_address(u).to_string());
+        if let Some(addr) = by_name.or_else(|| s.remote.urls.first().map(|u| format!("{u}/remote")))
+        {
             items.push((
-                format!("{url}/remote"),
+                addr,
                 None,
                 7,
                 Some("Open this address on a tablet in the same network (Setup > Remote shows a QR code)"),

@@ -87,9 +87,9 @@ that sees a `rev` gap must reconnect (the server then sends a fresh `state`).
                      "peers": [ { "name": "iPad", "addr": "192.168.1.20:5004", "state": "connected", "latency_ms": 1.2,
                                   "lost": 3, "recovered": 2 } ],
                      "discovered": [ { "name": "Studio Mac", "addr": "192.168.1.30:5004", "host": "studio-mac.local" } ] } },
-  "remote": { "urls": ["http://192.168.1.10:7400"], "port": 7400,
+  "remote": { "urls": ["http://192.168.1.10"], "port": 7400,
               "clients": [ { "id": 3, "role": "control", "addr": "192.168.1.20", "since_ms": 1731312000000, "agent": "Safari…" } ],
-              "mdns": { "enabled": true, "active": true, "host": "showmaster.local", "url": "http://showmaster.local:7400",
+              "mdns": { "enabled": true, "active": true, "host": "show-master.local", "url": "http://show-master.local",
                         "rtp_advertised": true, "rtp_instance": "Show Master", "error": null } },
   "preflight": [ { "severity": "error"|"warning"|"info", "cue": 17, "message": "…" } ],
   "layouts": ["mono","stereo","lcr","quad","5.1","7.1"]
@@ -106,10 +106,14 @@ mDNS/Bonjour fields (optional comfort, see `decisions.md`):
   `rtp_midi.advertise` is off.
 - `remote.mdns` – `null` when the process runs without mDNS (tests, embedding). `enabled` mirrors
   `settings.remote.mdns`; `active` = the mDNS responder runs; `host` = advertised host name
-  (`showmaster.local`, `showmaster-2.local` after a name conflict); `url` = base URL by name while the
+  (`show-master.local`, `show-master-2.local` after a name conflict); `url` = base URL by name while the
   web interface is advertised (`null` otherwise – e.g. with `--local-only`); `rtp_advertised` = the
   RTP-MIDI session is advertised, `rtp_instance` = under which name (`Name (2)` if the name was taken); `error` = last problem (e.g. no multicast on this network). The IP
   URLs in `remote.urls` always work and remain the primary way in.
+- Port: besides the configured port the server also listens on the standard web port 80 when it can;
+  then `remote.urls` and `remote.mdns.url` carry no port (`http://192.168.1.10`). Otherwise they use the
+  configured port. `GET /` from a network device redirects (302) to `/remote`; on this computer `/`
+  is the full interface.
 
 ### Inputs (`state.inputs`)
 

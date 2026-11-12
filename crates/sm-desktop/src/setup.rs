@@ -16,7 +16,7 @@ mod hotkeys;
 #[path = "setup_midi.rs"]
 mod midi;
 #[path = "setup_remote.rs"]
-mod remote;
+pub(crate) mod remote;
 
 use crate::app::App;
 use crate::model::UiState;
