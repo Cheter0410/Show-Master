@@ -221,8 +221,10 @@ revidieren lassen.
   passen; abweichende MTC-Rate oder LTC-Drop-Frame-Flag wird einmal im Log gemeldet), keine
   Varispeed-Verfolgung (Drift wird nur durch Neuverankern ab 1 Frame korrigiert), kein Rückwärtslauf,
   keine Latenzkompensation für das Eingangsgerät.
-- **AAC/M4A:** Encoder-Vorlauf wird nicht abgeschnitten (ca. 1024 Frames). Für framegenaue Einsätze
-  WAV/AIFF/FLAC verwenden.
+- **AAC/M4A:** Encoder-Vorlauf und Auffüllung am Ende werden anhand von `iTunSMPB` (Apple/iTunes) bzw.
+  der Edit-List der Tonspur (ffmpeg u. a.) abgeschnitten, damit startet der Ton framegenau. Dateien ohne
+  beide Angaben (rohe `.aac`-ADTS-Streams) behalten den Vorlauf (~1024 Frames) – für framegenaue
+  Einsätze dann WAV/AIFF/FLAC oder M4A verwenden. MP3: LAME-Gapless-Angaben wertet symphonia aus.
 - **mDNS/Bonjour:** nur IPv4-Erkennung; Android-Tablets lösen `.local`-Namen oft nicht auf, und
   WLANs mit Client-Isolation blockieren Multicast – dann gilt die IP-Adresse bzw. der QR-Code.
 - **Systemweite Hotkeys:** unter Linux nur mit X11 (nicht Wayland); Tastendruck kommt dort mit bis zu

@@ -2,6 +2,7 @@
 
 mod decoder;
 mod file;
+mod mp4_gapless;
 mod symph;
 mod wav;
 

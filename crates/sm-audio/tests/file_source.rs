@@ -514,3 +514,29 @@ fn compressed_formats_decode_seek_and_loop() {
         );
     }
 }
+
+#[test]
+fn aac_encoder_delay_and_padding_are_trimmed() {
+    // A 0.5 s file whose tone starts exactly at frame 4800 (encoded by
+    // ffmpeg's AAC encoder: 1024 frames of priming, length in the edit list).
+    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/onset_4800.m4a");
+    let info = probe(&p).unwrap();
+    assert_eq!(info.codec, "aac");
+    assert_eq!(info.frames, Some(24_000));
+    let mut src = FileSource::open(&p, opts()).unwrap();
+    let pcm = read_all(&mut src);
+    let left: Vec<f32> = pcm.chunks(2).map(|f| f[0]).collect();
+    assert_eq!(left.len(), 24_000);
+    let onset = left.iter().position(|s| s.abs() > 0.1).unwrap();
+    assert!(
+        (4790..=4830).contains(&onset),
+        "tone starts at frame {onset} (untrimmed it would be ~5824)"
+    );
+    // Starting in the middle is frame-exact, too.
+    let mut o = opts();
+    o.start_seconds = 0.09; // 4320 frames: the tone begins 480 frames in
+    let mut src = FileSource::open(&p, o).unwrap();
+    let pcm = read_all(&mut src);
+    let onset = pcm.chunks(2).position(|f| f[0].abs() > 0.1).unwrap();
+    assert!((470..=510).contains(&onset), "onset after seek at {onset}");
+}
