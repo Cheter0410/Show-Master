@@ -118,3 +118,92 @@ pub fn clock_font(size: f32) -> FontId {
 pub fn cue_tint(c: Color32, selected: bool) -> Color32 {
     c.gamma_multiply(if selected { 0.16 } else { 0.30 })
 }
+
+/// Where a cue sits among groups, for drawing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GroupPlace {
+    /// Its own colour, else that of the nearest coloured group around it.
+    pub color: String,
+    /// The colour of each enclosing group, outermost first ("" = none).
+    pub chain: Vec<String>,
+    /// Last cue inside its group (the bracket ends here).
+    pub last: bool,
+}
+
+/// [`GroupPlace`] of every cue in `cues` (and inside its groups).
+pub fn group_places(cues: &[sm_core::model::Cue]) -> std::collections::HashMap<u64, GroupPlace> {
+    fn walk(
+        cues: &[sm_core::model::Cue],
+        inherited: &str,
+        chain: &mut Vec<String>,
+        out: &mut std::collections::HashMap<u64, GroupPlace>,
+    ) {
+        for (i, c) in cues.iter().enumerate() {
+            let color = if c.color.is_empty() {
+                inherited
+            } else {
+                c.color.as_str()
+            };
+            out.insert(
+                c.id,
+                GroupPlace {
+                    color: color.to_string(),
+                    chain: chain.clone(),
+                    last: i + 1 == cues.len(),
+                },
+            );
+            if let sm_core::model::CueKind::Group(g) = &c.kind {
+                chain.push(c.color.clone());
+                walk(&g.children, color, chain, out);
+                chain.pop();
+            }
+        }
+    }
+    let mut out = std::collections::HashMap::new();
+    walk(cues, "", &mut Vec::new(), &mut out);
+    out
+}
+
+/// Line colour of a group bracket.
+pub fn bracket_color(group_color: &str) -> Color32 {
+    cue_color(group_color).unwrap_or(Color32::from_gray(120))
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::*;
+    use sm_core::model::{Cue, CueKind, GroupCue};
+
+    #[test]
+    fn children_take_the_group_colour() {
+        let kid = |id, color: &str| Cue {
+            id,
+            color: color.into(),
+            ..Cue::default()
+        };
+        let inner = Cue {
+            id: 5,
+            kind: CueKind::Group(GroupCue {
+                children: vec![kid(6, "")],
+                ..GroupCue::default()
+            }),
+            ..Cue::default()
+        };
+        let g = Cue {
+            id: 1,
+            color: "blue".into(),
+            kind: CueKind::Group(GroupCue {
+                children: vec![kid(2, ""), kid(3, "red"), inner],
+                ..GroupCue::default()
+            }),
+            ..Cue::default()
+        };
+        let p = group_places(&[g, kid(9, "")]);
+        assert_eq!(p[&2].color, "blue");
+        assert_eq!(p[&3].color, "red", "own colour wins");
+        assert_eq!(p[&6].color, "blue", "inherited through an uncoloured group");
+        assert_eq!(p[&6].chain, vec!["blue".to_string(), String::new()]);
+        assert!(p[&5].last && !p[&2].last);
+        assert_eq!(p[&9].color, "");
+    }
+}

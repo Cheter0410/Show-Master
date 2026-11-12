@@ -10,14 +10,29 @@ export interface CueRow {
   /** index within its parent container */
   index: number;
   hasChildren: boolean;
+  /** own colour, else the colour of the nearest coloured group around it ("" = none) */
+  color: string;
+  /** colour of each enclosing group, outermost first ("" = none) */
+  chain: string[];
+  /** last cue inside its group */
+  last: boolean;
 }
 
-export function flattenCues(cues: Cue[], collapsed?: ReadonlySet<number>, depth = 0, parent: number | null = null, out: CueRow[] = []): CueRow[] {
+export function flattenCues(
+  cues: Cue[],
+  collapsed?: ReadonlySet<number>,
+  depth = 0,
+  parent: number | null = null,
+  out: CueRow[] = [],
+  inherited = "",
+  chain: string[] = [],
+): CueRow[] {
   cues.forEach((cue, index) => {
     const isGroup = cue.kind.type === "group";
     const children = cue.kind.type === "group" ? cue.kind.children : [];
-    out.push({ cue, depth, parent, index, hasChildren: isGroup && children.length > 0 });
-    if (isGroup && !collapsed?.has(cue.id)) flattenCues(children, collapsed, depth + 1, cue.id, out);
+    const color = cue.color || inherited;
+    out.push({ cue, depth, parent, index, hasChildren: isGroup && children.length > 0, color, chain, last: index === cues.length - 1 });
+    if (isGroup && !collapsed?.has(cue.id)) flattenCues(children, collapsed, depth + 1, cue.id, out, color, [...chain, cue.color]);
   });
   return out;
 }

@@ -47,7 +47,7 @@ const EditRow = memo(function EditRow(p: RowProps) {
   const dur = cueDuration(cue);
   const cont = CONTINUE_GLYPH[cue.continue_mode];
   const isGroup = cue.kind.type === "group";
-  const cls = ["trow", `is-${st}`, p.isPlayhead ? "is-playhead" : "", p.selected ? "is-selected" : "", cue.armed ? "" : "is-disarmed", isGroup ? "is-group" : "", p.drop ? `drop-${p.drop}` : "", cue.color ? `c-${cue.color}` : ""].join(" ");
+  const cls = ["trow", `is-${st}`, p.isPlayhead ? "is-playhead" : "", p.selected ? "is-selected" : "", cue.armed ? "" : "is-disarmed", isGroup ? "is-group" : "", p.drop ? `drop-${p.drop}` : "", p.row.color ? `c-${p.row.color}` : ""].join(" ");
   const progress = p.active && p.active.duration ? Math.min(1, p.active.elapsed / p.active.duration) : null;
   const longPress = useLongPress((x, y) => p.onMenu(cue.id, x, y));
   return (

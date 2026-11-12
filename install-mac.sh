@@ -24,9 +24,16 @@ if ! xcode-select -p >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ -d .git ] && git diff --quiet && git diff --cached --quiet; then
-  say "Fetching the newest version"
-  git pull --ff-only || echo "(could not update - building the version that is here)"
+if [ -z "${SM_PULLED:-}" ] && [ -d .git ]; then
+  if git diff --quiet && git diff --cached --quiet; then
+    say "Fetching the newest version"
+    git pull --ff-only || echo "(could not update - building the version that is here)"
+    # Run the freshly pulled copy of this script (bash would go on reading
+    # the old one).
+    SM_PULLED=1 exec bash "$(pwd)/$(basename "$0")" "$@"
+  else
+    echo "(local changes in $(pwd) - not updating; 'git status' shows them)"
+  fi
 fi
 
 if [ ! -x "$HOME/.cargo/bin/rustup" ] && ! command -v rustup >/dev/null 2>&1; then
@@ -36,17 +43,16 @@ fi
 # shellcheck disable=SC1091
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 
-# This Mac's architecture only (one compile instead of two). UNIVERSAL=1 builds
-# the DMG for Intel and Apple Silicon Macs (for publishing a release).
+# This Mac's architecture only (one compile). UNIVERSAL=1 builds the DMG for
+# Intel and Apple Silicon Macs (for publishing a release).
 if [ -n "${UNIVERSAL:-}" ]; then
   export ARCHS="arm64 x86_64"
+elif [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then
+  export ARCHS="arm64"
 else
-  case "$(uname -m)" in
-    arm64) export ARCHS="arm64" ;;
-    *) export ARCHS="x86_64" ;;
-  esac
+  export ARCHS="x86_64"
 fi
-say "Building the DMG for $ARCHS (takes a few minutes the first time)"
+say "Building the DMG for $ARCHS only (takes a few minutes the first time)"
 ./packaging/macos/build-dmg.sh
 DMG=$(ls -t dist/ShowMaster-*.dmg | head -n 1)
 

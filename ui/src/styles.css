@@ -1091,3 +1091,15 @@ button.lrow-gutter:hover { box-shadow: inset 7px 0 0 var(--green-deep); }
 .stage-running li.is-paused { opacity: 0.6; }
 .stage-notes { white-space: pre-wrap; font-size: clamp(16px, 2.2vw, 24px); background: var(--panel); border-radius: 10px; padding: 10px 14px; }
 .stage-next .tag { align-self: flex-start; }
+
+/* group brackets in the live cue list: a line per enclosing group (in its colour) down the
+   number column, closing with a foot on the group's last cue */
+.lrow-tree { position: absolute; left: 96px; top: 0; bottom: 0; width: 0; pointer-events: none; z-index: 1; }
+.lrow-tree i { position: absolute; top: -2px; bottom: -2px; margin-left: 2px; border-left: 2px solid rgb(var(--cc, 140 146 160)); }
+.lrow-tree i.end { bottom: 50%; }
+.lrow-tree i.mid::after, .lrow-tree i.end::after { content: ""; position: absolute; left: 0; width: 8px; border-top: 2px solid rgb(var(--cc, 140 146 160)); }
+.lrow-tree i.mid::after { top: 50%; }
+.lrow-tree i.end::after { bottom: -1px; }
+.lrow-tree i.open { top: calc(50% + 14px); }
+.lrow.is-child .lrow-num { color: var(--muted); }
+.lrow-tree i:not([class*="c-"]) { --cc: 140 146 160; }

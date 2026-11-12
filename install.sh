@@ -25,9 +25,16 @@ if [ "${1:-}" = "--uninstall" ]; then
   exit 0
 fi
 
-if [ -d .git ] && git diff --quiet && git diff --cached --quiet; then
-  say "Fetching the newest version"
-  git pull --ff-only || echo "(could not update - building the version that is here)"
+if [ -z "${SM_PULLED:-}" ] && [ -d .git ]; then
+  if git diff --quiet && git diff --cached --quiet; then
+    say "Fetching the newest version"
+    git pull --ff-only || echo "(could not update - building the version that is here)"
+    # Run the freshly pulled copy of this script (bash would go on reading
+    # the old one).
+    SM_PULLED=1 exec bash "$(pwd)/$(basename "$0")" "$@"
+  else
+    echo "(local changes in $(pwd) - not updating; 'git status' shows them)"
+  fi
 fi
 
 say "Installing what the build needs"

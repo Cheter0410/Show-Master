@@ -1,7 +1,7 @@
 #!/bin/bash
-# Builds ShowMaster-x.y.z.dmg on a Mac: universal (Apple Silicon + Intel, two
-# compiles) by default; ARCHS="x86_64" or ARCHS="arm64" builds one only (half
-# the time; an Intel build also runs on Apple Silicon through Rosetta).
+# Builds ShowMaster-x.y.z.dmg on a Mac, for this Mac's architecture only by
+# default (one compile). UNIVERSAL=1 builds Apple Silicon + Intel (two
+# compiles, for publishing); ARCHS="x86_64" or ARCHS="arm64" picks one.
 # Needs: Xcode command line tools and Rust (rustup). Node.js only with REBUILD_UI=1.
 #   ./packaging/macos/build-dmg.sh
 # The result is in dist/. Used by the `build` workflow and for building by hand.
@@ -56,18 +56,30 @@ fi
 if [ ! -f ui/dist/index.html ] || [ -n "${REBUILD_UI:-}" ]; then
   (cd ui && npm ci && npm run build)
 fi
-ARCHS="${ARCHS:-arm64 x86_64}"
+# This Mac's own architecture (also when the terminal runs under Rosetta).
+if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then HOST=arm64; else HOST=x86_64; fi
+ARCHS="${ARCHS:-$HOST}"
+[ -n "${UNIVERSAL:-}" ] && ARCHS="arm64 x86_64"
 BINS=()
 for a in $ARCHS; do
   case "$a" in
-    arm64|aarch64) t=aarch64-apple-darwin ;;
-    x86_64|intel) t=x86_64-apple-darwin ;;
+    arm64|aarch64) a=arm64; t=aarch64-apple-darwin ;;
+    x86_64|intel) a=x86_64; t=x86_64-apple-darwin ;;
     *) echo "Unknown architecture in ARCHS: $a (use arm64 and/or x86_64)"; exit 1 ;;
   esac
-  echo "== Building for $t"
-  rustup target add "$t"
-  cargo build --release --locked -p showmaster --target "$t"
-  BINS+=("target/$t/release/showmaster")
+  if [ "$a" = "$HOST" ] && [ "$(uname -m)" = "$HOST" ]; then
+    # Native build without --target: build tools and the app share one
+    # compile (with --target cargo builds the build-time crates separately,
+    # which looks like everything is compiled twice).
+    echo "== Building for this Mac ($a)"
+    cargo build --release --locked -p showmaster
+    BINS+=("target/release/showmaster")
+  else
+    echo "== Building for $t"
+    rustup target add "$t"
+    cargo build --release --locked -p showmaster --target "$t"
+    BINS+=("target/$t/release/showmaster")
+  fi
 done
 
 V=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print([p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="showmaster"][0])')

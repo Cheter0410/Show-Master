@@ -319,6 +319,7 @@ pub fn cue_window(
     };
     let mut flat: Vec<(&Cue, u8)> = Vec::with_capacity(list.cues.len());
     flatten(&list.cues, 0, &mut flat);
+    let groups = theme::group_places(&list.cues);
     let playhead = input.state.playhead(list.id);
     let ph_index = playhead.and_then(|p| flat.iter().position(|(c, _)| c.id == p));
 
@@ -378,7 +379,17 @@ pub fn cue_window(
             let (cue, depth) = flat[i];
             let (rect, _) =
                 ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::hover());
-            if let Some(a) = draw_row(ui, rect, i, cue, depth, playhead == Some(cue.id), input) {
+            let place = groups.get(&cue.id);
+            if let Some(a) = draw_row(
+                ui,
+                rect,
+                i,
+                cue,
+                depth,
+                place,
+                playhead == Some(cue.id),
+                input,
+            ) {
                 actions.push(a);
             }
         }
@@ -388,15 +399,21 @@ pub fn cue_window(
     actions
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_row(
     ui: &mut egui::Ui,
     rect: Rect,
     index: usize,
     cue: &Cue,
     depth: u8,
+    place: Option<&theme::GroupPlace>,
     is_playhead: bool,
     input: &CueWindowInput<'_>,
 ) -> Option<CueAction> {
+    // Own colour, else the colour of the group the cue is in.
+    let color = place
+        .and_then(|p| theme::cue_color(&p.color))
+        .or_else(|| theme::cue_color(&cue.color));
     let state = input.state;
     let id = ui.scope_id().with(("cue_row", cue.id));
     let resp = ui.interact(rect, id, Sense::click());
@@ -433,7 +450,7 @@ fn draw_row(
     };
     p.rect_filled(rect, 4.0, bg);
     // Cue colour: a see-through tint over the whole row.
-    if let Some(c) = theme::cue_color(&cue.color) {
+    if let Some(c) = color {
         p.rect_filled(rect, 4.0, theme::cue_tint(dim(c), false));
     }
     if resp.hovered() {
@@ -455,7 +472,7 @@ fn draw_row(
         );
     }
     // Cue colour swatch on the left edge.
-    if let Some(c) = theme::cue_color(&cue.color) {
+    if let Some(c) = color {
         p.rect_filled(
             Rect::from_min_size(
                 rect.min + Vec2::new(2.0, 4.0),
@@ -488,17 +505,35 @@ fn draw_row(
     // Number.
     let indent = f32::from(depth) * 22.0;
     let num_w = 70.0;
-    if depth > 0 {
-        // Tree guide for group children.
-        let gx = x + indent - 12.0;
-        p.line_segment(
-            [Pos2::new(gx, rect.top() + 2.0), Pos2::new(gx, cy)],
-            Stroke::new(1.0, muted.gamma_multiply(0.6)),
-        );
-        p.line_segment(
-            [Pos2::new(gx, cy), Pos2::new(gx + 7.0, cy)],
-            Stroke::new(1.0, muted.gamma_multiply(0.6)),
-        );
+    // Group brackets: a line per enclosing group (in its colour) runs down
+    // the indentation and closes with a foot on the group's last cue.
+    let gap = ROW_GAP / 2.0 + 0.5;
+    let painter = ui.painter().clone();
+    if let Some(pl) = place {
+        for (level, gc) in pl.chain.iter().enumerate() {
+            let gx = x + (level as f32 + 1.0) * 22.0 - 12.0;
+            let stroke = Stroke::new(2.0, dim(theme::bracket_color(gc)));
+            let innermost = level + 1 == pl.chain.len();
+            let bottom = if innermost && pl.last {
+                cy
+            } else {
+                rect.bottom() + gap
+            };
+            painter.line_segment(
+                [Pos2::new(gx, rect.top() - gap), Pos2::new(gx, bottom)],
+                stroke,
+            );
+            if innermost {
+                painter.line_segment([Pos2::new(gx, cy), Pos2::new(gx + 8.0, cy)], stroke);
+            }
+        }
+        if matches!(cue.kind, CueKind::Group(_)) && !cue.children().is_empty() {
+            let gx = x + (f32::from(depth) + 1.0) * 22.0 - 12.0;
+            painter.line_segment(
+                [Pos2::new(gx, cy + 12.0), Pos2::new(gx, rect.bottom() + gap)],
+                Stroke::new(2.0, dim(theme::bracket_color(&cue.color))),
+            );
+        }
     }
     let num = elided(
         ui,

@@ -1,8 +1,8 @@
 # Arch Linux package for Show Master, built from this checkout.
 # Used by packaging/build-on-linux.sh (which builds the program first):
-#   SM_VERSION=0.3.0 makepkg -f
+#   SM_VERSION=0.4.0 makepkg -f
 pkgname=showmaster
-pkgver=${SM_VERSION:-0.3.0}
+pkgver=${SM_VERSION:-0.4.0}
 pkgrel=1
 pkgdesc="Cue-based playback and show control for live production (runs fully offline)"
 arch=('x86_64')

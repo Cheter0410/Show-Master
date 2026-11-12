@@ -49,6 +49,14 @@ export function activeTiming(a: ActiveCue): { text: string; label: string; progr
 interface RowProps {
   cue: Cue;
   depth: number;
+  /** own or inherited group colour */
+  color: string;
+  /** colours of the enclosing groups, outermost first */
+  chain: string[];
+  /** last cue in its group */
+  last: boolean;
+  /** an open group with children */
+  opens: boolean;
   show: Show;
   active: ActiveCue | undefined;
   error: string | undefined;
@@ -76,8 +84,21 @@ const LiveRow = memo(function LiveRow(p: RowProps) {
     p.selected ? "is-selected" : "",
     cue.armed ? "" : "is-disarmed",
     cue.kind.type === "group" ? "is-group" : "",
-    cue.color ? `c-${cue.color}` : "",
+    p.color ? `c-${p.color}` : "",
+    p.depth ? "is-child" : "",
   ].join(" ");
+  // Group brackets: one line per enclosing group, in its colour.
+  const tree =
+    p.chain.length || p.opens ? (
+      <span className="lrow-tree" aria-hidden="true">
+        {p.chain.map((gc, level) => {
+          const inner = level === p.chain.length - 1;
+          const kind = inner ? (p.last ? "end" : "mid") : "pass";
+          return <i key={level} className={`${kind}${gc ? ` c-${gc}` : ""}`} style={{ left: level * 14 }} />;
+        })}
+        {p.opens ? <i className={`open${cue.color ? ` c-${cue.color}` : ""}`} style={{ left: p.depth * 14 }} /> : null}
+      </span>
+    ) : null;
   return (
     <div
       className={cls}
@@ -103,6 +124,7 @@ const LiveRow = memo(function LiveRow(p: RowProps) {
       ) : (
         <span className="lrow-gutter">{p.isPlayhead ? <span className="tag tag-next">NEXT</span> : null}</span>
       )}
+      {tree}
       <span className="lrow-status"><StatusIcon state={st} armed={cue.armed} size={18} /></span>
       <span className="lrow-num num" style={p.depth ? { paddingLeft: p.depth * 14 } : undefined}>{cue.number}</span>
       <span className="lrow-type" title={TYPE_LABELS[cue.kind.type]}><TypeIcon type={cue.kind.type} size={18} /></span>
@@ -224,6 +246,10 @@ export function CueList(p: {
           key={r.cue.id}
           cue={r.cue}
           depth={r.depth}
+          color={r.color}
+          chain={r.chain}
+          last={r.last}
+          opens={r.hasChildren}
           show={show}
           active={amap.get(r.cue.id)}
           error={errors?.[String(r.cue.id)]}

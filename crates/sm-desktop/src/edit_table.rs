@@ -13,7 +13,7 @@ use egui::{
 };
 use serde_json::{json, Value};
 use sm_core::model::{ContinueMode, Cue, CueKind, CueList};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub const ROW_H: f32 = 30.0;
 /// Row height with touch-friendly controls.
@@ -446,6 +446,7 @@ pub(crate) fn show(
         }
         let first = (viewport.top() / row_h).floor().max(0.0) as usize;
         let last = ((viewport.bottom() / row_h).ceil() as usize + 1).min(rows.len());
+        let groups = theme::group_places(&list.cues);
         let ctx = RowCtx {
             state,
             tick,
@@ -454,6 +455,7 @@ pub(crate) fn show(
             cols: &cols,
             order: &order,
             touch,
+            groups: &groups,
         };
         for (i, row) in rows.iter().enumerate().take(last).skip(first) {
             let rect = Rect::from_min_size(
@@ -579,6 +581,7 @@ struct RowCtx<'a> {
     cols: &'a Cols,
     order: &'a [u64],
     touch: bool,
+    groups: &'a HashMap<u64, theme::GroupPlace>,
 }
 
 /// What the row shows about the cue's runtime state.
@@ -658,8 +661,9 @@ fn draw_row(
     if let Some(bg) = bg {
         painter.rect_filled(rect, 0.0, bg);
     }
-    // Cue colour: a see-through tint over the whole row.
-    if let Some(c) = theme::cue_color(&cue.color) {
+    // Cue colour (its own or its group's): a see-through tint over the whole row.
+    let place = ctx.groups.get(&id);
+    if let Some(c) = place.and_then(|p| theme::cue_color(&p.color)) {
         painter.rect_filled(rect, 0.0, theme::cue_tint(c, selected));
     }
     if selected && hovered {
@@ -756,6 +760,37 @@ fn draw_row(
     // --- name (indented, group twisty, loaded tag)
     let name_cell = cell(cols.name, rect);
     let indent = row.depth as f32 * INDENT;
+    // Group brackets: a line per enclosing group down the indentation, in
+    // the group's colour, closing with a foot on the group's last cue.
+    if let Some(p) = place {
+        for (level, gc) in p.chain.iter().enumerate() {
+            let x = name_cell.left() + level as f32 * INDENT + 9.0;
+            let color = theme::bracket_color(gc);
+            let innermost = level + 1 == p.chain.len();
+            let bottom = if innermost && p.last {
+                rect.center().y
+            } else {
+                rect.bottom()
+            };
+            painter.vline(x, Rangef::new(rect.top(), bottom), Stroke::new(2.0, color));
+            if innermost {
+                painter.hline(
+                    Rangef::new(x, x + INDENT - 6.0),
+                    rect.center().y,
+                    Stroke::new(2.0, color),
+                );
+            }
+        }
+        // An open group starts its bracket below its twisty.
+        if is_group && !cue.children().is_empty() && !edit.table.collapsed.contains(&id) {
+            let x = name_cell.left() + p.chain.len() as f32 * INDENT + 9.0;
+            painter.vline(
+                x,
+                Rangef::new(rect.center().y + 8.0, rect.bottom()),
+                Stroke::new(2.0, theme::bracket_color(&cue.color)),
+            );
+        }
+    }
     let mut name_left = name_cell.left() + indent;
     let mut twisty = None;
     if is_group {
