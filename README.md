@@ -53,6 +53,13 @@ showmaster [OPTIONEN] [SHOW.smshow]
 | Debian/Ubuntu | `showmaster_x.y.z-1_amd64.deb` | doppelklicken oder `sudo apt install ./showmaster_*.deb` |
 | jedes Linux | `showmaster-x.y.z-linux-x86_64.tar.gz` | entpacken, `showmaster` starten |
 
+**Linux direkt aus dem Repository** (baut und installiert in einem Schritt, auf Arch als echtes Paket;
+erneut ausführen = aktualisieren, `./install.sh --uninstall` entfernt es):
+
+```bash
+git clone https://github.com/Cheter0410/Show-Master.git && cd Show-Master && ./install.sh
+```
+
 Die Installer liegen auf der [Download-Seite](https://github.com/Cheter0410/show-master-releases/releases/latest)
 (sobald dort eine Version veröffentlicht ist). Gebaut werden sie lokal, siehe *Pakete bauen*.
 
