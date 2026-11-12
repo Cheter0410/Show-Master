@@ -4,7 +4,9 @@
 //!
 //! Needs a network interface with multicast (loopback or LAN). Where this
 //! machine cannot join the mDNS group at all (some sandboxes / containers) the
-//! test reports that and passes without checking anything.
+//! test reports that and passes without checking anything. A firewall or VPN
+//! can still drop the packets, so it is not part of the normal test run (nor
+//! of a release build): run it with `-- --ignored`.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use sm_mdns::{Desired, Mdns, RtpAdvert};
@@ -18,6 +20,7 @@ fn free_port() -> u16 {
 }
 
 #[test]
+#[ignore = "depends on this machine's network (firewall / VPN may drop the multicast); run with: cargo test -p sm-mdns --test loopback -- --ignored"]
 fn advertised_session_is_discovered() {
     if let Some(problem) = sm_mdns::multicast_problem() {
         eprintln!("skipped: {problem}");
