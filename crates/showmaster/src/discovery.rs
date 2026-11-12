@@ -52,6 +52,7 @@ fn status_json(snap: &Snapshot) -> Value {
             "error": s.error,
         },
         "discovered": s.discovered,
+        "lanterns": s.lanterns,
     })
 }
 
@@ -87,6 +88,9 @@ pub fn desired(state: &Value, http_port: Option<u16>) -> (bool, Desired) {
                 port,
             }),
             browse_rtp: advertise,
+            lantern: None,
+            // Lantern players for the Lantern cue's computer list.
+            browse_lantern: web_on || advertise,
         },
     )
 }
@@ -201,14 +205,17 @@ mod tests {
             })
         );
         assert!(d.browse_rtp);
+        assert!(d.browse_lantern);
 
         let (on, d) = desired(&state(Some(false), true, false), Some(7400));
         assert!(!on);
         assert!(d.is_idle());
 
-        // Web server only on this machine (--local-only / remote off).
+        // Web server only on this machine (--local-only / remote off):
+        // nothing advertised, but Lantern players are still looked for.
         let (_, d) = desired(&state(Some(true), false, true), None);
-        assert!(d.is_idle());
+        assert_eq!((d.http_port, d.rtp.is_some()), (None, false));
+        assert!(d.browse_lantern);
 
         // RTP-MIDI enabled but the session did not start (port in use).
         let mut s = state(None, true, true);

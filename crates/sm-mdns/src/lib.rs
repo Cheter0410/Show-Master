@@ -10,7 +10,10 @@
 //!   standard web port 80 cannot be opened);
 //! * advertises the RTP-MIDI session as `_apple-midi._udp` on its control port
 //!   (macOS Audio MIDI Setup, iOS, rtpMIDI on Windows list it);
-//! * browses for other `_apple-midi._udp` sessions.
+//! * browses for other `_apple-midi._udp` sessions;
+//! * Lantern (the presentation player) advertises its OSC port as
+//!   `_lantern._udp` (instance = computer name); Show Master browses for it
+//!   so a Lantern cue can pick the computer from a list.
 //!
 //! Everything is **local-link multicast only** (224.0.0.251 / ff02::fb, UDP
 //! 5353, TTL 255 per RFC 6762); nothing is sent anywhere else. mDNS is a
@@ -36,6 +39,8 @@ pub const MDNS_PORT: u16 = 5353;
 pub const HTTP_SERVICE: &str = "_http._tcp.local.";
 /// DNS-SD type of RTP-MIDI (AppleMIDI) sessions.
 pub const APPLE_MIDI_SERVICE: &str = "_apple-midi._udp.local.";
+/// DNS-SD type of Lantern's OSC remote control.
+pub const LANTERN_SERVICE: &str = "_lantern._udp.local.";
 /// Default host label: `showmaster.local`.
 pub const DEFAULT_HOST: &str = "showmaster";
 /// Path tablets should open, published in the TXT record.
@@ -63,12 +68,20 @@ pub struct Desired {
     pub rtp: Option<RtpAdvert>,
     /// Browse for other RTP-MIDI sessions.
     pub browse_rtp: bool,
+    /// Lantern's OSC port to advertise (name = computer name).
+    pub lantern: Option<RtpAdvert>,
+    /// Browse for Lantern players.
+    pub browse_lantern: bool,
 }
 
 impl Desired {
     /// `true` if nothing at all is wanted (the daemon is then shut down).
     pub fn is_idle(&self) -> bool {
-        self.http_port.is_none() && self.rtp.is_none() && !self.browse_rtp
+        self.http_port.is_none()
+            && self.rtp.is_none()
+            && !self.browse_rtp
+            && self.lantern.is_none()
+            && !self.browse_lantern
     }
 }
 
@@ -101,6 +114,8 @@ pub struct Status {
     pub error: Option<String>,
     /// Other RTP-MIDI sessions, sorted by name.
     pub discovered: Vec<Discovered>,
+    /// Lantern players on the network (`addr` = their OSC `ip:port`), sorted by name.
+    pub lanterns: Vec<Discovered>,
 }
 
 /// `http://label.local`, with `:port` only when it is not the standard port 80.
@@ -182,6 +197,23 @@ pub fn http_service(instance: &str, host: &str, port: u16) -> Result<ServiceInfo
         (),
         port,
         http_txt().as_slice(),
+    )
+    .map(ServiceInfo::enable_addr_auto)
+}
+
+/// Builds the advertisement of Lantern's OSC port.
+pub fn lantern_service(
+    instance: &str,
+    host: &str,
+    port: u16,
+) -> Result<ServiceInfo, mdns_sd::Error> {
+    ServiceInfo::new(
+        LANTERN_SERVICE,
+        &instance_label(instance),
+        &fqdn(host),
+        (),
+        port,
+        [("app", "lantern")].as_slice(),
     )
     .map(ServiceInfo::enable_addr_auto)
 }
@@ -270,8 +302,11 @@ pub struct Mdns {
     error: Option<String>,
     http: Option<Registered>,
     rtp: Option<Registered>,
+    lantern: Option<Registered>,
     browse: Option<Receiver<ServiceEvent>>,
+    browse_lantern: Option<Receiver<ServiceEvent>>,
     found: BTreeMap<String, Discovered>,
+    lanterns: BTreeMap<String, Discovered>,
     url: Option<String>,
 }
 
@@ -309,8 +344,11 @@ impl Mdns {
             error: None,
             http: None,
             rtp: None,
+            lantern: None,
             browse: None,
+            browse_lantern: None,
             found: BTreeMap::new(),
+            lanterns: BTreeMap::new(),
             url: None,
         }
     }
@@ -353,6 +391,27 @@ impl Mdns {
         });
         self.note(result, "RTP-MIDI session");
 
+        let want_lantern = desired
+            .lantern
+            .as_ref()
+            .map(|r| (instance_label(&r.name), r.port));
+        let result = sync_service(&daemon, &mut self.lantern, want_lantern, |(name, port)| {
+            lantern_service(name, &host, *port)
+        });
+        self.note(result, "Lantern");
+        match (desired.browse_lantern, self.browse_lantern.is_some()) {
+            (true, false) => match daemon.browse(LANTERN_SERVICE) {
+                Ok(rx) => self.browse_lantern = Some(rx),
+                Err(e) => self.note(Err(e), "Lantern browsing"),
+            },
+            (false, true) => {
+                let _ = daemon.stop_browse(LANTERN_SERVICE);
+                self.browse_lantern = None;
+                self.lanterns.clear();
+            }
+            _ => {}
+        }
+
         match (desired.browse_rtp, self.browse.is_some()) {
             (true, false) => match daemon.browse(APPLE_MIDI_SERVICE) {
                 Ok(rx) => self.browse = Some(rx),
@@ -383,6 +442,18 @@ impl Mdns {
                 }
             }
         }
+        if let Some(rx) = &self.browse_lantern {
+            loop {
+                match rx.try_recv() {
+                    Ok(event) => events.push(event),
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        self.browse_lantern = None;
+                        break;
+                    }
+                }
+            }
+        }
         for event in events {
             self.on_service_event(event);
         }
@@ -398,7 +469,10 @@ impl Mdns {
                             renamed = Some(change.new_name);
                         } else {
                             // A renamed instance ("Show Master (2)") is still our own.
-                            for r in [&mut self.http, &mut self.rtp].into_iter().flatten() {
+                            for r in [&mut self.http, &mut self.rtp, &mut self.lantern]
+                                .into_iter()
+                                .flatten()
+                            {
                                 if r.fullname.eq_ignore_ascii_case(&change.original) {
                                     info!(from = %change.original, to = %change.new_name, "mDNS name taken on the network - renamed");
                                     r.fullname = change.new_name.clone();
@@ -449,6 +523,11 @@ impl Mdns {
                 list.sort_by(|a, b| a.name.cmp(&b.name).then(a.addr.cmp(&b.addr)));
                 list
             },
+            lanterns: {
+                let mut list: Vec<Discovered> = self.lanterns.values().cloned().collect();
+                list.sort_by(|a, b| a.name.cmp(&b.name).then(a.addr.cmp(&b.addr)));
+                list
+            },
         }
     }
 
@@ -456,17 +535,24 @@ impl Mdns {
     /// Does not wait for the daemon thread.
     pub fn shutdown(&mut self) {
         if let Some(daemon) = self.daemon.take() {
-            for r in [self.http.take(), self.rtp.take()].into_iter().flatten() {
+            for r in [self.http.take(), self.rtp.take(), self.lantern.take()]
+                .into_iter()
+                .flatten()
+            {
                 let _ = daemon.unregister(&r.fullname);
             }
             if self.browse.take().is_some() {
                 let _ = daemon.stop_browse(APPLE_MIDI_SERVICE);
+            }
+            if self.browse_lantern.take().is_some() {
+                let _ = daemon.stop_browse(LANTERN_SERVICE);
             }
             let _ = daemon.shutdown();
             info!("mDNS stopped");
         }
         self.monitor = None;
         self.found.clear();
+        self.lanterns.clear();
         self.url = None;
     }
 
@@ -515,6 +601,19 @@ impl Mdns {
                 let Some(ip) = pick_ipv4(addrs) else {
                     return;
                 };
+                if fullname.ends_with(LANTERN_SERVICE) {
+                    let own = self.lantern.as_ref().map(|r| r.fullname.to_lowercase());
+                    if own.as_deref() != Some(fullname.as_str()) {
+                        let entry = Discovered {
+                            name: instance_of(service.get_fullname(), LANTERN_SERVICE),
+                            addr: std::net::SocketAddr::new(IpAddr::V4(ip), service.get_port())
+                                .to_string(),
+                            host: service.get_hostname().trim_end_matches('.').to_owned(),
+                        };
+                        self.lanterns.insert(fullname, entry);
+                    }
+                    return;
+                }
                 let entry = Discovered {
                     name: instance_of(service.get_fullname(), APPLE_MIDI_SERVICE),
                     addr: std::net::SocketAddr::new(IpAddr::V4(ip), service.get_port()).to_string(),
@@ -527,6 +626,7 @@ impl Mdns {
             }
             ServiceEvent::ServiceRemoved(_, fullname) => {
                 self.found.remove(&fullname.to_lowercase());
+                self.lanterns.remove(&fullname.to_lowercase());
             }
             _ => {}
         }
@@ -635,6 +735,11 @@ mod tests {
         assert_eq!(http.get_property_val_str("path"), Some("/remote"));
         assert!(http.is_addr_auto());
 
+        let lantern = lantern_service("Stage PC", "lantern", 53100).unwrap();
+        assert_eq!(lantern.get_fullname(), "Stage PC._lantern._udp.local.");
+        assert_eq!(lantern.get_port(), 53100);
+        assert_eq!(lantern.get_property_val_str("app"), Some("lantern"));
+
         let rtp = rtp_service(
             &RtpAdvert {
                 name: "Show Master".into(),
@@ -710,6 +815,7 @@ mod tests {
                 port: 5004,
             }),
             browse_rtp: true,
+            ..Default::default()
         });
         for _ in 0..5 {
             m.poll();

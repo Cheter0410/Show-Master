@@ -1593,6 +1593,7 @@ impl Runtime {
             "remote": { "urls": self.urls.1, "port": port, "clients": clients,
                         "pairings": self.handle.pairings.lock().map(|p| p.public()).unwrap_or(Value::Null),
                         "link": self.handle.link.lock().map(|l| l.status_json()).unwrap_or(Value::Null), "mdns": net.get("mdns").cloned().unwrap_or(Value::Null) },
+            "lanterns": net.get("lanterns").cloned().unwrap_or_else(|| json!([])),
             "inputs": self.inputs.json(self.io.input_status(), snap.tc_status, snap.tc_speed),
             "preflight": self.preflight,
             "layouts": LAYOUTS,

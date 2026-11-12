@@ -214,7 +214,7 @@ fn single(
                 CueKind::Osc(m) if m.lantern_action().is_some() => {
                     let id = cue.id;
                     grid(("insp_lantern", id)).show(ui, |ui| {
-                        lantern_rows(ui, &mut edit.drafts, id, m, out);
+                        lantern_rows(ui, &state.lanterns, &mut edit.drafts, id, m, out);
                     });
                 }
                 CueKind::Osc(m) => {
@@ -1526,6 +1526,7 @@ pub(crate) fn osc_rows(
 /// A Lantern cue: what the presentation should do, and which computer runs Lantern.
 fn lantern_rows(
     ui: &mut Ui,
+    lanterns: &[crate::model::DiscoveredPeer],
     drafts: &mut fields::Drafts,
     id: u64,
     m: &sm_core::osc::OscMessage,
@@ -1622,6 +1623,63 @@ fn lantern_rows(
             _ => Err("Port: 1-65535".into()),
         },
     );
+    ui.end_row();
+    // Lantern players announce themselves on the network (mDNS).
+    let found: Vec<(String, String, u16)> = lanterns
+        .iter()
+        .filter_map(|l| {
+            let addr: std::net::SocketAddr = l.addr.parse().ok()?;
+            Some((l.name.clone(), addr.ip().to_string(), addr.port()))
+        })
+        .collect();
+    let local = matches!(m.host.trim(), "127.0.0.1" | "localhost" | "::1");
+    let current = found
+        .iter()
+        .find(|(_, ip, port)| *ip == m.host.trim() && *port == m.port);
+    label(ui, "Network");
+    ui.vertical(|ui| {
+        let mut picked = None;
+        egui::ComboBox::from_id_salt(("lantern_found", id))
+            .selected_text(match (current, local) {
+                (Some((name, _, _)), _) => name.clone(),
+                (None, true) => "This computer".to_string(),
+                (None, false) => "Pick a Lantern…".to_string(),
+            })
+            .width(200.0)
+            .show_ui(ui, |ui| {
+                if ui.selectable_label(local, "This computer").clicked() {
+                    picked = Some(("127.0.0.1".to_string(), m.port));
+                }
+                for (name, ip, port) in &found {
+                    let on = current.is_some_and(|c| c.1 == *ip && c.2 == *port);
+                    if ui
+                        .selectable_label(on, format!("{name}  ·  {ip}"))
+                        .clicked()
+                    {
+                        picked = Some((ip.clone(), *port));
+                    }
+                }
+            });
+        if let Some((host, port)) = picked {
+            out.push(Out::Cmd(kind_patch(
+                id,
+                json!({ "host": host, "port": port }),
+            )));
+        }
+        let (text, color) = match (current, local) {
+            (Some(_), _) => ("Found on the network".to_string(), theme::NEXT),
+            (None, true) => ("Lantern on this computer".to_string(), theme::MUTED),
+            (None, false) if found.is_empty() => (
+                "No Lantern found on the network right now (it may still be off)".to_string(),
+                theme::WARN,
+            ),
+            (None, false) => (
+                "Not among the Lanterns found right now".to_string(),
+                theme::WARN,
+            ),
+        };
+        ui.label(RichText::new(text).small().color(color));
+    });
     ui.end_row();
     ui.label("");
     ui.label(

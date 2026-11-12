@@ -10,7 +10,7 @@
 # is not built again, an unchanged app not installed again. Missing tools
 # (Xcode command line tools, Rust) are installed.
 #   dist/ShowMaster-x.y.z.dmg      installer (this Mac's type; UNIVERSAL=1 for Intel + Apple Silicon)
-#   /Applications/ShowMaster.app   installed on this Mac (skip with NO_INSTALL=1)
+#   /Applications/Stagehand/ShowMaster.app   installed on this Mac (skip with NO_INSTALL=1)
 set -euo pipefail
 cd "$(dirname "$0")"
 # shellcheck source=scripts/ui.sh
@@ -58,9 +58,11 @@ if [ -n "${NO_INSTALL:-}" ]; then
 fi
 # The DMG this app came from (kept next to the build outputs).
 STAMP=dist/.made/installed-app
+# All show tools share one folder (as Stagehand installs them).
+APPDIR=/Applications/Stagehand
 WANT=$(cat "dist/.made/$(basename "$DMG")" 2>/dev/null || echo none)
-if [ -d /Applications/ShowMaster.app ] && [ "$(cat "$STAMP" 2>/dev/null)" = "$WANT" ]; then
-  ui_skip "In /Applications" "Show Master $V ist schon installiert"
+if [ -d "$APPDIR/ShowMaster.app" ] && [ "$(cat "$STAMP" 2>/dev/null)" = "$WANT" ]; then
+  ui_skip "In Programme/Stagehand" "Show Master $V ist schon installiert"
 elif pgrep -x showmaster >/dev/null 2>&1; then
   ui_warn "Show Master läuft gerade – nicht ersetzt (es könnte eine Show laufen)."
   ui_info "Beenden (Quit, Cmd+Q oder Menüleisten-Symbol), dann nochmal: bash install-mac.sh"
@@ -68,17 +70,18 @@ else
   put() {
     MNT=$(mktemp -d)
     hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG" >/dev/null
-    rm -rf /Applications/ShowMaster.app
-    ditto "$MNT/ShowMaster.app" /Applications/ShowMaster.app
+    mkdir -p "$APPDIR"
+    rm -rf "$APPDIR/ShowMaster.app" "/Applications/ShowMaster.app"
+    ditto "$MNT/ShowMaster.app" "$APPDIR/ShowMaster.app"
     hdiutil detach "$MNT" -quiet >/dev/null 2>&1 || true
     rmdir "$MNT" 2>/dev/null || true
-    xattr -dr com.apple.quarantine /Applications/ShowMaster.app 2>/dev/null || true
+    xattr -dr com.apple.quarantine "$APPDIR/ShowMaster.app" 2>/dev/null || true
   }
-  ui_run "In /Applications" put
+  ui_run "In Programme/Stagehand" put
   printf '%s' "$WANT" > "$STAMP"
 fi
 
 ui_section "Fertig"
-ui_ok "Show Master ist in Programme (Launchpad, Spotlight)"
+ui_ok "Show Master ist in Programme › Stagehand (Launchpad, Spotlight)"
 ui_ok "Am Handy / Tablet im selben Netz:  showmaster.local"
 ui_done

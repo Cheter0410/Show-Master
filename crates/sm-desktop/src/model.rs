@@ -43,6 +43,8 @@ pub struct UiState {
     pub update: UpdateInfo,
     /// MIDI input and timecode input status.
     pub inputs: InputsInfo,
+    /// Lantern players found on the network (`addr` = OSC `ip:port`).
+    pub lanterns: Vec<DiscoveredPeer>,
 }
 
 /// The last incoming MIDI message (`inputs.midi_last`).

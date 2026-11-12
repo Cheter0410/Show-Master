@@ -36,6 +36,7 @@ fn advertised_session_is_discovered() {
             port: 5004,
         }),
         browse_rtp: true,
+        ..Default::default()
     });
     browser.apply(&Desired {
         browse_rtp: true,
@@ -88,4 +89,44 @@ fn advertised_session_is_discovered() {
         browser.poll();
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[test]
+#[ignore = "depends on this machine's network; run with: cargo test -p sm-mdns --test loopback -- --ignored"]
+fn advertised_lantern_is_discovered() {
+    if let Some(problem) = sm_mdns::multicast_problem() {
+        eprintln!("skipped: {problem}");
+        return;
+    }
+    let port = free_port();
+    let mut lantern = Mdns::with_options(port, "lantern-test", "stage-pc");
+    let mut browser = Mdns::with_options(port, "sm-test-browse2", "browser");
+    lantern.apply(&Desired {
+        lantern: Some(RtpAdvert {
+            name: "Stage PC".into(),
+            port: 53100,
+        }),
+        ..Desired::default()
+    });
+    browser.apply(&Desired {
+        browse_lantern: true,
+        ..Desired::default()
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let found = loop {
+        lantern.poll();
+        browser.poll();
+        let status = browser.status();
+        if let Some(d) = status.lanterns.iter().find(|d| d.name == "Stage PC") {
+            break d.clone();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Lantern not discovered: {status:?}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(found.addr.ends_with(":53100"), "{found:?}");
+    // Not mixed into the RTP-MIDI list.
+    assert!(browser.status().discovered.is_empty());
 }
