@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.4.0
+
+- Groups: a group's colour tints every cue inside it, and a bracket in its colour shows what belongs
+  to the group.
+- Waveform: a click sets the cue's playhead (a playing cue jumps there); the in / out points move by
+  their handles; the loop is drawn, moved and resized by dragging in the strip below the wave.
+- A loop can take the timecode with it: the timecode jumps back with every pass.
+- macOS: the audio device is switched to the show's sample rate (fixes crackles and dropouts when
+  the device ran at another rate).
+- Mac builds compile once, for this Mac only; install scripts use their newest version after updating;
+  builds can be uploaded to the release right away.
+
+## 0.3.0
+
+- Smoother fades: new default curve "Smooth".
+- Loops (vamps) in audio cues, released in the show (Live button, Control cue, OSC).
+- Save as: the show gets its own folder, media copied or moved into it.
+- Live: gain and routing changes reach playing cues; meters only (master level in Setup > Audio).
+- Pause can pause the timecode too; cue colours tint the whole row; tablet UI restyled.
+- Steadier audio streaming; real CPU display.
+
+## 0.2.0
+
+- Tablets: showmaster.local, QR pairing, stage manager view, backup computer with automatic takeover.
+- OSC and HTTP cues, cue sheet export, show packages, templates, kiosk mode, background mode.
+
 ## 0.1.0
 
 - First version: cue engine, audio playback with routing, LTC/MTC/RTP-MIDI, edit and live mode,

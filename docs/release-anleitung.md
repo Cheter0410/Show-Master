@@ -56,7 +56,7 @@ Mit AppImage (lädt `appimagetool` beim ersten Mal herunter, falls es nicht inst
 APPIMAGE=1 ./packaging/build-on-linux.sh
 ```
 
-**Mac** (DMG). Für ein Release universal bauen (Intel + Apple Silicon, zwei Durchläufe):
+**Mac** (DMG). Für ein Release universal bauen (Intel + Apple Silicon, zwei Durchläufe; optional):
 
 ```bash
 cd ~/Desktop/dev/show-master && UNIVERSAL=1 NO_INSTALL=1 bash install-mac.sh
@@ -93,20 +93,21 @@ Zeitstempel und Notarisierung brauchen Internet auf dem Build-Rechner, nie auf d
 
 ## Veröffentlichen
 
-Wer zuerst fertig ist, legt das Release an (`create`), der andere lädt dazu (`upload`). Auf dem Arch-PC:
+Geht automatisch am Ende des Bauens: `./packaging/build-on-linux.sh` (Arch-PC) und `bash install-mac.sh`
+(Mac) rufen `packaging/publish.sh` auf. Das zeigt die Dateien dieses Builds und fragt
+**„Upload now? [y/N]“**; mit `y` legt es das Release `v<Version>` in `Cheter0410/show-master-releases`
+an oder lädt die Dateien zum schon vorhandenen Release dazu (gleichnamige werden ersetzt). Arch-PC und
+Mac können also in beliebiger Reihenfolge hochladen.
 
-```bash
-cd ~/Show-Master
-V=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
-awk -v v="$V" '$0 ~ "^## " v "$" {on=1; next} /^## / {on=0} on' CHANGELOG.md > /tmp/notes.md
-gh release view "v$V" -R Cheter0410/show-master-releases >/dev/null 2>&1 \
-  && gh release upload "v$V" -R Cheter0410/show-master-releases --clobber dist/* \
-  || gh release create "v$V" -R Cheter0410/show-master-releases --title "Show Master $V" --notes-file /tmp/notes.md dist/*
-```
+- Voraussetzung einmalig: `gh` installiert und `gh auth login` (mit Schreibrecht auf das Release-Repo).
+  Ohne `gh` wird nichts gefragt und nichts hochgeladen.
+- `PUBLISH=1` lädt ohne Frage hoch, `PUBLISH=0` fragt nie.
+- Nur Dateien, die beim letzten Bauen entstanden sind, werden hochgeladen (alte aus `dist/` nicht).
+- Die Release-Notizen (auch im Update-Dialog der App) kommen aus dem Abschnitt `## x.y.z` in
+  `CHANGELOG.md`.
+- Später von Hand: `./packaging/publish.sh`.
 
-Auf dem Mac genauso (dort enthält `dist/` das DMG und die zwei macOS-`.gz`). Ohne `gh`: auf
-github.com/Cheter0410/show-master-releases → *Releases* → das Release öffnen bzw. *Draft a new release*
-mit Tag `vX.Y.Z` → Dateien hineinziehen.
+Ein Mac-Build nur für Intel reicht für alle Macs (Apple Silicon über Rosetta); `UNIVERSAL=1` baut beide.
 
 Prüfen: `gh release view "v$V" -R Cheter0410/show-master-releases` – vollständig sind: `.dmg`,
 `ShowMaster-Setup-….exe`, `.pkg.tar.zst`, `linux-x86_64.tar.gz` und die drei `showmaster-…gz` (dazu, falls

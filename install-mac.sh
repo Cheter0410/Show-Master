@@ -56,6 +56,12 @@ say "Building the DMG for $ARCHS only (takes a few minutes the first time)"
 ./packaging/macos/build-dmg.sh
 DMG=$(ls -t dist/ShowMaster-*.dmg | head -n 1)
 
+# Offer to upload the DMG to the release the in-app updater looks at
+# (only when the GitHub command line is set up; PUBLISH=0 never asks).
+if command -v gh >/dev/null 2>&1 || [ -n "${PUBLISH:-}" ]; then
+  ./packaging/publish.sh || true
+fi
+
 if [ -n "${NO_INSTALL:-}" ]; then
   open dist
   say "Done: $DMG"

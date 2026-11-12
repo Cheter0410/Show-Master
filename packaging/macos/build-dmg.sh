@@ -56,6 +56,7 @@ fi
 if [ ! -f ui/dist/index.html ] || [ -n "${REBUILD_UI:-}" ]; then
   (cd ui && npm ci && npm run build)
 fi
+mkdir -p dist && touch dist/.build-start   # packaging/publish.sh uploads only newer files
 # This Mac's own architecture (also when the terminal runs under Rosetta).
 if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then HOST=arm64; else HOST=x86_64; fi
 ARCHS="${ARCHS:-$HOST}"
