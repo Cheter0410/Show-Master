@@ -76,7 +76,7 @@ setup_rust() {
     # shellcheck disable=SC1091
     . "$HOME/.cargo/env"
   fi
-  have=$(rustc --version 2>/dev/null | sed -n 's/^rustc \([0-9.]*\).*/\1/p')
+  have=$(rustc --version 2>/dev/null | sed -n 's/^rustc \([0-9.]*\).*/\1/p' || true)
   if [ -n "$want" ] && [ -n "$have" ] && ! setup_version_ge "$have" "$want"; then
     if command -v rustup >/dev/null 2>&1; then
       ui_run "Rust aktualisieren ($have → mindestens $want)" rustup update stable
@@ -90,7 +90,7 @@ setup_rust() {
       . "$HOME/.cargo/env"
       export PATH="$HOME/.cargo/bin:$PATH"
     fi
-    have=$(rustc --version 2>/dev/null | sed -n 's/^rustc \([0-9.]*\).*/\1/p')
+    have=$(rustc --version 2>/dev/null | sed -n 's/^rustc \([0-9.]*\).*/\1/p' || true)
     setup_version_ge "${have:-0}" "$want" || ui_fail "Rust $have ist zu alt (gebraucht: $want). Rust aktualisieren, dann nochmal."
   fi
   ui_ok "Rust ${have:-?}"

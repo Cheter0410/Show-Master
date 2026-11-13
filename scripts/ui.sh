@@ -141,7 +141,8 @@ ui_run() {
     while kill -0 "$pid" 2>/dev/null; do
       el=$((SECONDS - start))
       n=$(($(wc -l <"$UI_LOG") - from + 1))
-      u=$(tail -n +"$from" "$UI_LOG" | grep -cE "$UI_UNITS")
+      # grep -c exits 1 when it counts 0; under "set -e" that would end the script.
+      u=$(tail -n +"$from" "$UI_LOG" | grep -cE "$UI_UNITS" || true)
       # Estimate: by crates / tests when there were some last time, by lines of
       # output when the step talks a lot, else by time.
       pct=
