@@ -13,42 +13,36 @@ set -euo pipefail
 cd "$(dirname "$0")"
 # shellcheck source=scripts/ui.sh
 . scripts/ui.sh
+# shellcheck source=scripts/setup.sh
+. scripts/setup.sh
+setup_no_root
 
 if [ "${1:-}" = "--uninstall" ]; then
   ui_header "Show Master" "Entfernen"
-  ui_sudo
+  user_app_remove showmaster showmaster && ui_ok "Aus dem Stagehand-Ordner entfernt"
   if command -v pacman >/dev/null 2>&1 && pacman -Q showmaster >/dev/null 2>&1; then
+    ui_sudo
     ui_run "Paket entfernen" sudo pacman -R --noconfirm showmaster
-  else
-    ui_run "Dateien entfernen" sudo rm -f /usr/local/bin/showmaster /usr/local/share/applications/showmaster.desktop \
-      /usr/local/share/icons/hicolor/512x512/apps/showmaster.png
+  fi
+  if system_copy_there showmaster; then
+    ui_sudo
+    ui_run "Dateien in /usr/local entfernen" system_copy_remove showmaster
   fi
   ui_ok "Entfernt (Shows und Einstellungen bleiben)"
   exit 0
 fi
 
 # --- Neuester Stand (danach läuft die neue Fassung dieses Skripts) ---------
-if [ -z "${SM_PULLED:-}" ] && [ -d .git ]; then
+if [ -z "${SM_PULLED:-}" ]; then
   ui_header "Show Master" "Installieren / Aktualisieren"
-  if git diff --quiet && git diff --cached --quiet; then
-    git fetch -q 2>/dev/null || true
-    if [ -n "$(git rev-list HEAD..@{u} 2>/dev/null)" ]; then
-      ui_run "Neuesten Stand holen" git pull -q --ff-only
-      SM_PULLED=1 exec bash "$(pwd)/$(basename "$0")" "$@"
-    fi
-    ui_ok "Quellcode ist aktuell"
-  else
-    ui_warn "Lokale Änderungen – baue den Stand, der hier liegt"
-  fi
-else
-  ui_ok "Quellcode ist aktuell"
+  if setup_pull; then SM_PULLED=1 exec bash "$(pwd)/$(basename "$0")" "$@"; fi
 fi
 
 # --- Werkzeuge: nur was fehlt -------------------------------------------------
 missing=()
 if command -v pacman >/dev/null 2>&1; then
   pkgs=(git base-devel alsa-lib gtk3 libxkbcommon-x11 libglvnd libcap)
-  command -v cargo >/dev/null 2>&1 || pkgs+=(rust)
+  command -v cargo >/dev/null 2>&1 || [ -x "$HOME/.cargo/bin/cargo" ] || pkgs+=(rust)
   while IFS= read -r p; do [ -n "$p" ] && missing+=("$p"); done < <(pacman -T "${pkgs[@]}" 2>/dev/null || true)
   install_pkgs() { sudo pacman -S --needed --noconfirm "$@"; }
 elif command -v apt-get >/dev/null 2>&1; then
@@ -71,14 +65,12 @@ if [ ${#missing[@]} -gt 0 ]; then
 else
   ui_ok "Benötigte Pakete sind da"
 fi
-if ! command -v cargo >/dev/null 2>&1; then
-  ui_run "Rust installieren (einmalig)" sh -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal"
-  # shellcheck disable=SC1091
-  . "$HOME/.cargo/env"
-fi
+setup_rust
 
 # The built web UI is committed; restore it if it was deleted locally.
-[ -f ui/dist/index.html ] || git checkout HEAD -- ui/dist
+if [ ! -f ui/dist/index.html ]; then
+  git checkout HEAD -- ui/dist 2>/dev/null || ui_fail "Die Oberfläche (ui/dist) fehlt. Das Projekt neu herunterladen oder klonen."
+fi
 V=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
 
 # --- Bauen (nur Geändertes wird neu übersetzt) -------------------------------
@@ -100,6 +92,11 @@ if command -v makepkg >/dev/null 2>&1 && command -v pacman >/dev/null 2>&1; then
     ui_run "Installieren" sudo pacman -U --noconfirm packaging/arch/showmaster-"$V"-*.pkg.tar.zst
     rm -f packaging/arch/*.pkg.tar.*
   fi
+  # A copy from before the package (in /usr/local) would be found first.
+  if system_copy_there showmaster; then
+    ui_sudo
+    ui_run "Alte Kopie in /usr/local entfernen" system_copy_remove showmaster
+  fi
 else
   if cmp -s /usr/local/bin/showmaster "$BIN"; then
     ui_skip "Installieren" "Show Master $V ist schon installiert"
@@ -114,6 +111,15 @@ else
     ui_sudo
     ui_run "Installieren nach /usr/local" put
   fi
+fi
+
+# One copy only: an older one from Stagehand or a USB stick (in the home folder)
+# would be the one the application menu starts.
+if user_app_remove showmaster showmaster; then
+  ui_ok "Ältere Kopie im Stagehand-Ordner entfernt (diese hier ersetzt sie)"
+fi
+if pgrep -x showmaster >/dev/null 2>&1; then
+  ui_info "Show Master läuft noch in der alten Fassung – die neue gilt ab dem nächsten Start"
 fi
 
 ui_section "Fertig"
