@@ -70,7 +70,7 @@ und installiert die App nach *Programme*; erneut ausführen = aktualisieren):
 git clone https://github.com/Cheter0410/Show-Master.git ~/Desktop/dev/show-master; cd ~/Desktop/dev/show-master && bash install-mac.sh
 ```
 
-Die Installer liegen auf der [Download-Seite](https://github.com/Cheter0410/show-master-releases/releases/latest)
+Die Installer liegen auf der [Download-Seite](https://github.com/Cheter0410/show-master-releases/releases)
 (sobald dort eine Version veröffentlicht ist). Gebaut werden sie lokal, siehe *Pakete bauen*.
 
 - Show Master ist eine **native App mit eigenem Fenster**. Die Weboberfläche (`/remote`, `/view`) ist für

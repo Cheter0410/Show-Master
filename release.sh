@@ -5,13 +5,14 @@
 #                         (Arch-PC: Linux + Windows, Mac: das DMG)
 #   ./release.sh status   zeigt, welche Teile schon oben sind
 #
-# Die Versionsnummer ist automatisch:
-#   * Gibt es einen Entwurf, baut dieser Rechner genau dessen Stand (Git-Tag
-#     vX.Y.Z) und ergänzt seine Teile darin.
-#   * Ist die aktuelle Version schon veröffentlicht, wird sie um eins erhöht,
-#     "was ist neu" aus den Commits seitdem eingetragen, alles gepusht und ein
-#     neuer Entwurf angelegt.
-# Sobald Mac, Windows und Linux im Entwurf sind, wird er veröffentlicht.
+# Jeder Rechner veröffentlicht für sich - keiner wartet auf den anderen:
+#   * Hat sich seit dem letzten Release etwas geändert, wird die Version um
+#     eins erhöht, "was ist neu" aus den Commits eingetragen und das Release
+#     mit den Teilen dieses Rechners sofort veröffentlicht.
+#   * Fehlen im neuesten Release nur die Teile dieses Rechners (der andere
+#     war schneller), baut er genau dessen Stand (Git-Tag vX.Y.Z) und reicht
+#     sie nach. Bis dahin bekommen die Nutzer dieses Systems einfach die
+#     letzte Version, die es für sie gibt.
 # Nichts wird doppelt gemacht: unveränderte Pakete werden nicht neu gebaut,
 # Dateien, die schon oben sind, nicht nochmal hochgeladen.
 set -euo pipefail
@@ -97,7 +98,7 @@ show_status() {
   assets=$(release_assets "$v")
   case "$state" in
     none) ui_section "$APP $v · noch nichts hochgeladen" ;;
-    draft) ui_section "$APP $v · Entwurf (für Nutzer noch unsichtbar)" ;;
+    draft) ui_section "$APP $v · wird gerade hochgeladen (noch unsichtbar)" ;;
     published) ui_section "$APP $v · veröffentlicht" ;;
   esac
   for p in "${PARTS[@]}"; do
@@ -106,7 +107,7 @@ show_status() {
     if printf '%s\n' "$assets" | grep -q "^$file "; then
       ui_ok "$(printf '%-8s %s' "$name" "$file")"
     else
-      printf '  %s○%s %-8s %sfehlt – kommt vom %s%s\n' "$UI_Y" "$UI_0" "$name" "$UI_D" "$who" "$UI_0"
+      printf '  %s○%s %-8s %snoch nicht da – reicht der %s nach%s\n' "$UI_Y" "$UI_0" "$name" "$UI_D" "$who" "$UI_0"
       missing=1
     fi
   done
@@ -228,6 +229,22 @@ built_files() {
   fi
 }
 
+# Sichtbar machen (ein Entwurf wird veröffentlicht) und sagen, was noch fehlt.
+publish() {
+  if [ "$(release_state "$1")" = draft ]; then
+    ui_run "Veröffentlichen" gh release edit "v$1" -R "$RELEASES" --draft=false --latest
+  fi
+  if show_status "$1"; then
+    ui_section "Fertig"
+    ui_ok "$APP $1 ist veröffentlicht, alle Teile sind da."
+  else
+    ui_section "Fertig"
+    ui_ok "$APP $1 ist veröffentlicht – installierte Programme bieten das Update beim nächsten Start an."
+    ui_info "Die mit ○ markierten Teile reicht der andere Rechner nach, wenn dort ./release.sh läuft."
+    ui_info "Bis dahin bleibt dort die letzte Version, die es für das System gibt."
+  fi
+}
+
 # --- Release ---------------------------------------------------------------
 cmd_release() {
   [ -d .git ] || ui_fail "Das geht nur in einem Git-Checkout (git clone ...)."
@@ -238,20 +255,26 @@ cmd_release() {
   need_gh
   ui_run "Neuesten Stand holen" sh -c 'git pull -q --ff-only && git fetch -q --tags --force'
 
-  local v state
+  local v state late=""
   v=$(version)
   state=$(release_state "$v")
   case "$state" in
     published)
-      if [ -z "$(changes_since "v$v")" ] && git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
+      if ! mine_complete "$v" || [ -n "${FORCE:-}" ]; then
+        # Der andere Rechner hat veröffentlicht: dieselbe Version nachreichen.
+        git rev-parse -q --verify "refs/tags/v$v" >/dev/null || ui_fail "Der Tag v$v fehlt auf GitHub – so kann der $WHO diese Version nicht bauen."
+        late=1
+        ui_ok "$APP $v ist veröffentlicht – der $WHO reicht seine Teile nach"
+      elif [ -z "$(changes_since "v$v")" ] && git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
         show_status "$v" || true
         ui_section "Nichts zu tun"
         ui_info "Seit $v hat sich nichts geändert – kein neues Release nötig."
         ui_done
         exit 0
+      else
+        bump_version "$v"
+        v=$(version)
       fi
-      bump_version "$v"
-      v=$(version)
       ;;
     none | draft)
       git rev-parse -q --verify "refs/tags/v$v" >/dev/null || git tag "v$v"
@@ -263,18 +286,11 @@ cmd_release() {
       ;;
   esac
 
-  # Sind die Teile dieses Rechners schon im Entwurf, gibt es nichts zu tun
-  # (FORCE=1 baut und lädt sie trotzdem neu).
+  # Ein Entwurf, in dem die Teile dieses Rechners schon liegen (z. B. nach
+  # einem abgebrochenen Lauf): nur noch veröffentlichen.
   if [ "$state" = draft ] && [ -z "${FORCE:-}" ] && mine_complete "$v"; then
-    ui_ok "Die Teile vom $WHO sind schon im Entwurf – nichts zu bauen"
-    if show_status "$v"; then
-      ui_run "Veröffentlichen" gh release edit "v$v" -R "$RELEASES" --draft=false --latest
-      ui_section "Fertig"
-      ui_ok "$APP $v ist veröffentlicht – installierte Programme bieten das Update beim nächsten Start an."
-    else
-      ui_section "Fertig"
-      ui_info "Es fehlen nur noch die mit ○ markierten Teile – die kommen vom anderen Rechner."
-    fi
+    ui_ok "Die Teile vom $WHO sind schon oben – nichts zu bauen"
+    publish "$v"
     ui_done
     exit 0
   fi
@@ -308,7 +324,7 @@ cmd_release() {
     local notes
     notes=$(notes_for "$v")
     gh release create "v$v" -R "$RELEASES" --draft --title "$APP $v" --notes-file "$notes" >>"$UI_LOG" 2>&1 ||
-      [ "$(release_state "$v")" != none ] || ui_fail "Entwurf konnte nicht angelegt werden (Protokoll: $UI_LOG)"
+      [ "$(release_state "$v")" != none ] || ui_fail "Release konnte nicht angelegt werden (Protokoll: $UI_LOG)"
     rm -f "$notes"
   fi
   # Nur hochladen, was fehlt oder sich geändert hat.
@@ -326,17 +342,9 @@ cmd_release() {
     ui_run "$(basename "$f") ($(du -h "$f" | cut -f1 | tr -d ' '))" gh release upload "v$v" -R "$RELEASES" --clobber "$f"
   done
 
-  if show_status "$v"; then
-    ui_run "Veröffentlichen" gh release edit "v$v" -R "$RELEASES" --draft=false --latest
-    ui_section "Fertig"
-    ui_ok "$APP $v ist veröffentlicht – installierte Programme bieten das Update beim nächsten Start an."
-  else
-    ui_section "Fertig"
-    if [ ${#todo[@]} -gt 0 ]; then
-      ui_info "Hochgeladen. Veröffentlicht wird automatisch, sobald die fehlenden Teile oben sind."
-    else
-      ui_info "Alles von diesem Rechner ist schon oben. Es fehlen nur noch die mit ○ markierten Teile."
-    fi
+  publish "$v"
+  if [ -n "$late" ] && [ -n "$(git log --oneline "v$v..$BACK" 2>/dev/null)" ]; then
+    ui_info "Es gibt schon neuere Änderungen: nochmal ./release.sh macht daraus das nächste Release."
   fi
   ui_done
 }

@@ -17,10 +17,9 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-pub const DOWNLOAD_PAGE: &str =
-    "https://github.com/Cheter0410/show-master-releases/releases/latest";
+pub const DOWNLOAD_PAGE: &str = "https://github.com/Cheter0410/show-master-releases/releases";
 const RELEASES: &str =
-    "https://api.github.com/repos/Cheter0410/show-master-releases/releases/latest";
+    "https://api.github.com/repos/Cheter0410/show-master-releases/releases?per_page=20";
 const TRUSTED_PREFIX: &str = "https://github.com/Cheter0410/show-master-releases/";
 const AGENT: &str = "showmaster-updater";
 const WORK_DIR: &str = "showmaster-update";
@@ -154,7 +153,38 @@ pub fn pick(json: &Value, program_name: &str, installer_suffix: &str) -> Option<
     })
 }
 
-fn fetch_latest() -> Result<Value, String> {
+/// The newest published release in GitHub's release list that has a download
+/// for this system. The Mac and the PC publish on their own, so the very
+/// newest release may not have one yet - then the one before it still counts.
+/// A system that never updates itself (Linux) just gets the newest.
+pub fn pick_newest(list: &Value, program_name: &str, installer_suffix: &str) -> Option<Release> {
+    let flag = |j: &Value, k: &str| j.get(k).and_then(Value::as_bool).unwrap_or(false);
+    let all: Vec<Release> = list
+        .as_array()?
+        .iter()
+        .filter(|j| !flag(j, "draft") && !flag(j, "prerelease"))
+        .filter_map(|j| pick(j, program_name, installer_suffix))
+        .collect();
+    let best = |usable: bool| {
+        all.iter()
+            .filter(|r| !usable || r.program.is_some() || r.installer.is_some())
+            .reduce(|a, b| {
+                if is_newer(&b.version, &a.version) {
+                    b
+                } else {
+                    a
+                }
+            })
+            .cloned()
+    };
+    if program_name.is_empty() {
+        best(false)
+    } else {
+        best(true)
+    }
+}
+
+fn fetch_releases() -> Result<Value, String> {
     let resp = ureq::get(RELEASES)
         .set("User-Agent", AGENT)
         .set("Accept", "application/vnd.github+json")
@@ -163,7 +193,7 @@ fn fetch_latest() -> Result<Value, String> {
     let text = match resp {
         Ok(r) => r.into_string().map_err(|e| e.to_string())?,
         // No release published yet.
-        Err(ureq::Error::Status(404, _)) => return Ok(Value::Null),
+        Err(ureq::Error::Status(404, _)) => return Ok(json!([])),
         Err(ureq::Error::Status(code, _)) => {
             return Err(format!("The update server answered with error {code}."))
         }
@@ -173,9 +203,9 @@ fn fetch_latest() -> Result<Value, String> {
 }
 
 pub fn check(current: &str) -> Result<Option<Release>, String> {
-    let json = fetch_latest()?;
+    let list = fetch_releases()?;
     let (program, suffix) = platform().unwrap_or((String::new(), ".none"));
-    Ok(pick(&json, &program, suffix).filter(|r| is_newer(&r.version, current)))
+    Ok(pick_newest(&list, &program, suffix).filter(|r| is_newer(&r.version, current)))
 }
 
 pub fn download(a: &Asset, progress: &dyn Fn(u64, u64)) -> Result<PathBuf, String> {
@@ -636,6 +666,45 @@ mod tests {
         let win = pick(&json, &program_asset("windows-x86_64"), ".exe").unwrap();
         assert!(win.program.is_none() && win.installer.unwrap().name.ends_with(".exe"));
         assert!(pick(&Value::Null, "x", ".y").is_none());
+    }
+
+    #[test]
+    fn newest_release_with_a_download_for_this_system() {
+        let rel = |tag: &str, draft: bool, files: &[&str]| {
+            let assets: Vec<Value> = files
+                .iter()
+                .map(|f| json!({"name": f, "browser_download_url": format!("u/{f}")}))
+                .collect();
+            json!({"tag_name": tag, "draft": draft, "assets": assets})
+        };
+        let list = json!([
+            rel("v0.6.0", true, &["ShowMaster-0.6.0.dmg"]),
+            rel(
+                "v0.5.0",
+                false,
+                &["ShowMaster-Setup-0.5.0.exe", "showmaster-windows-x86_64.gz"]
+            ),
+            rel("v0.4.0", false, &["ShowMaster-0.4.0.dmg"]),
+            rel("v0.4.1", false, &["showmaster-macos-x86_64.gz"]),
+        ]);
+        let v =
+            |program: &str, suffix: &str| pick_newest(&list, program, suffix).map(|r| r.version);
+        // The Mac part of 0.5.0 is not there yet: stay on the newest that has one.
+        assert_eq!(
+            v(&program_asset("macos-x86_64"), ".dmg").as_deref(),
+            Some("0.4.1")
+        );
+        assert_eq!(
+            v(&program_asset("macos-arm64"), ".dmg").as_deref(),
+            Some("0.4.0")
+        );
+        assert_eq!(
+            v(&program_asset("windows-x86_64"), ".exe").as_deref(),
+            Some("0.5.0")
+        );
+        // Linux only shows that there is something newer.
+        assert_eq!(v("", ".none").as_deref(), Some("0.5.0"));
+        assert!(pick_newest(&json!([]), "x", ".y").is_none());
     }
 
     #[test]

@@ -7,14 +7,17 @@ Ein Befehl, auf beiden Rechnern derselbe:
 ```
 
 - **Arch-PC** baut Linux und Windows, **Mac** baut das DMG. Jeder lädt seinen Teil hoch.
+- **Jeder Rechner veröffentlicht für sich – keiner wartet auf den anderen.** Wer gerade Zeit hat, lässt
+  `./release.sh` laufen; die Version ist danach sofort für seine Systeme da. Die anderen Systeme bleiben
+  so lange auf der letzten Version, die es für sie gibt (das Programm und Stagehand nehmen immer das
+  neueste Release, das eine Datei für das eigene System hat).
 - **Die Versionsnummer ist automatisch:**
-  - Gibt es schon einen Entwurf, baut der Rechner genau dessen Stand und ersetzt darin seine Teile.
-  - Ist die aktuelle Version schon veröffentlicht, wird sie um eins erhöht (0.4.0 → 0.4.1). „Was ist neu“
-    kommt aus den Commit-Nachrichten seitdem (in `CHANGELOG.md` und im Update-Dialog), dann wird gepusht
-    und ein neuer Entwurf angelegt.
+  - Fehlen im neuesten Release die Teile dieses Rechners, baut er genau dessen Stand und reicht sie nach.
+  - Sind sie da und es gibt neue Änderungen, wird die Version um eins erhöht (0.4.0 → 0.4.1). „Was ist
+    neu“ kommt aus den Commit-Nachrichten seitdem (in `CHANGELOG.md` und im Update-Dialog), dann wird
+    gepusht, gebaut und veröffentlicht.
   - Hat sich seit der letzten Version nichts geändert, passiert nichts.
-- Hochgeladen wird in einen **Entwurf** (für Nutzer unsichtbar). Sobald Mac, Windows und Linux drin
-  sind, veröffentlicht das Skript ihn automatisch – egal wer als Letzter fertig ist.
+- Wer mehrere Versionen verpasst hat, baut nur die neueste nach – die dazwischen werden übersprungen.
 - Beide Rechner bauen garantiert **denselben Code**: jede Version bekommt im Code-Repo einen Git-Tag
   (`v0.4.1`), und gebaut wird immer dieser Stand, auch wenn danach schon weiter gearbeitet wurde.
 - Beim ersten Mal richtet das Skript alles Fehlende selbst ein: GitHub-Anmeldung (Browser öffnet sich),
@@ -27,8 +30,8 @@ Was schon oben ist:
 ```
 
 ```
-Show Master 0.4.1: Entwurf (noch nicht für Nutzer sichtbar)
-  · Mac      fehlt noch - baut der Mac mit ./release.sh
+Show Master 0.4.1 · veröffentlicht
+  ○ Mac      noch nicht da – reicht der Mac nach
   ✓ Windows  ShowMaster-Setup-0.4.1.exe
   ✓ Linux    showmaster-0.4.1-linux-x86_64.tar.gz
 ```
