@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2
+
+- CLAUDE.md: how two people (and their Claude Code sessions) work on this repository – straight on
+  `main`, pull before work and before push, version and changelog with every change, what to do on
+  conflicts.
+
 ## 0.4.1
 
 - The checkout folder is `show-master` everywhere (Linux instructions too), as Stagehand expects it.
