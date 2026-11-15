@@ -60,7 +60,7 @@ showmaster [OPTIONEN] [SHOW.smshow]
 erneut ausführen = aktualisieren, `./install.sh --uninstall` entfernt es):
 
 ```bash
-git clone https://github.com/Cheter0410/Show-Master.git && cd Show-Master && ./install.sh
+git clone https://github.com/Cheter0410/Show-Master.git show-master && cd show-master && ./install.sh
 ```
 
 **Mac direkt aus dem Repository** (holt den neuesten Stand, installiert fehlende Werkzeuge, baut das DMG

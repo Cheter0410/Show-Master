@@ -1,8 +1,8 @@
 #!/bin/bash
 # Show Master on Linux: update this checkout, build and install - in one go.
 #
-#   git clone https://github.com/Cheter0410/Show-Master.git
-#   cd Show-Master
+#   git clone https://github.com/Cheter0410/Show-Master.git show-master
+#   cd show-master
 #   ./install.sh
 #
 # Run it again later to update. Only what is needed is done: packages that are

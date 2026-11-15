@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- The checkout folder is `show-master` everywhere (Linux instructions too), as Stagehand expects it.
+- Development happens on the `main` branch.
+
 ## 0.4.0
 
 - New logo: the cue stack with the green NEXT cue (app icon, window, tray and tablet icons).
