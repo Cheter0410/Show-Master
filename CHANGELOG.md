@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.3
+
+- Stagehand is now called Showtime Suite: the install scripts put Show Master into the renamed shared
+  folder (`/Applications/Showtime Suite`, `~/.local/share/showtime-suite/apps`, Windows
+  `…\Programs\Showtime Suite\Show Master`) and move the old `Stagehand` folder over once, with the
+  menu entries and commands that point into it.
+
 ## 0.4.2
 
 - CLAUDE.md: how two people (and their Claude Code sessions) work on this repository – straight on

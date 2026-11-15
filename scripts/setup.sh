@@ -4,12 +4,12 @@
 #   setup_pull                    newest source, when that is possible without losing anything;
 #                                 returns 0 when new commits were pulled (restart the script)
 #   setup_rust                    Rust is there and new enough for this project
-#   user_app_install ...          Linux: install into the folder Stagehand uses (no sudo)
+#   user_app_install ...          Linux: install into the folder Showtime Suite uses (no sudo)
 #   user_app_remove <id> <bin>    Linux: remove the copy in that folder
 #   system_copy_remove <bin>      Linux: remove an older copy in /usr/local
 #   mac_app_dir / mac_app_put     macOS: the shared folder in Applications, app from a DMG
 #
-# The same file is used by Show Master, Lantern and Stagehand.
+# The same file is used by Show Master, Lantern and Showtime Suite.
 
 setup_no_root() {
   [ -n "${ALLOW_ROOT:-}" ] && return 0
@@ -96,18 +96,47 @@ setup_rust() {
   ui_ok "Rust ${have:-?}"
 }
 
-# --- Linux: the folder all show tools share (as Stagehand installs them) ----
-USER_APPS="${XDG_DATA_HOME:-$HOME/.local/share}/stagehand/apps"
+# --- Linux: the folder all show tools share (as Showtime Suite installs them) ----
+USER_APPS="${XDG_DATA_HOME:-$HOME/.local/share}/showtime-suite/apps"
+# Its name up to Stagehand 0.1 (before the rename to Showtime Suite).
+OLD_USER_APPS="${XDG_DATA_HOME:-$HOME/.local/share}/stagehand/apps"
 USER_MENU="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 USER_BIN="$HOME/.local/bin"
 
+# The shared folder was called stagehand before: move it over once, with the
+# menu entries and commands that point into it.
+user_apps_move() {
+  [ -d "$OLD_USER_APPS" ] || return 0
+  local e f t
+  if [ ! -e "$USER_APPS" ]; then
+    mkdir -p "$(dirname "$USER_APPS")"
+    mv "$OLD_USER_APPS" "$USER_APPS" || return 0
+  else
+    for e in "$OLD_USER_APPS"/*; do
+      [ -e "$e" ] && [ ! -e "$USER_APPS/$(basename "$e")" ] && mv "$e" "$USER_APPS/"
+    done
+  fi
+  rmdir "$OLD_USER_APPS" "$(dirname "$OLD_USER_APPS")" 2>/dev/null || true
+  for f in "$USER_MENU"/*.desktop; do
+    grep -qs '^X-Stagehand=1' "$f" || continue
+    sed -e "s|$OLD_USER_APPS/|$USER_APPS/|g" -e 's|^X-Stagehand=1|X-Showtime-Suite=1|' "$f" >"$f.new" && mv "$f.new" "$f"
+  done
+  for f in "$USER_BIN"/*; do
+    [ -L "$f" ] || continue
+    t=$(readlink "$f")
+    case "$t" in "$OLD_USER_APPS"/*) ln -sfn "$USER_APPS/${t#"$OLD_USER_APPS"/}" "$f" ;; esac
+  done
+  return 0
+}
+
 # user_app_current <id> <bin> <program file>: that very program is installed.
-user_app_current() { cmp -s "$USER_APPS/$1/$2" "$3"; }
+user_app_current() { user_apps_move; cmp -s "$USER_APPS/$1/$2" "$3"; }
 
 # user_app_install <id> <bin> <version> <program file> <desktop file> <icon>
 # No sudo. The folder is swapped in one move, so a half copy never stays.
 user_app_install() {
   local id=$1 bin=$2 version=$3 prog=$4 desktop=$5 icon=$6 new dir
+  user_apps_move
   dir="$USER_APPS/$id"
   new="$USER_APPS/.$id.new"
   mkdir -p "$USER_APPS" "$USER_MENU" "$USER_BIN"
@@ -123,8 +152,8 @@ user_app_install() {
   local args
   args=$(sed -n 's/^Exec=[^ ]*//p' "$desktop" | head -n 1)
   {
-    grep -vE '^(Exec|Icon|X-Stagehand)=' "$desktop"
-    printf 'Exec="%s"%s\nIcon=%s\nX-Stagehand=1\n' "$dir/$bin" "$args" "$dir/icon.png"
+    grep -vE '^(Exec|Icon|X-Showtime-Suite|X-Stagehand)=' "$desktop"
+    printf 'Exec="%s"%s\nIcon=%s\nX-Showtime-Suite=1\n' "$dir/$bin" "$args" "$dir/icon.png"
   } >"$USER_MENU/$bin.desktop"
   # The command; a real file someone put there is left alone.
   if [ -L "$USER_BIN/$bin" ] || [ ! -e "$USER_BIN/$bin" ]; then ln -sfn "$dir/$bin" "$USER_BIN/$bin"; fi
@@ -132,13 +161,14 @@ user_app_install() {
   return 0
 }
 
-# user_app_remove <id> <bin>: the copy Stagehand (or an install script) put
+# user_app_remove <id> <bin>: the copy Showtime Suite (or an install script) put
 # into the shared folder, with its menu entry and command.
 user_app_remove() {
+  user_apps_move
   local id=$1 bin=$2 dir="$USER_APPS/$1"
   [ -e "$dir" ] || return 1
   rm -rf "$dir"
-  if grep -qs '^X-Stagehand=1' "$USER_MENU/$bin.desktop"; then rm -f "$USER_MENU/$bin.desktop"; fi
+  if grep -qsE '^X-(Showtime-Suite|Stagehand)=1' "$USER_MENU/$bin.desktop"; then rm -f "$USER_MENU/$bin.desktop"; fi
   case "$(readlink "$USER_BIN/$bin" 2>/dev/null)" in "$dir"/*) rm -f "$USER_BIN/$bin" ;; esac
   return 0
 }
@@ -157,17 +187,35 @@ user_bin_on_path() {
   ui_info "Im Terminal: $USER_BIN ist noch nicht im PATH (das Anwendungsmenü geht trotzdem)"
 }
 
-# --- macOS: the folder all show tools share (as Stagehand installs them) ----
-# /Applications/Stagehand, or the one in the home folder when this user may
+# --- macOS: the folder all show tools share (as Showtime Suite installs them) ----
+# /Applications/Showtime Suite, or the one in the home folder when this user may
 # not write to /Applications (no admin account).
 mac_app_dir() {
-  local d=/Applications/Stagehand
+  local base
+  for base in /Applications "$HOME/Applications"; do mac_folder_move "$base"; done
+  local d="/Applications/Showtime Suite"
   if mkdir -p "$d" 2>/dev/null && [ -w "$d" ]; then
     echo "$d"
   else
-    mkdir -p "$HOME/Applications/Stagehand"
-    echo "$HOME/Applications/Stagehand"
+    mkdir -p "$HOME/Applications/Showtime Suite"
+    echo "$HOME/Applications/Showtime Suite"
   fi
+}
+
+# mac_folder_move <Applications folder>: the shared folder was called
+# Stagehand before; move it (or what is only in it) over once.
+mac_folder_move() {
+  local old="$1/Stagehand" new="$1/Showtime Suite" e
+  [ -d "$old" ] || return 0
+  if [ ! -e "$new" ]; then
+    mv "$old" "$new" 2>/dev/null || return 0
+  else
+    for e in "$old"/*; do
+      [ -e "$e" ] && [ ! -e "$new/$(basename "$e")" ] && mv "$e" "$new/" 2>/dev/null
+    done
+    rmdir "$old" 2>/dev/null || true
+  fi
+  return 0
 }
 
 # mac_app_put <dmg> <Name.app> <folder>: the app from the DMG into the folder.
@@ -186,7 +234,8 @@ mac_app_put() {
   xattr -dr com.apple.quarantine "$dir/$app" 2>/dev/null || true
   # A loose copy from before the shared folder would be started by Spotlight too.
   local old
-  for old in "/Applications/$app" "$HOME/Applications/$app"; do
+  for old in "/Applications/$app" "$HOME/Applications/$app" \
+    "/Applications/Stagehand/$app" "$HOME/Applications/Stagehand/$app"; do
     [ -d "$old" ] && rm -rf "$old" 2>/dev/null
   done
   return 0

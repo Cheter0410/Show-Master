@@ -10,7 +10,7 @@
 # is not built again, an unchanged app not installed again. Missing tools
 # (Xcode command line tools, Rust) are installed.
 #   dist/ShowMaster-x.y.z.dmg      installer (this Mac's type; UNIVERSAL=1 for Intel + Apple Silicon)
-#   /Applications/Stagehand/ShowMaster.app   installed on this Mac (skip with NO_INSTALL=1)
+#   /Applications/Showtime Suite/ShowMaster.app   installed on this Mac (skip with NO_INSTALL=1)
 set -euo pipefail
 cd "$(dirname "$0")"
 # shellcheck source=scripts/ui.sh
@@ -46,7 +46,7 @@ if [ -n "${NO_INSTALL:-}" ]; then
 fi
 # The DMG this app came from (kept next to the build outputs).
 STAMP=dist/.made/installed-app
-# All show tools share one folder (as Stagehand installs them).
+# All show tools share one folder (as Showtime Suite installs them).
 APPDIR=$(mac_app_dir)
 WANT=$(cat "dist/.made/$(basename "$DMG")" 2>/dev/null || echo none)
 if [ -d "$APPDIR/ShowMaster.app" ] && [ "$(cat "$STAMP" 2>/dev/null)" = "$WANT" ]; then
@@ -60,6 +60,6 @@ else
 fi
 
 ui_section "Fertig"
-ui_ok "Show Master ist in Programme › Stagehand (Launchpad, Spotlight)"
+ui_ok "Show Master ist in Programme › Showtime Suite (Launchpad, Spotlight)"
 ui_ok "Am Handy / Tablet im selben Netz:  showmaster.local"
 ui_done

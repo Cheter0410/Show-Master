@@ -9,7 +9,7 @@ Ein Befehl, auf beiden Rechnern derselbe:
 - **Arch-PC** baut Linux und Windows, **Mac** baut das DMG. Jeder lädt seinen Teil hoch.
 - **Jeder Rechner veröffentlicht für sich – keiner wartet auf den anderen.** Wer gerade Zeit hat, lässt
   `./release.sh` laufen; die Version ist danach sofort für seine Systeme da. Die anderen Systeme bleiben
-  so lange auf der letzten Version, die es für sie gibt (das Programm und Stagehand nehmen immer das
+  so lange auf der letzten Version, die es für sie gibt (das Programm und Showtime Suite nehmen immer das
   neueste Release, das eine Datei für das eigene System hat).
 - **Die Versionsnummer ist automatisch:**
   - Fehlen im neuesten Release die Teile dieses Rechners, baut er genau dessen Stand und reicht sie nach.
@@ -51,7 +51,7 @@ Tipp: Commit-Nachrichten so schreiben, dass sie als „Was ist neu“ taugen (z.
 
 Der Besitzer der Release-Repos lädt den Freund ein: auf GitHub
 `Cheter0410/show-master-releases` → **Settings → Collaborators → Add people** (dasselbe für
-`Cheter0410/stagehand-releases` und, damit er pushen kann, für die Code-Repos). Der Freund nimmt die
+`Cheter0410/showtime-suite-releases` und, damit er pushen kann, für die Code-Repos). Der Freund nimmt die
 Einladung an (E-Mail oder https://github.com/notifications). Fehlt das Recht, sagt `./release.sh` genau
 das und zeigt den Link zur Einladung.
 
@@ -60,7 +60,7 @@ das und zeigt den Link zur Einladung.
 | | Mac | Arch-PC |
 |---|---|---|
 | Show Master | `~/Desktop/dev/show-master` | wo `install.sh` geklont wurde |
-| Stagehand | `~/Desktop/dev/stagehand` | wo `install.sh` geklont wurde |
+| Showtime Suite | `~/Desktop/dev/showtime-suite` | wo `install.sh` geklont wurde |
 
 In jedem Repo heißt der Befehl gleich: `./release.sh` (auf dem Mac auch `bash release.sh`).
 

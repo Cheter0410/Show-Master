@@ -19,7 +19,7 @@ setup_no_root
 
 if [ "${1:-}" = "--uninstall" ]; then
   ui_header "Show Master" "Entfernen"
-  user_app_remove showmaster showmaster && ui_ok "Aus dem Stagehand-Ordner entfernt"
+  user_app_remove showmaster showmaster && ui_ok "Aus dem Showtime-Suite-Ordner entfernt"
   if command -v pacman >/dev/null 2>&1 && pacman -Q showmaster >/dev/null 2>&1; then
     ui_sudo
     ui_run "Paket entfernen" sudo pacman -R --noconfirm showmaster
@@ -113,10 +113,10 @@ else
   fi
 fi
 
-# One copy only: an older one from Stagehand or a USB stick (in the home folder)
+# One copy only: an older one from Showtime Suite or a USB stick (in the home folder)
 # would be the one the application menu starts.
 if user_app_remove showmaster showmaster; then
-  ui_ok "Ältere Kopie im Stagehand-Ordner entfernt (diese hier ersetzt sie)"
+  ui_ok "Ältere Kopie im Showtime-Suite-Ordner entfernt (diese hier ersetzt sie)"
 fi
 if pgrep -x showmaster >/dev/null 2>&1; then
   ui_info "Show Master läuft noch in der alten Fassung – die neue gilt ab dem nächsten Start"

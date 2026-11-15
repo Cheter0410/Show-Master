@@ -43,7 +43,7 @@ Build output and local files: `target/`, `dist/`, `.DS_Store`, logs, editor file
 ## Releases
 
 Released files go to the public repository **`Cheter0410/show-master-releases`**. It only holds the downloads (and a
-README) – never develop there. Installed copies and Stagehand read the newest release from it.
+README) – never develop there. Installed copies and Showtime Suite read the newest release from it.
 
 `./release.sh` publishes (Arch PC: Linux + Windows, Mac: the DMG); `./release.sh status` shows what is
 up. Each computer publishes on its own. Details: `docs/release-anleitung.md`.
@@ -56,10 +56,10 @@ All live side by side in `~/Desktop/dev` (folder names in lower case):
 |---|---|---|
 | `show-master` | Cheter0410/Show-Master | Cheter0410/show-master-releases |
 | `lantern` | Cheter0410/lantern | Cheter0410/lantern-releases |
-| `stagehand` | Cheter0410/stagehand | Cheter0410/stagehand-releases |
+| `showtime-suite` | Cheter0410/showtime-suite | Cheter0410/showtime-suite-releases |
 | `beamweave` | Cheter0410/beamweave | Cheter0410/beamweave-releases |
 
-Stagehand installs, updates and starts the others; its catalog is `stagehand/apps.json`.
+Showtime Suite installs, updates and starts the others; its catalog is `showtime-suite/apps.json`.
 
 ## Build and test
 
@@ -82,4 +82,5 @@ bigger changes and add a line to `decisions.md` when you decide something new.
 - The GitHub default branch was still `claude/nifty-heisenberg-mcqrc9` on 2026-11-15; `main` is the
   branch to use. Cheter0410 (owner): please switch the default branch to `main` in the repository
   settings and delete the old branch.
-- The checkout folder is `show-master` (lower case), as Stagehand expects.
+- The checkout folder is `show-master` (lower case), as Showtime Suite expects.
+- `scripts/setup.sh` is the same file in Lantern, Showtime Suite and here – change all three together.
