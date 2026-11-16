@@ -158,3 +158,58 @@ fn missing_file_is_reported_through_tick() {
     assert_eq!(failed[0].0, 3);
     assert!(failed[0].1.contains("nope.wav"), "{}", failed[0].1);
 }
+
+/// A 6-channel file routed to six outputs plays on a stereo device: the outputs the
+/// device lacks are skipped instead of failing the cue ("crosspoint … outside the 6x2 matrix").
+#[test]
+fn six_channel_file_plays_on_a_stereo_device() {
+    let (dir, mut io, mut renderer) = setup();
+    let (ch, frames) = (6u16, 4_800u32);
+    let data_len = frames * u32::from(ch) * 2;
+    let mut out = Vec::new();
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&ch.to_le_bytes());
+    out.extend_from_slice(&48_000u32.to_le_bytes());
+    out.extend_from_slice(&(48_000 * u32::from(ch) * 2).to_le_bytes());
+    out.extend_from_slice(&(ch * 2).to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_len.to_le_bytes());
+    for _ in 0..frames {
+        for _ in 0..ch {
+            out.extend_from_slice(&20_000i16.to_le_bytes());
+        }
+    }
+    std::fs::write(dir.path().join("six.wav"), out).unwrap();
+    let mut s = spec("six.wav");
+    s.matrix = (0..6).map(|i| (i, i, 1.0)).collect();
+    io.apply(vec![
+        Action::PrepareVoice {
+            voice: 1,
+            cue: 1,
+            spec: s,
+        },
+        Action::StartVoice {
+            voice: 1,
+            at: 0,
+            fade_in_frames: 0,
+            curve: Curve::Linear,
+        },
+    ]);
+    let failed = wait_opened(&mut io);
+    assert!(failed.is_empty(), "{failed:?}");
+    while !io.all_primed() {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let mut buf = vec![0.0f32; 512 * 2];
+    renderer.render(&mut buf, 2);
+    assert!(
+        buf[100 * 2] > 0.5 && buf[100 * 2 + 1] > 0.5,
+        "both outputs play: {:?}",
+        &buf[200..202]
+    );
+}

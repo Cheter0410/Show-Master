@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.3
+
+- Audio files with more channels than the audio device (e.g. a 6-channel WAV on a stereo output) play
+  again: routes to outputs the device does not have are skipped instead of failing the cue with
+  "crosspoint … is outside the 6x2 matrix". The same for routes from channels the file does not have.
+
 ## 0.5.2
 
 - Starting is faster on computers with many audio devices: the device list is asked for once at a time

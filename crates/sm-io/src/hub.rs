@@ -93,7 +93,13 @@ impl Io {
         audio_in: Box<dyn sm_audio::input::AudioInputBackend>,
     ) -> Self {
         let audio = AudioSystem::open(&show.settings.audio);
-        Self::build(show, show_dir, midi, audio, crate::inputs::Inputs::new(midi_in, audio_in))
+        Self::build(
+            show,
+            show_dir,
+            midi,
+            audio,
+            crate::inputs::Inputs::new(midi_in, audio_in),
+        )
     }
 
     /// Build on an already opened audio system (offline rendering, tests).
@@ -362,7 +368,9 @@ impl Io {
             if pending.cancelled {
                 continue; // stopped or discarded before the file was open
             }
-            match result.and_then(|(source, params)| {
+            let out_ch = self.audio.controller.config().out_channels;
+            match result.and_then(|(source, mut params)| {
+                fit_matrix(&mut params.matrix, source.channels(), out_ch);
                 self.audio
                     .controller
                     .prepare_voice(source, params)
@@ -623,6 +631,24 @@ struct OpenJob {
     spec: VoiceSpec,
 }
 
+/// Drop crosspoints the voice cannot play: a source channel the file does not have, or an
+/// output the audio device does not have (a patch made for a bigger interface, played on a
+/// stereo one). Those channels stay silent; the rest plays.
+fn fit_matrix(matrix: &mut Vec<(u16, u16, f32)>, src_ch: usize, out_ch: usize) {
+    let before = matrix.len();
+    matrix.retain(|&(s, o, _)| usize::from(s) < src_ch && usize::from(o) < out_ch);
+    if matrix.len() < before {
+        // An empty matrix would mean "default routing"; this voice should stay silent.
+        if matrix.is_empty() {
+            matrix.push((0, 0, 0.0));
+        }
+        tracing::warn!(
+            "{} crosspoint(s) skipped: not in the {src_ch}x{out_ch} matrix of file and device",
+            before - matrix.len()
+        );
+    }
+}
+
 type Opened = Result<(Box<dyn sm_audio::SampleSource>, VoiceParams), String>;
 type OpenResult = (VoiceId, u64, Opened);
 
@@ -735,5 +761,30 @@ impl Drop for Opener {
         for t in self.threads.drain(..) {
             let _ = t.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_matrix;
+
+    #[test]
+    fn crosspoints_beyond_file_or_device_are_skipped() {
+        // 6-channel file, patch with outputs on device channels 0..5, stereo device.
+        let mut m: Vec<_> = (0..6).map(|i| (i, i, 1.0)).collect();
+        fit_matrix(&mut m, 6, 2);
+        assert_eq!(m, vec![(0, 0, 1.0), (1, 1, 1.0)]);
+        // A routing made for a 6-channel file, the file now stereo.
+        let mut m = vec![(0, 0, 1.0), (4, 1, 0.5)];
+        fit_matrix(&mut m, 2, 2);
+        assert_eq!(m, vec![(0, 0, 1.0)]);
+        // Nothing playable: silent, not the default routing.
+        let mut m = vec![(2, 2, 1.0), (3, 3, 1.0)];
+        fit_matrix(&mut m, 6, 2);
+        assert_eq!(m, vec![(0, 0, 0.0)]);
+        // Fitting matrices stay as they are.
+        let mut m = vec![(0, 1, 0.5), (1, 0, 0.5)];
+        fit_matrix(&mut m, 2, 2);
+        assert_eq!(m, vec![(0, 1, 0.5), (1, 0, 0.5)]);
     }
 }

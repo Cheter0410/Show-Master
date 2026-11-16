@@ -280,3 +280,7 @@ revidieren lassen.
 ## Tests parallel (0.5.2)
 
 - Die Geräteliste (`sm_io::audio::list_devices`) wird nur von einem gleichzeitig abgefragt und eine Sekunde lang wiederverwendet: Mehrere Engines (parallele Tests) blockierten sich sonst in CoreAudio. Test-Eingänge werden über `Io::with_input_backends` gleich beim Start gesetzt, statt erst die echten zu öffnen.
+
+## Mehr Kanäle als das Gerät (0.5.3)
+
+- Routen auf Ausgänge, die das Audio-Gerät nicht hat (oder von Kanälen, die die Datei nicht hat), werden beim Öffnen der Stimme übersprungen (`fit_matrix` in `sm-io/src/hub.rs`) statt die Cue mit einem Fehler abzulehnen: Ein Patch für ein großes Interface soll auch am Laptop mit Stereo spielen. Bleibt nichts übrig, spielt die Stimme stumm (nicht das Standard-Routing).

@@ -107,7 +107,8 @@ pub fn list_devices() -> Vec<DeviceEntry> {
     // Asking CoreAudio for every device takes a while and several askers at once block each other
     // (one engine per test when the tests run in parallel). So one asks at a time, and a list that
     // is less than a second old is handed out again.
-    static LAST: std::sync::Mutex<Option<(std::time::Instant, Vec<DeviceEntry>)>> = std::sync::Mutex::new(None);
+    static LAST: std::sync::Mutex<Option<(std::time::Instant, Vec<DeviceEntry>)>> =
+        std::sync::Mutex::new(None);
     let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((at, list)) = last.as_ref() {
         if at.elapsed() < std::time::Duration::from_secs(1) {

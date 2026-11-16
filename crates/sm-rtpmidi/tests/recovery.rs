@@ -92,9 +92,7 @@ impl LossyProxy {
                     client = Some(from);
                     let is_rtp = offset == 1 && bytes.first().is_some_and(|b| b >> 6 == 2);
                     if is_rtp
-                        && drop
-                            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |d| d.checked_sub(1))
-                            .is_ok()
+                        && take_one(&drop)
                     {
                         dropped.fetch_add(1, Ordering::AcqRel);
                         continue;
@@ -246,4 +244,17 @@ fn without_journal_loss_is_only_counted() {
     let stats = l.stats();
     assert_eq!(stats.packets_lost, 1);
     assert_eq!(stats.recovered, 0);
+}
+
+/// Counts `n` down by one unless it is 0; true when it did (a compare-exchange loop, as
+/// `fetch_update` is deprecated and `try_update` is too new for every toolchain we build on).
+fn take_one(n: &std::sync::atomic::AtomicUsize) -> bool {
+    let mut cur = n.load(Ordering::Acquire);
+    while cur > 0 {
+        match n.compare_exchange_weak(cur, cur - 1, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return true,
+            Err(now) => cur = now,
+        }
+    }
+    false
 }
