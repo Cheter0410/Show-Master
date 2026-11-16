@@ -233,11 +233,16 @@ fn sender_loop(
                     .filter(|(_, s)| s.is_some())
                     .map(|(p, _)| p.clone())
                     .collect();
+                // The RTP-MIDI session only when it is on: otherwise every message of the panic
+                // reported "not enabled" (some hundred log lines per PANIC).
+                let rtp_on = rtp.lock().ok().is_some_and(|g| g.is_some());
                 for m in sm_core::midi::panic_messages() {
                     for p in &ports {
                         deliver(&mut open, &mut osc, p, &m);
                     }
-                    deliver(&mut open, &mut osc, RTP_PREFIX, &m);
+                    if rtp_on {
+                        deliver(&mut open, &mut osc, RTP_PREFIX, &m);
+                    }
                 }
             }
             Ok(Msg::Reset) => open.clear(),
@@ -605,6 +610,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(log.lock().unwrap().len(), 3 + 48);
+        // Without an RTP-MIDI session the panic reports nothing (it used to report "not
+        // enabled" once per message).
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(hub.take_errors().is_empty(), "{:?}", hub.take_errors());
     }
 
     #[test]

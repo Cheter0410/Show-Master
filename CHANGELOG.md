@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.5
+
+- PANIC no longer fills the log with "RTP-MIDI session is not enabled" (about a hundred lines each
+  time): the panic messages only go to the RTP-MIDI session when it is on.
+
 ## 0.5.4
 
 - Outputs patched on device channels beyond the open ones now play: the number of output channels
