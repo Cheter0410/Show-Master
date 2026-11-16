@@ -69,6 +69,30 @@ pub(super) fn audio_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
         );
     }
 
+    // Apply / Revert at the top: the list of devices can be long (and the
+    // setup wizard shows this page in a smaller box).
+    let pending = d != saved;
+    let (mut apply, mut revert) = (false, false);
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        let mut b = egui::Button::new(RichText::new("Apply audio settings").strong());
+        if pending {
+            b = b.fill(theme::EDIT);
+        }
+        apply = ui.add_enabled(pending, b).clicked();
+        revert = ui
+            .add_enabled(pending, egui::Button::new("Revert"))
+            .clicked();
+        hint(
+            ui,
+            if pending {
+                "Not applied yet. Applying reopens the audio device: all running cues stop."
+            } else {
+                "Applying reopens the audio device: all running cues stop."
+            },
+        );
+    });
+
     heading(ui, "Device");
     let default_selected = d.device.is_none() && d.backend.is_none();
     if ui
@@ -204,34 +228,20 @@ pub(super) fn audio_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
         });
     });
 
-    ui.add_space(10.0);
-    let changed = d != saved;
-    ui.horizontal(|ui| {
-        let apply = egui::Button::new(RichText::new("Apply audio settings").strong());
-        if ui.add_enabled(changed, apply).clicked() {
-            st.update_settings(json!({ "audio": {
-                "backend": d.backend,
-                "device": d.device,
-                "sample_rate": d.sample_rate,
-                "buffer_frames": d.buffer_frames,
-                "channels": d.channels,
-            }}));
-            st.audio = None;
-            return;
-        }
-        if ui
-            .add_enabled(changed, egui::Button::new("Revert"))
-            .clicked()
-        {
-            st.audio = None;
-            return;
-        }
-        st.audio = changed.then(|| d.clone());
-    });
-    hint(
-        ui,
-        "Applying reopens the audio device: all running cues stop.",
-    );
+    if apply {
+        st.update_settings(json!({ "audio": {
+            "backend": d.backend,
+            "device": d.device,
+            "sample_rate": d.sample_rate,
+            "buffer_frames": d.buffer_frames,
+            "channels": d.channels,
+        }}));
+        st.audio = None;
+    } else if revert {
+        st.audio = None;
+    } else {
+        st.audio = (d != saved).then_some(d);
+    }
 }
 
 // ----------------------------------------------------------------------

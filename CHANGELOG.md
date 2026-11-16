@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+- Setup wizard, Audio step: "Apply audio settings" and "Revert" are now at the top, above the device
+  list, so they are visible without scrolling (also in Setup › Audio).
+- Setup › General: "Open the last show at start" explains that it skips the start screen.
+
 ## 0.5.0
 
 - Start screen like Lantern's, in Show Master's green: New show, Open show, Open show package and the

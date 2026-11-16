@@ -148,6 +148,7 @@ pub(super) fn general_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
             let mut on = st.open_last;
             if ui
                 .checkbox(&mut on, "Open the last show at start")
+                .on_hover_text("Skips the start screen: the last show opens right away")
                 .changed()
             {
                 st.outbox_push(super::Out::SetOpenLast(on));
