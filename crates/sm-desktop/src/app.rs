@@ -12,6 +12,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
+#[path = "start.rs"]
+mod start;
+pub use start::{Page, Step};
+
 /// Callback for a command result.
 pub type Reply = Box<dyn FnOnce(&mut App, Result<Value, String>)>;
 
@@ -136,6 +140,9 @@ pub struct App {
     last_show_path: Option<String>,
     /// After stepping the playhead in Edit mode, select the new playhead cue.
     select_playhead: bool,
+    /// Start screen, setup wizard or the main window.
+    pub page: Page,
+    pub start: start::StartState,
 }
 
 impl App {
@@ -174,6 +181,8 @@ impl App {
             recent: crate::recent::Recent::load_from(None),
             last_show_path: None,
             select_playhead: false,
+            page: Page::Main,
+            start: Default::default(),
         };
         // The theme is applied on the first frame (`logic`), on the context that draws.
         let _ = &mut app;
@@ -460,10 +469,21 @@ impl App {
             Pending::Open(p) => json!({ "cmd": "open_show", "path": p, "force": force }),
             Pending::Close => return,
         };
+        let opens = matches!(action, Pending::Open(_));
         self.cmd_then(cmd, move |app, r| match r {
-            Ok(_) => app.view = View::default(),
+            Ok(_) if !opens && app.creating_show() => app.save_new_show(),
+            Ok(_) => {
+                app.view = View::default();
+                if opens && app.page != Page::Main {
+                    app.start.error = None;
+                    app.page = Page::Main;
+                }
+            }
             Err(e) if e == "unsaved_changes" => app.modal = Some(Modal::Unsaved(action)),
-            Err(e) => app.toast_error(App::error_text(&e)),
+            Err(e) => {
+                app.start.creating = None;
+                app.toast_error(App::error_text(&e))
+            }
         });
     }
 
@@ -1323,6 +1343,20 @@ impl App {
     /// Draw the whole window.
     pub fn ui_root(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        if self.page != Page::Main {
+            let frame = egui::Frame::NONE.fill(Color32::from_rgb(12, 14, 17));
+            egui::CentralPanel::default()
+                .frame(frame)
+                .show(ui, |ui| match self.page {
+                    Page::Start => self.start_screen(ui),
+                    Page::Wizard(step) => self.wizard(ui, step),
+                    Page::Main => {}
+                });
+            self.modals(&ctx);
+            self.draw_toasts(&ctx);
+            self.was_typing = ctx.egui_wants_keyboard_input();
+            return;
+        }
         self.backup_banner(ui);
         egui::Panel::top("top_bar").show(ui, |ui| {
             ui.add_space(4.0);
@@ -1363,6 +1397,14 @@ impl App {
 
     /// File menu entries (also the folded "Menu" on narrow screens).
     fn file_menu_items(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .button("Start screen")
+            .on_hover_text("New show, open, show package and recent shows")
+            .clicked()
+        {
+            self.back_to_start();
+        }
+        ui.separator();
         if ui.button("New show").clicked() {
             self.new_show();
         }
@@ -1971,6 +2013,7 @@ impl App {
                     ui.horizontal(|ui| {
                         if ui.button("Cancel").clicked() {
                             keep = false;
+                            self.start.creating = None;
                         }
                         if ui.button("Don't save").clicked() {
                             keep = false;

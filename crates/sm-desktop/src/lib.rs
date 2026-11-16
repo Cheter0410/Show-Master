@@ -26,7 +26,7 @@ pub mod widgets;
 
 use std::path::PathBuf;
 
-pub use app::App;
+pub use app::{App, Page, Step};
 
 /// Load the application icon.
 fn icon() -> Option<egui::IconData> {
@@ -89,7 +89,12 @@ pub fn run(
                     .then(|| recent.existing().next().cloned())
                     .flatten()
             });
+            // Started without a show: the start screen (never in kiosk mode).
+            let start = open.is_none() && !has_show && !prefs.kiosk;
             let mut app = App::new(&cc.egui_ctx, client, open);
+            if start {
+                app.page = app::Page::Start;
+            }
             app.recent = recent;
             app.prefs = prefs;
             app.global_hotkeys = global_hotkeys::GlobalHotkeys::native();

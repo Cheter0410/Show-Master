@@ -61,7 +61,12 @@ impl Env {
     pub fn harness_sized(&self, size: egui::Vec2) -> Harness<'static, App> {
         let client = Client::new(self.handle.clone(), self.rt.handle().clone());
         let app = App::new(&egui::Context::default(), client, None);
-        let mut h = Harness::builder().with_size(size).build_ui_state(
+        let mut b = Harness::builder().with_size(size);
+        // SM_SHOTS=<folder>: tests that take pictures need the real renderer.
+        if std::env::var_os("SM_SHOTS").is_some() {
+            b = b.wgpu();
+        }
+        let mut h = b.build_ui_state(
             |ui, app: &mut App| {
                 app.logic(ui.ctx());
                 app.ui_root(ui);
@@ -213,4 +218,18 @@ fn write_wav(path: &std::path::Path, secs: f32) {
         out.extend_from_slice(&s.to_le_bytes());
     }
     std::fs::write(path, out).expect("write wav");
+}
+
+/// With `SM_SHOTS=<folder>`: a picture of the window as `<name>.png` there.
+pub fn shot(h: &mut Harness<'static, App>, name: &str) {
+    let Some(dir) = std::env::var_os("SM_SHOTS").map(std::path::PathBuf::from) else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    match h.render() {
+        Ok(img) => {
+            let _ = img.save(dir.join(format!("{name}.png")));
+        }
+        Err(e) => eprintln!("no picture of {name}: {e}"),
+    }
 }

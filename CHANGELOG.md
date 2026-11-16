@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0
+
+- Start screen like Lantern's, in Show Master's green: New show, Open show, Open show package and the
+  recent shows over a banner of the logo's cue list. It shows when Show Master starts without a show
+  (never in kiosk mode); *File › Start screen* leads back to it.
+- New show asks for a name and a place and makes the show folder right away
+  (`<place>/<name>/<name>.smshow`, default: Documents/Show Master).
+- A setup wizard runs after New show: audio interface, outputs/patch, timecode, remote (tablet, PIN,
+  QR codes) and a summary; *Skip setup* opens the show at once. The steps are the same pages as in
+  Setup.
+- UI tests for the start screen and the wizard; `SM_SHOTS=<folder>` writes pictures of every step.
+
 ## 0.4.3
 
 - Stagehand is now called Showtime Suite: the install scripts put Show Master into the renamed shared

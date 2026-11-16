@@ -282,6 +282,34 @@ fn body(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
     }
 }
 
+/// A page of the setup window drawn somewhere else (the setup wizard of a new
+/// show, see `start.rs`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Page {
+    Audio,
+    Outputs,
+    Timecode,
+    Remote,
+}
+
+pub fn page(app: &mut App, ui: &mut egui::Ui, page: Page) {
+    {
+        let st = &mut app.setup;
+        let s = &app.client.state;
+        match page {
+            Page::Audio => audio::audio_tab(ui, st, s),
+            Page::Outputs => audio::patch_tab(ui, st, s),
+            Page::Timecode => midi::timecode_tab(ui, st, s),
+            Page::Remote => remote::remote_tab(ui, st, s),
+        }
+    }
+    flush(app);
+}
+
+pub(crate) fn rate_label(r: sm_core::timecode::FrameRate) -> &'static str {
+    midi::rate_label(r)
+}
+
 /// Execute what the window queued while drawing.
 fn flush(app: &mut App) {
     for out in std::mem::take(&mut app.setup.outbox) {

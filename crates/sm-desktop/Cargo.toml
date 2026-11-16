@@ -41,7 +41,7 @@ tray-icon = { version = "=0.26.1", default-features = false }
 ksni = { version = "=0.3.7", default-features = false, features = ["tokio"] }
 
 [dev-dependencies]
-egui_kittest = { version = "0.37", features = ["eframe"] }
+egui_kittest = { version = "0.37", features = ["eframe", "wgpu"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 sm-io.workspace = true

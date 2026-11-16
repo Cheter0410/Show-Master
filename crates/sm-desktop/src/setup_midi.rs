@@ -254,7 +254,7 @@ pub(super) fn midi_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
 // Timecode
 // ----------------------------------------------------------------------
 
-fn rate_label(r: FrameRate) -> &'static str {
+pub(crate) fn rate_label(r: FrameRate) -> &'static str {
     match r {
         FrameRate::F2997Df => "29.97 drop-frame",
         FrameRate::F2997Ndf => "29.97 non-drop",

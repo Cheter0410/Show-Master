@@ -236,6 +236,17 @@ revidieren lassen.
 - **Rolle pro Rechner** (`link.json`), nicht in der Show: beide Rechner öffnen dieselbe Showdatei. Medien
   müssen auf dem Backup relativ zur Show am selben Ort liegen (Show-Ordner oder Show-Paket kopieren).
 
+## Startbildschirm und Einrichtung (0.5.0)
+
+- **Startbildschirm wie in Lantern**, in Show Masters Grün: Neue Show, Show öffnen, Show-Paket öffnen,
+  zuletzt geöffnete Shows. Er erscheint nur, wenn Show Master ohne Show startet (nicht bei einer Datei
+  auf der Kommandozeile, nicht mit „letzte Show öffnen“, nie im Kiosk-Modus). *File › Start screen*
+  führt zurück (nicht im Live-Modus).
+- **Neue Show = eigener Ordner:** `new_show`, dann `save_show` mit `folder: true` nach
+  `<Ort>/<Name>/<Name>.smshow` (Standard-Ort: Dokumente/Show Master). Der Name kommt aus dem Dateinamen.
+- **Einrichtungs-Assistent** (Audio, Outputs/Patch, Timecode, Remote, Übersicht) zeigt dieselben Seiten
+  wie das Setup-Fenster (`setup::page`), damit es nur eine Stelle für diese Einstellungen gibt.
+
 ## Bekannte Grenzen
 
 - **Dateien öffnen im Hintergrund.** Audiodateien werden von zwei eigenen Threads geöffnet, nie von der
