@@ -82,12 +82,40 @@ impl Io {
         Self::with_audio(show, show_dir, midi, audio)
     }
 
+    /// Like [`Io::with_midi_backend`], with these input backends from the start (tests, virtual
+    /// devices). The real inputs are never opened then: closing them again waits for the system's
+    /// device list, which takes long on a computer with many audio devices.
+    pub fn with_input_backends(
+        show: &Show,
+        show_dir: Option<PathBuf>,
+        midi: Box<dyn MidiBackend>,
+        midi_in: Box<dyn crate::midi_in::MidiInputBackend>,
+        audio_in: Box<dyn sm_audio::input::AudioInputBackend>,
+    ) -> Self {
+        let audio = AudioSystem::open(&show.settings.audio);
+        Self::build(show, show_dir, midi, audio, crate::inputs::Inputs::new(midi_in, audio_in))
+    }
+
     /// Build on an already opened audio system (offline rendering, tests).
     pub fn with_audio(
         show: &Show,
         show_dir: Option<PathBuf>,
         midi: Box<dyn MidiBackend>,
         audio: AudioSystem,
+    ) -> Self {
+        let inputs = crate::inputs::Inputs::new(
+            crate::midi_in::default_input_backend(),
+            sm_audio::input::default_input_backend(),
+        );
+        Self::build(show, show_dir, midi, audio, inputs)
+    }
+
+    fn build(
+        show: &Show,
+        show_dir: Option<PathBuf>,
+        midi: Box<dyn MidiBackend>,
+        audio: AudioSystem,
+        inputs: crate::inputs::Inputs,
     ) -> Self {
         let sr = audio.controller.sample_rate();
         let mut io = Self {
@@ -112,10 +140,7 @@ impl Io {
             started: Default::default(),
             show_dir,
             underruns_before: 0,
-            inputs: crate::inputs::Inputs::new(
-                crate::midi_in::default_input_backend(),
-                sm_audio::input::default_input_backend(),
-            ),
+            inputs,
         };
         io.configure(show);
         io

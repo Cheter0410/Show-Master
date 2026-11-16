@@ -31,7 +31,7 @@ impl Env {
             midi_backend: Some(Box::new(sm_io::midi::NoMidi)),
             ..Config::default()
         });
-        Env { rt, handle, dir }
+        Env { rt, handle, dir }.ready()
     }
 
     /// The demo show (generated audio files, every cue type) in a temp folder.
@@ -51,7 +51,18 @@ impl Env {
             midi_backend: Some(Box::new(sm_io::midi::NoMidi)),
             ..Config::default()
         });
-        Env { rt, handle, dir }
+        Env { rt, handle, dir }.ready()
+    }
+
+    /// Wait until the runtime has loaded the show and published it. Tests read the state right
+    /// away; with many tests at once (the default `cargo test`) loading takes a moment.
+    fn ready(self) -> Env {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !self.state()["show"]["cue_lists"].is_array() {
+            assert!(Instant::now() < deadline, "the runtime did not publish the show\nstate: {}", self.state());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        self
     }
 
     pub fn harness(&self) -> Harness<'static, App> {
@@ -89,7 +100,8 @@ impl Env {
         what: &str,
         pred: impl Fn(&serde_json::Value) -> bool,
     ) {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        // Generous: under load (all test files at once) the runtime answers slower.
+        let deadline = Instant::now() + Duration::from_secs(30);
         while !pred(&self.state()) {
             assert!(
                 Instant::now() < deadline,

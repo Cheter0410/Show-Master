@@ -276,3 +276,7 @@ revidieren lassen.
 - **Systemweite Hotkeys:** unter Linux nur mit X11 (nicht Wayland); Tastendruck kommt dort mit bis zu
   50 ms Verzögerung an. Eine per Programm-Update aktualisierte, Developer-ID-signierte Mac-App wird ad hoc
   neu signiert (läuft weiter, verliert aber die Developer-ID-Signatur; das DMG-Update behält sie).
+
+## Tests parallel (0.5.2)
+
+- Die Geräteliste (`sm_io::audio::list_devices`) wird nur von einem gleichzeitig abgefragt und eine Sekunde lang wiederverwendet: Mehrere Engines (parallele Tests) blockierten sich sonst in CoreAudio. Test-Eingänge werden über `Io::with_input_backends` gleich beim Start gesetzt, statt erst die echten zu öffnen.

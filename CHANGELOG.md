@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.2
+
+- Starting is faster on computers with many audio devices: the device list is asked for once at a time
+  and reused for a second, so several engines at once no longer block each other in CoreAudio.
+- Tests: all UI and input tests pass again with a plain `cargo test --workspace` (in parallel). The test
+  engine waits until the show is loaded, gets more time under load, and test input devices are used from
+  the start instead of opening and closing the real ones first.
+
 ## 0.5.1
 
 - Setup wizard, Audio step: "Apply audio settings" and "Revert" are now at the top, above the device

@@ -581,14 +581,12 @@ impl Runtime {
         };
         let doc = Document::new(show, path);
         let dir = doc.show_dir().map(Path::to_path_buf);
-        let io = match config.midi_backend.take() {
-            Some(m) => Io::with_midi_backend(&doc.show, dir, m),
-            None => Io::new(&doc.show, dir),
-        };
-        let mut io = io;
-        if config.midi_input_backend.is_some() || config.audio_input_backend.is_some() {
-            io.set_input_backends(
+        let midi = config.midi_backend.take().unwrap_or_else(sm_io::midi::default_backend);
+        let io = if config.midi_input_backend.is_some() || config.audio_input_backend.is_some() {
+            Io::with_input_backends(
                 &doc.show,
+                dir,
+                midi,
                 config
                     .midi_input_backend
                     .take()
@@ -597,8 +595,10 @@ impl Runtime {
                     .audio_input_backend
                     .take()
                     .unwrap_or_else(sm_audio::input::default_input_backend),
-            );
-        }
+            )
+        } else {
+            Io::with_midi_backend(&doc.show, dir, midi)
+        };
         let engine = Engine::new(doc.show.clone(), io.sample_rate());
         let mut rt = Self {
             doc,
