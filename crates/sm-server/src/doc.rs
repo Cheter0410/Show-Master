@@ -819,7 +819,7 @@ impl Document {
                 match parsed {
                     Ok(mut show) => {
                         show.cue_lists = lists;
-                        show.settings.audio.channels = show.settings.audio.channels.clamp(1, 128);
+                        show.fit_audio_channels();
                         self.show = show;
                         Ok(Value::Null)
                     }
@@ -832,10 +832,7 @@ impl Document {
             EditCommand::ApplyLayout { layout } => {
                 self.show.patch = OutputPatch::from_layout(&layout)
                     .ok_or_else(|| format!("unknown layout '{layout}'"))?;
-                let n = self.show.patch.outputs.len() as u16;
-                if self.show.settings.audio.channels < n {
-                    self.show.settings.audio.channels = n;
-                }
+                self.show.fit_audio_channels();
                 Ok(Value::Null)
             }
         }
@@ -1088,6 +1085,45 @@ mod tests {
         )
         .unwrap();
         assert_eq!(order(&doc), vec![ids[1], dup]);
+    }
+
+    /// Outputs patched on channels 3-6 open those channels: a 6-channel file then plays on all
+    /// six instead of only 1 and 2 (the device stayed at the 2 channels set before).
+    #[test]
+    fn patch_beyond_the_open_channels_raises_them() {
+        let mut doc = Document::default();
+        doc.show.settings.audio.channels = 2;
+        let outputs: Vec<_> = (0..6)
+            .map(|c| json!({ "name": format!("Out {c}"), "channel": c }))
+            .collect();
+        doc.apply(
+            EditCommand::UpdateShow {
+                patch: json!({ "patch": { "outputs": outputs } }),
+            },
+            &NoProbe,
+        )
+        .unwrap();
+        assert_eq!(doc.show.settings.audio.channels, 6);
+        // Setting the channels lower again is lifted to what the patch needs.
+        doc.apply(
+            EditCommand::UpdateShow {
+                patch: json!({ "settings": { "audio": { "channels": 2 } } }),
+            },
+            &NoProbe,
+        )
+        .unwrap();
+        assert_eq!(doc.show.settings.audio.channels, 6);
+        // A file saved like that opens with the channels fitted.
+        doc.show.settings.audio.channels = 2;
+        let text = sm_core::showfile::to_string(&doc.show).unwrap();
+        assert_eq!(
+            sm_core::showfile::parse(&text)
+                .unwrap()
+                .settings
+                .audio
+                .channels,
+            6
+        );
     }
 
     #[test]

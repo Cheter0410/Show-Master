@@ -208,6 +208,15 @@ pub struct OutputPatch {
 }
 
 impl OutputPatch {
+    /// Device channels the patch needs open: the highest channel used, plus one.
+    pub fn channels_needed(&self) -> u16 {
+        self.outputs
+            .iter()
+            .map(|o| o.channel.saturating_add(1))
+            .max()
+            .unwrap_or(0)
+    }
+
     pub fn stereo() -> Self {
         Self::from_layout("stereo").unwrap_or_default()
     }
@@ -1044,6 +1053,13 @@ impl CueList {
 }
 
 impl Show {
+    /// Open at least as many output channels as the patch uses: outputs on channel 3 and up
+    /// stay silent while the device is opened with 2 (a patch made for a bigger interface).
+    pub fn fit_audio_channels(&mut self) {
+        let a = &mut self.settings.audio;
+        a.channels = a.channels.max(self.patch.channels_needed()).clamp(1, 128);
+    }
+
     pub fn alloc_id(&mut self) -> u64 {
         let id = self.next_id.max(1);
         self.next_id = id + 1;

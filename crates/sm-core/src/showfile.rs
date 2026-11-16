@@ -141,6 +141,7 @@ pub fn parse(text: &str) -> Result<Show, ShowfileError> {
     let mut show: Show = serde_json::from_value(doc)?;
     show.schema_version = SCHEMA_VERSION;
     show.assign_missing_ids();
+    show.fit_audio_channels();
     Ok(show)
 }
 

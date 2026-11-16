@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.4
+
+- Outputs patched on device channels beyond the open ones now play: the number of output channels
+  (Settings › Audio) is raised to what the patch uses – when the patch changes and when a show opens.
+  Before, choosing a big interface kept the 2 channels set earlier, so outputs 3 and up stayed silent.
+
 ## 0.5.3
 
 - Audio files with more channels than the audio device (e.g. a 6-channel WAV on a stereo output) play

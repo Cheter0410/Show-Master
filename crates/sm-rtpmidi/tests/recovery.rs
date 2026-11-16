@@ -91,9 +91,7 @@ impl LossyProxy {
                     }
                     client = Some(from);
                     let is_rtp = offset == 1 && bytes.first().is_some_and(|b| b >> 6 == 2);
-                    if is_rtp
-                        && take_one(&drop)
-                    {
+                    if is_rtp && take_one(&drop) {
                         dropped.fetch_add(1, Ordering::AcqRel);
                         continue;
                     }

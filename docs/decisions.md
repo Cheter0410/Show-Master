@@ -284,3 +284,7 @@ revidieren lassen.
 ## Mehr Kanäle als das Gerät (0.5.3)
 
 - Routen auf Ausgänge, die das Audio-Gerät nicht hat (oder von Kanälen, die die Datei nicht hat), werden beim Öffnen der Stimme übersprungen (`fit_matrix` in `sm-io/src/hub.rs`) statt die Cue mit einem Fehler abzulehnen: Ein Patch für ein großes Interface soll auch am Laptop mit Stereo spielen. Bleibt nichts übrig, spielt die Stimme stumm (nicht das Standard-Routing).
+
+## Kanäle folgen dem Patch (0.5.4)
+
+- `settings.audio.channels` ist mindestens der höchste gepatchte Kanal + 1 (`Show::fit_audio_channels`, beim Laden und bei jeder Änderung von Show/Patch). Vorher blieb die Zahl beim Gerätewechsel auf 2 stehen und Ausgänge ab Kanal 3 waren stumm.
