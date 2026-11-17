@@ -29,11 +29,12 @@ use std::time::{Duration, Instant};
 
 /// Actions that can be bound system-wide. Editing actions (undo, delete, ...)
 /// make no sense while another application is in front.
-pub const GLOBAL_ACTIONS: [&str; 9] = [
+pub const GLOBAL_ACTIONS: [&str; 10] = [
     "go",
     "panic",
     "stop_all",
     "toggle_pause",
+    "release_loop",
     "next",
     "previous",
     "reset",
@@ -620,7 +621,7 @@ pub mod fast {
     use std::time::{Duration, Instant};
 
     /// Actions that take the fast path (the rest waits for the UI pass).
-    pub const FAST_ACTIONS: [&str; 4] = ["go", "panic", "stop_all", "toggle_pause"];
+    pub const FAST_ACTIONS: [&str; 5] = ["go", "panic", "stop_all", "toggle_pause", "release_loop"];
 
     struct State {
         handle: Handle,
@@ -756,6 +757,7 @@ pub mod fast {
             }
             "stop_all" => json!({ "cmd": "stop_all" }),
             "toggle_pause" => json!({ "cmd": "toggle_pause" }),
+            "release_loop" => json!({ "cmd": "release_loops" }),
             _ => return,
         };
         let result = parse_command(cmd).and_then(|c| s.handle.post(c, Role::Admin, "hotkey"));

@@ -1760,6 +1760,56 @@ fn control_tab(ui: &mut Ui, show: &Show, cue: &Cue, edit: &mut EditState, out: &
             });
             ui.end_row();
         }
+        if k.action == ControlAction::ReleaseLoop {
+            label(ui, "Loop");
+            ui.horizontal(|ui| {
+                // The target's loop names, to pick from.
+                let names: Vec<String> = k
+                    .target
+                    .and_then(|t| show.cue(t))
+                    .and_then(|c| match &c.kind {
+                        CueKind::Audio(a) => Some(
+                            a.loops
+                                .iter()
+                                .enumerate()
+                                .map(|(i, l)| l.label(i))
+                                .collect(),
+                        ),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let shown = if k.loop_name.is_empty() {
+                    "The loop playing".to_string()
+                } else {
+                    k.loop_name.clone()
+                };
+                let mut picked: Option<String> = None;
+                egui::ComboBox::from_id_salt(("control_loop", id))
+                    .selected_text(shown)
+                    .width(200.0)
+                    .show_ui(ui, |ui| {
+                        if ui
+                            .selectable_label(k.loop_name.is_empty(), "The loop playing")
+                            .clicked()
+                        {
+                            picked = Some(String::new());
+                        }
+                        for n in &names {
+                            if ui
+                                .selectable_label(k.loop_name.eq_ignore_ascii_case(n), n)
+                                .clicked()
+                            {
+                                picked = Some(n.clone());
+                            }
+                        }
+                    });
+                if let Some(n) = picked.filter(|n| *n != k.loop_name) {
+                    out.push(Out::Cmd(kind_patch(id, json!({ "loop_name": n }))));
+                }
+                hint(ui, "a loop the target has not reached yet is skipped");
+            });
+            ui.end_row();
+        }
     });
 }
 

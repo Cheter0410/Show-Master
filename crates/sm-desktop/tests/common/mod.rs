@@ -198,6 +198,7 @@ fn demo_show(dir: &std::path::Path) -> std::path::PathBuf {
             action: ControlAction::Stop,
             target: Some(c4.id),
             time: 0.5,
+            ..ControlCue::default()
         }),
     );
     let c7 = mk(&mut show, "7", "Note", CueKind::Memo);

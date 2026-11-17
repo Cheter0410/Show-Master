@@ -15,8 +15,8 @@
 use crate::chase::{ChaseStep, Chaser, TcObservation, TcStatus};
 use crate::db_to_lin;
 use crate::model::{
-    ContinueMode, ControlAction, Crosspoint, Cue, CueId, CueKind, Curve, GroupMode, ListId,
-    PanicMessage, Show, TcAction, TcJumpPolicy, TcMode, TcSource,
+    AudioCue, ContinueMode, ControlAction, Crosspoint, Cue, CueId, CueKind, Curve, GroupMode,
+    ListId, Loop, PanicMessage, Show, TcAction, TcJumpPolicy, TcMode, TcSource,
 };
 use serde::{Deserialize, Serialize};
 use sm_timecode::{TcTransport, Timecode};
@@ -61,10 +61,18 @@ pub enum Command {
     StopCue {
         cue: CueId,
     },
-    /// Release a vamping audio cue: it leaves its loop at the end of the
-    /// pass and plays on to the end.
+    /// Release the loop an audio cue plays: it leaves it at the end of the pass (or right
+    /// away for an "immediate" loop) and plays on to its next loop or the end. With `name`
+    /// only that loop: when the cue has not reached it yet, it is skipped when it comes.
     ReleaseLoop {
         cue: CueId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// Release the loop of every cue that plays one (with `name`: only loops of that name).
+    ReleaseLoops {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
     },
     /// Jump to `time` seconds into the cue's action (the waveform's
     /// playhead): a playing cue continues from there, a stopped one is
@@ -120,6 +128,8 @@ pub struct VoiceSpec {
     pub offset_frames: u64,
     /// Vamp: passes after the first start here (seconds of file time).
     pub loop_from: Option<f64>,
+    /// Crossfade at each jump back of the vamp (seconds; 0 = hard jump).
+    pub loop_xfade: f64,
     /// Start in source frames (overrides `start`; sample-exact splices).
     pub start_frame: Option<u64>,
     pub gain: f32,
@@ -238,10 +248,11 @@ pub enum EventKind {
         cue: CueId,
         armed: bool,
     },
-    /// A vamp was released; it leaves the loop `in_secs` from now.
+    /// A loop was released; the cue leaves it `in_secs` from now.
     LoopReleased {
         cue: CueId,
         in_secs: f64,
+        name: String,
     },
     Playhead {
         list: ListId,
@@ -291,9 +302,35 @@ pub struct ActiveCue {
     /// Length of the current phase in seconds; `None` = open-ended.
     pub duration: Option<f64>,
     pub from_tc: bool,
-    /// Audio cue playing its vamp (loop) and not released yet.
+    /// Audio cue playing a loop and not released yet.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub vamping: bool,
+    /// The loop the cue plays (also while it is released and waits for the loop end).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub looping: Option<LoopStatus>,
+    /// Position in the file (seconds) for an audio cue with loops.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_pos: Option<f64>,
+}
+
+/// The loop an audio cue is playing, for Live and the remotes.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct LoopStatus {
+    pub name: String,
+    /// Index among the cue's loops (0-based) and how many it has.
+    pub index: usize,
+    pub count: usize,
+    /// The pass playing (1-based).
+    pub pass: u64,
+    /// Passes before it releases itself; 0 = until released.
+    pub passes: u32,
+    /// Seconds until the end of this pass (released: until it leaves the loop).
+    pub remaining: f64,
+    /// Released, leaving at the end of the pass.
+    pub releasing: bool,
+    /// GO releases it.
+    pub release_on_go: bool,
+    pub immediate: bool,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -374,34 +411,77 @@ struct Inst {
     vamp: VampState,
     /// The vamp voice fading out after the switch, until this global time.
     old_voice: Option<(VoiceId, u64)>,
-    /// Loop ends of a vamp the timecode follows.
-    wraps: Option<Wraps>,
+    /// The loop being played (also while released and waiting for its end).
+    lp: Option<LoopRt>,
+    /// Index of the loop the cue plays or comes to next (audio cues with loops).
+    seg: usize,
+    /// Loops released before the cue got to them: skipped when they come.
+    skip: Vec<usize>,
+    /// "Immediate" loop: the audio after it, opened ahead so a release can switch at once.
+    spare: Option<VoiceId>,
+    /// Where the current segment's voice started: (offset after the pre-wait, file seconds).
+    origin: (u64, f64),
 }
 
-/// Where the loop ends of a vamping voice fall, exactly: the `k`-th loop end
-/// is `intro + k * len` source frames into the voice.
+/// Where the loop ends of a looping voice fall, exactly: the `k`-th loop end is
+/// `intro + k * len` source frames after the voice's first frame, which plays at
+/// `base` (engine frames after the pre-wait).
 #[derive(Clone, Copy, Debug)]
-struct Wraps {
-    next: u64,
+struct LoopRt {
+    index: usize,
+    base: u64,
     intro: u64,
     len: u64,
     rate: u64,
     sr: u64,
+    /// The voice's first source frame and the loop (absolute source frames).
+    src0: u64,
+    ls: u64,
+    le: u64,
+    /// Next loop end the timecode jumps back at (when `tc`).
+    next: u64,
+    tc: bool,
 }
 
-impl Wraps {
-    /// Voice position (engine frames) of source position `n`.
+impl LoopRt {
+    /// Voice position (engine frames) of source position `n` (relative to `src0`).
     fn at(&self, n: u64) -> u64 {
         ((u128::from(n) * u128::from(self.sr) + u128::from(self.rate) / 2) / u128::from(self.rate))
             as u64
     }
-    /// Position of loop end `k`.
+    /// Position of loop end `k` (engine frames after the pre-wait).
     fn end(&self, k: u64) -> u64 {
-        self.at(self.intro + k * self.len)
+        self.base + self.at(self.intro + k * self.len)
     }
     /// Length (engine frames) of the pass that ends at loop end `k`.
     fn pass(&self, k: u64) -> u64 {
-        self.end(k) - self.at((self.intro + k * self.len).saturating_sub(self.len))
+        self.end(k) - self.base - self.at((self.intro + k * self.len).saturating_sub(self.len))
+    }
+    /// The first loop end after `pos`.
+    fn next_end(&self, pos: u64) -> u64 {
+        let rel = pos.saturating_sub(self.base) as f64 * self.rate as f64 / self.sr as f64;
+        let mut k = if rel < self.intro as f64 {
+            0
+        } else {
+            ((rel - self.intro as f64) / self.len as f64).floor() as u64 + 1
+        };
+        while k > 0 && self.end(k - 1) > pos {
+            k -= 1;
+        }
+        while self.end(k) <= pos {
+            k += 1;
+        }
+        k
+    }
+    /// File position (seconds) at `pos`.
+    fn file_pos(&self, pos: u64) -> f64 {
+        let rel = (pos.saturating_sub(self.base) as f64 * self.rate as f64 / self.sr as f64) as u64;
+        let n = if rel < self.intro {
+            self.src0 + rel
+        } else {
+            self.ls + (rel - self.intro) % self.len.max(1)
+        };
+        n as f64 / self.rate as f64
     }
 }
 
@@ -412,16 +492,18 @@ enum VampState {
     None,
     /// Looping, not released.
     Looping,
-    /// Released before the audio started: play straight through.
-    ReleasedEarly,
-    /// Released: at local frame `at` the voice `next` (the rest of the file)
-    /// takes over; `len` = its length in frames (if known).
+    /// Released: at local frame `at` the voice `next` (the audio after the loop) takes
+    /// over; `len` = its length in frames when it plays to the end (no further loop).
     Switching {
         at: u64,
         next: VoiceId,
         len: Option<u64>,
         /// Crossfade length (frames), centred on the loop end.
         xfade: u64,
+        /// Source frames the new voice starts before the loop end.
+        h_src: u64,
+        /// Released by its number of passes (a manual release may still come earlier).
+        auto: bool,
     },
 }
 
@@ -448,12 +530,14 @@ impl Inst {
         )
     }
 
-    /// A prepared (not started) voice for a released vamp.
-    fn pending_voice(&self) -> Option<VoiceId> {
-        match self.vamp {
-            VampState::Switching { next, .. } => Some(next),
-            _ => None,
+    /// Prepared (not started) voices: the audio after a released loop, and the one kept
+    /// ready for an immediate release.
+    fn pending_voices(&self) -> Vec<VoiceId> {
+        let mut v: Vec<VoiceId> = self.spare.into_iter().collect();
+        if let VampState::Switching { next, .. } = self.vamp {
+            v.push(next);
         }
+        v
     }
 
     fn local_at(&self, t: u64) -> u64 {
@@ -487,7 +571,7 @@ impl Inst {
         if let VampState::Switching { at, .. } = self.vamp {
             consider(self.global(at), Ev::VampSwitch);
         }
-        if let Some(w) = &self.wraps {
+        if let Some(w) = self.lp.filter(|w| w.tc) {
             let local = self.pre + w.end(w.next);
             let before_switch = match self.vamp {
                 VampState::Switching { at, .. } => local < at,
@@ -873,7 +957,11 @@ impl Engine {
             stop_target_on_end: None,
             vamp: VampState::None,
             old_voice: None,
-            wraps: None,
+            lp: None,
+            seg: 0,
+            skip: Vec::new(),
+            spare: None,
+            origin: (0, 0.0),
         });
         self.emit(t, EventKind::CueTriggered { cue: cue_id });
         Some(id)
@@ -1002,7 +1090,7 @@ impl Engine {
                     hard: false,
                 });
             }
-            if let Some(voice) = inst.pending_voice() {
+            for voice in inst.pending_voices() {
                 self.actions.push(Action::DiscardVoice { voice });
             }
             self.errors.insert(inst.cue, message.clone());
@@ -1054,81 +1142,285 @@ impl Engine {
         let CueKind::Audio(a) = &cue.kind else {
             return None;
         };
-        let vamp = a.active_vamp();
-        Some(VoiceSpec {
+        Some(self.seg_spec(a, a.start.max(0.0), 0, offset_frames))
+    }
+
+    /// The voice for one stretch of an audio cue: from `from` (file seconds) on, through
+    /// loop `k` (looping there) - or to the cue's end when there is no loop `k`.
+    fn seg_spec(&self, a: &AudioCue, from: f64, k: usize, offset_frames: u64) -> VoiceSpec {
+        let base = VoiceSpec {
             file: a.file.clone(),
-            start: a.start.max(0.0),
-            end: vamp.map_or(a.end, |v| Some(v.end)),
-            loop_count: if vamp.is_some() { 0 } else { a.loop_count },
+            start: from,
+            end: a.end,
+            loop_count: a.loop_count,
             offset_frames,
-            loop_from: vamp.map(|v| v.start),
+            loop_from: None,
+            loop_xfade: 0.0,
             start_frame: None,
             gain: db_to_lin(a.gain_db),
             matrix: self.matrix(&a.effective_routing(self.show.patch.outputs.len())),
-        })
+        };
+        let loops = a.active_loops();
+        if loops.is_empty() {
+            return base;
+        }
+        match loops.get(k) {
+            Some(l) => VoiceSpec {
+                end: Some(l.end),
+                loop_count: 0,
+                loop_from: Some(l.start),
+                loop_xfade: l.crossfade,
+                ..base
+            },
+            None => VoiceSpec {
+                loop_count: 1,
+                ..base
+            },
+        }
     }
 
-    /// The plain (no vamp) spec: an audio cue whose vamp was released
-    /// before it started plays straight through.
-    fn plain_voice_spec(&self, cue: &Cue, offset_frames: u64) -> Option<VoiceSpec> {
-        let CueKind::Audio(a) = &cue.kind else {
+    /// The loop cue instance `ix` plays: the cue's audio and its loops.
+    fn inst_loops(&self, ix: usize) -> Option<(Cue, AudioCue, Vec<Loop>)> {
+        let c = self.show.cue(self.insts.get(ix)?.cue)?.clone();
+        let CueKind::Audio(a) = &c.kind else {
             return None;
         };
-        Some(VoiceSpec {
-            loop_count: 1,
-            end: a.end,
-            loop_from: None,
-            ..self.voice_spec(cue, offset_frames)?
-        })
+        let a = a.clone();
+        let loops = a.active_loops();
+        Some((c, a, loops))
     }
 
-    /// Release the vamp of `cue`: find the first loop end far enough ahead
-    /// to open the rest of the file, and schedule the switch there.
-    fn release_loop(&mut self, cue: CueId, t: u64) -> Result<(), String> {
+    /// Frames at the file's own rate, rounded as the file source does.
+    fn file_rate(&self, a: &AudioCue) -> u64 {
+        u64::from(a.file_rate.unwrap_or(self.sr).max(1))
+    }
+
+    /// The cue instance `ix` has just come to its loop `seg` (voice playing, `lp` set):
+    /// release it at once when it was released ahead or plays a fixed number of passes,
+    /// and keep the audio after it ready for an immediate release.
+    fn enter_loop(&mut self, ix: usize, t: u64) {
+        let Some((c, a, loops)) = self.inst_loops(ix) else {
+            return;
+        };
+        let seg = self.insts[ix].seg;
+        let Some(l) = loops.get(seg).cloned() else {
+            return;
+        };
+        let ahead = self.insts[ix].skip.contains(&seg);
+        if l.immediate && !ahead {
+            let voice = self.alloc_voice();
+            let spec = self.seg_spec(&a, l.end, seg + 1, 0);
+            self.actions.push(Action::PrepareVoice {
+                voice,
+                cue: c.id,
+                spec,
+            });
+            self.insts[ix].spare = Some(voice);
+        }
+        if ahead || l.passes > 0 {
+            let min_k = if ahead { 0 } else { u64::from(l.passes - 1) };
+            if let Err(e) = self.release_at(ix, t, min_k, false, !ahead) {
+                self.emit(
+                    t,
+                    EventKind::Info {
+                        message: format!("Release loop: {e}"),
+                    },
+                );
+            }
+        }
+    }
+
+    /// Release the loop cue `cue` plays (`name`: only that loop; a loop the cue has not
+    /// reached yet is skipped when it comes).
+    fn release_loop(&mut self, cue: CueId, name: Option<&str>, t: u64) -> Result<(), String> {
         let Some(ix) = self.insts.iter().position(|i| i.cue == cue) else {
             return Err("the cue is not running".into());
         };
-        let Some(c) = self.show.cue(cue).cloned() else {
-            return Err("no such cue".into());
+        let Some((_, _, loops)) = self.inst_loops(ix) else {
+            return Err("only audio cues have loops".into());
         };
-        let CueKind::Audio(a) = &c.kind else {
-            return Err("only audio cues have a loop".into());
-        };
-        let Some(v) = a.active_vamp() else {
+        if loops.is_empty() {
             return Err("this cue has no loop".into());
-        };
+        }
         let i = &self.insts[ix];
-        match i.vamp {
+        let started = i.started && i.voice.is_some();
+        let target = match name {
+            Some(n) => loops
+                .iter()
+                .position(|l| l.name.eq_ignore_ascii_case(n.trim()))
+                .ok_or_else(|| format!("the cue has no loop \"{}\"", n.trim()))?,
+            None => i.seg,
+        };
+        if target >= loops.len() {
+            return Err("the cue has no loop left".into());
+        }
+        if target < i.seg {
+            return Err(format!("\"{}\" is already over", loops[target].name));
+        }
+        if !started || target > i.seg {
+            // Not there yet (pre-wait, or a later loop): skip it when it comes.
+            let i = &mut self.insts[ix];
+            if !started && target == i.seg {
+                i.seg += 1;
+                while i.skip.contains(&i.seg) {
+                    i.seg += 1;
+                }
+            } else if !i.skip.contains(&target) {
+                i.skip.push(target);
+            }
+            let name = loops[target].name.clone();
+            self.emit(
+                t,
+                EventKind::LoopReleased {
+                    cue,
+                    in_secs: 0.0,
+                    name,
+                },
+            );
+            return Ok(());
+        }
+        self.release_at(ix, t, 0, true, false).map(|_| ())
+    }
+
+    /// Release every loop playing (`name`: only loops of that name).
+    fn release_loops(&mut self, name: Option<&str>, t: u64, list: Option<ListId>) -> usize {
+        let cues: Vec<CueId> = self
+            .insts
+            .iter()
+            .filter(|i| list.is_none_or(|l| i.list == l))
+            .filter(|i| {
+                // By name also a loop the cue comes to later; otherwise the loop playing.
+                name.is_some()
+                    || matches!(
+                        i.vamp,
+                        VampState::Looping | VampState::Switching { auto: true, .. }
+                    )
+            })
+            .map(|i| i.cue)
+            .collect();
+        let mut n = 0;
+        for cue in cues {
+            if self.release_loop(cue, name, t).is_ok() {
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// GO while loops play that GO releases: release them instead of starting the next
+    /// cue. Returns how many were released.
+    fn go_releases(&mut self, list: ListId, t: u64) -> usize {
+        let cues: Vec<CueId> = self
+            .insts
+            .iter()
+            .filter(|i| i.list == list && i.voice.is_some())
+            .filter(|i| {
+                matches!(
+                    i.vamp,
+                    VampState::Looping | VampState::Switching { auto: true, .. }
+                )
+            })
+            .filter(|i| {
+                let Some(CueKind::Audio(a)) = self.show.cue(i.cue).map(|c| &c.kind) else {
+                    return false;
+                };
+                a.active_loops().get(i.seg).is_some_and(|l| l.release_on_go)
+            })
+            .map(|i| i.cue)
+            .collect();
+        cues.into_iter()
+            .filter(|c| self.release_loop(*c, None, t).is_ok())
+            .count()
+    }
+
+    /// Release the loop instance `ix` plays: right away (`now`, an immediate loop with its
+    /// audio ready), or at the first loop end from `min_k` on that is far enough ahead to
+    /// open the audio after the loop. `auto`: released by its number of passes.
+    fn release_at(
+        &mut self,
+        ix: usize,
+        t: u64,
+        min_k: u64,
+        now: bool,
+        auto: bool,
+    ) -> Result<f64, String> {
+        let Some((c, a, loops)) = self.inst_loops(ix) else {
+            return Err("only audio cues have loops".into());
+        };
+        let cue = c.id;
+        match self.insts[ix].vamp {
             VampState::Looping => {}
-            VampState::None if !i.started || i.voice.is_none() => {
-                // Still in its pre-wait: it will play straight through.
-                self.insts[ix].vamp = VampState::ReleasedEarly;
-                self.emit(t, EventKind::LoopReleased { cue, in_secs: 0.0 });
-                return Ok(());
+            VampState::Switching {
+                next, auto: true, ..
+            } if !auto => {
+                // Released by its passes, now by hand: earlier.
+                self.actions.push(Action::DiscardVoice { voice: next });
+                self.insts[ix].vamp = VampState::Looping;
             }
             _ => return Err("the loop is already released".into()),
         }
-        if i.voice.is_none() {
+        let Some(lp) = self.insts[ix].lp else {
+            return Err("the cue is not looping".into());
+        };
+        let seg = self.insts[ix].seg;
+        let Some(l) = loops.get(seg).cloned() else {
+            return Err("the cue has no loop left".into());
+        };
+        if self.insts[ix].voice.is_none() {
             return Err("the cue is not playing".into());
         }
-        // Frames at the file's own rate, rounded as the file source does.
-        let rate_u = u64::from(a.file_rate.unwrap_or(self.sr).max(1));
-        let sr_u = u64::from(self.sr.max(1));
+        let pre = self.insts[ix].pre;
+        let pos = self.insts[ix].local_at(t).saturating_sub(pre);
+        let (rate_u, sr_u) = (lp.rate, lp.sr);
         let (rate, sr) = (rate_u as f64, sr_u as f64);
         let src = |secs: f64| (secs.max(0.0) * rate).round() as u64;
-        let s0 = src(a.start);
-        let le = src(v.end);
-        let ls = src(v.start).max(s0);
-        if le <= ls {
+        let end_secs = a.end.or(a.file_duration);
+
+        // Immediate: cross over to the audio after the loop now.
+        if now && l.immediate {
+            if let Some(next) = self.insts[ix].spare.take() {
+                let xfade = self.fr(l.crossfade.max(0.05));
+                let i = &mut self.insts[ix];
+                let old = i.voice.replace(next);
+                i.old_voice = old.map(|v| (v, t + xfade + 1));
+                self.actions.push(Action::StartVoice {
+                    voice: next,
+                    at: t,
+                    fade_in_frames: xfade,
+                    curve: Curve::EqualPower,
+                });
+                if let Some(v) = old {
+                    self.actions.push(Action::StopVoice {
+                        voice: v,
+                        at: t,
+                        fade_frames: xfade,
+                        curve: Curve::EqualPower,
+                        hard: false,
+                    });
+                }
+                let le = src(l.end);
+                let rest = end_secs.map(|e| self.fr(e - l.end));
+                self.next_segment(ix, t, pos, le, rest);
+                self.emit(
+                    t,
+                    EventKind::LoopReleased {
+                        cue,
+                        in_secs: 0.0,
+                        name: l.name.clone(),
+                    },
+                );
+                return Ok(0.0);
+            }
+        }
+
+        // At a loop end. The new voice starts `h_src` source frames before it, at an engine
+        // frame that maps exactly onto a source frame: both rates meet every `q` source =
+        // `p` engine frames (147 / 160 for 44.1 / 48 kHz), so the splice has no sub-sample
+        // offset.
+        let (intro, len) = (lp.intro, lp.len);
+        if len == 0 {
             return Err("the loop is empty".into());
         }
-        let (intro, len) = (le - s0, le - ls);
-        let pos = i.local_at(t).saturating_sub(i.pre);
-        let pre = i.pre;
-        // The new voice starts `h_src` source frames before the loop end, at
-        // an engine frame that maps exactly onto a source frame: both rates
-        // meet every `q` source = `p` engine frames (147 / 160 for 44.1 /
-        // 48 kHz), so the splice has no sub-sample offset.
         let g = gcd(rate_u, sr_u);
         let (q, p) = (rate_u / g, sr_u / g);
         let min_h = (VAMP_XFADE_HALF as f64 * rate / sr).ceil() as u64;
@@ -1140,35 +1432,39 @@ impl Engine {
                 (n as f64 * sr / rate).round() as u64
             }
         };
-        let mut k = 0u64;
+        let mut k = min_k;
         let (start_src, h_src) = loop {
             let n = intro + k * len;
             let mut h = if q <= 8192 { n % q } else { min_h };
             while h < min_h {
                 h += q;
             }
-            if h <= n && to_engine(n - h) >= ready {
+            if h <= n && lp.base + to_engine(n - h) >= ready {
                 break (n - h, h);
             }
             k += 1;
         };
-        let start = to_engine(start_src);
+        let start = lp.base + to_engine(start_src);
         let h_eng = (h_src as f64 * sr / rate).round() as u64;
+        if !auto {
+            // Released for the loop end: the audio kept for an immediate release is not needed.
+            if let Some(v) = self.insts[ix].spare.take() {
+                self.actions.push(Action::DiscardVoice { voice: v });
+            }
+        }
         let next = self.alloc_voice();
-        let mut spec = self
-            .plain_voice_spec(&c, 0)
-            .ok_or("only audio cues have a loop")?;
-        spec.start = v.end;
-        spec.start_frame = Some(le - h_src);
+        let mut spec = self.seg_spec(&a, l.end, seg + 1, 0);
+        spec.start_frame = Some(lp.le - h_src);
         self.actions.push(Action::PrepareVoice {
             voice: next,
             cue,
             spec,
         });
-        let rest = a
-            .end
-            .or(a.file_duration)
-            .map(|end| self.fr(end - v.end) + h_eng);
+        let rest = if seg + 1 < loops.len() {
+            None
+        } else {
+            end_secs.map(|e| self.fr(e - l.end) + h_eng)
+        };
         let at = pre + start;
         let i = &mut self.insts[ix];
         i.vamp = VampState::Switching {
@@ -1176,20 +1472,82 @@ impl Engine {
             next,
             len: rest,
             xfade: 2 * h_eng,
+            h_src,
+            auto,
         };
-        let in_secs = (i.global(at + h_eng) - t) as f64 / sr;
-        self.emit(t, EventKind::LoopReleased { cue, in_secs });
-        Ok(())
+        let in_secs = (i.global(at + h_eng).saturating_sub(t)) as f64 / sr;
+        if !auto {
+            self.emit(
+                t,
+                EventKind::LoopReleased {
+                    cue,
+                    in_secs,
+                    name: l.name,
+                },
+            );
+        }
+        Ok(in_secs)
     }
 
-    /// A loop end of a vamp the timecode follows: the generator jumps back by
+    /// The voice of the next stretch plays from source frame `first` (its first frame is at
+    /// `base`, engine frames after the pre-wait); `from` = the end of the loop just left.
+    /// Sets up its loop (if any) or its length (`rest` frames after `base`).
+    fn next_segment(&mut self, ix: usize, t: u64, base: u64, first: u64, rest: Option<u64>) {
+        let Some((_, a, loops)) = self.inst_loops(ix) else {
+            return;
+        };
+        let rate = self.file_rate(&a);
+        let sr = u64::from(self.sr.max(1));
+        let src = |secs: f64| (secs.max(0.0) * rate as f64).round() as u64;
+        let i = &mut self.insts[ix];
+        i.seg += 1;
+        i.origin = (base, first as f64 / rate as f64);
+        let seg = i.seg;
+        match loops.get(seg) {
+            Some(l) => {
+                let (ls, le) = (src(l.start), src(l.end));
+                i.vamp = VampState::Looping;
+                i.lp = Some(LoopRt {
+                    index: seg,
+                    base,
+                    intro: le.saturating_sub(first),
+                    len: le.saturating_sub(ls),
+                    rate,
+                    sr,
+                    src0: first,
+                    ls,
+                    le,
+                    next: 0,
+                    tc: l.timecode,
+                });
+                i.dur = None;
+                self.enter_loop(ix, t);
+            }
+            None => {
+                i.vamp = VampState::None;
+                i.lp = None;
+                let pre = i.pre;
+                i.dur = rest.map(|r| base + r);
+                let fade = (self.fr(a.fade_out), a.fade_curve);
+                let i = &mut self.insts[ix];
+                if let (Some(d), true) = (i.dur, fade.0 > 0) {
+                    let pos = i.local_at(t).saturating_sub(pre);
+                    i.fade_frames = fade.0.min(d.saturating_sub(pos));
+                    i.fade_curve = fade.1;
+                    i.fade_at = Some(pre + d - i.fade_frames);
+                }
+            }
+        }
+    }
+
+    /// A loop end of a loop the timecode follows: the generator jumps back by
     /// exactly the length of the pass, so it keeps matching the audio.
     fn vamp_wrap(&mut self, ix: usize, t: u64) {
-        let Some(w) = self.insts[ix].wraps else {
+        let Some(w) = self.insts[ix].lp else {
             return;
         };
         let back = w.pass(w.next);
-        if let Some(w) = &mut self.insts[ix].wraps {
+        if let Some(w) = &mut self.insts[ix].lp {
             w.next += 1;
         }
         let old = self.tc;
@@ -1218,24 +1576,31 @@ impl Engine {
         self.tc_jump(pos, new.anchor_frame, true, t);
     }
 
-    /// The switch point of a released vamp: cross over to the rest of the file.
+    /// The switch point of a released loop: cross over to the audio after it.
     fn vamp_switch(&mut self, ix: usize, t: u64) {
         let VampState::Switching {
             at,
             next,
             len,
             xfade,
+            h_src,
+            ..
         } = self.insts[ix].vamp
         else {
             return;
         };
+        let Some(lp) = self.insts[ix].lp else {
+            return;
+        };
         let i = &mut self.insts[ix];
         i.vamp = VampState::None;
+        if let Some(v) = i.spare.take() {
+            self.actions.push(Action::DiscardVoice { voice: v });
+        }
+        let i = &mut self.insts[ix];
         let old = i.voice.replace(next);
         i.old_voice = old.map(|v| (v, t + xfade + 1));
         let pre = i.pre;
-        i.dur = len.map(|l| at - pre + l);
-        let cue = i.cue;
         self.actions.push(Action::StartVoice {
             voice: next,
             at: t,
@@ -1251,16 +1616,7 @@ impl Engine {
                 hard: false,
             });
         }
-        let fade = match self.show.cue(cue).map(|c| &c.kind) {
-            Some(CueKind::Audio(a)) => (self.fr(a.fade_out), a.fade_curve),
-            _ => (0, Curve::Linear),
-        };
-        let i = &mut self.insts[ix];
-        if let (Some(d), true) = (i.dur, fade.0 > 0) {
-            i.fade_frames = fade.0.min(d.saturating_sub(at - pre));
-            i.fade_curve = fade.1;
-            i.fade_at = Some(pre + d - i.fade_frames);
-        }
+        self.next_segment(ix, t, at - pre, lp.le - h_src, len);
     }
 
     fn alloc_voice(&mut self) -> VoiceId {
@@ -1282,12 +1638,15 @@ impl Engine {
                     self.cue_error(id, t, "no audio file assigned".into());
                     return;
                 }
-                let early = self.insts[ix].vamp == VampState::ReleasedEarly;
-                let vamping = !early && a.active_vamp().is_some();
-                let dur = if early {
-                    a.play_through_duration()
-                } else {
+                let loops = a.active_loops();
+                let seg = self.insts[ix].seg.min(loops.len());
+                let looping = seg < loops.len();
+                let dur = if loops.is_empty() {
                     a.duration()
+                } else if looping {
+                    None
+                } else {
+                    a.region()
                 }
                 .map(|d| self.fr(d));
                 if dur.is_some_and(|d| offset >= d) {
@@ -1296,24 +1655,18 @@ impl Engine {
                 }
                 let standby = self.standby.remove(&cue.id);
                 let voice = match standby {
-                    Some((v, off)) if off == offset && !early => v,
+                    Some((v, off)) if off == offset && seg == 0 => v,
                     other => {
                         if let Some((v, _)) = other {
                             self.actions.push(Action::DiscardVoice { voice: v });
                         }
                         let v = self.alloc_voice();
-                        let spec = if early {
-                            self.plain_voice_spec(cue, offset)
-                        } else {
-                            self.voice_spec(cue, offset)
-                        };
-                        if let Some(spec) = spec {
-                            self.actions.push(Action::PrepareVoice {
-                                voice: v,
-                                cue: cue.id,
-                                spec,
-                            });
-                        }
+                        let spec = self.seg_spec(a, a.start.max(0.0), seg, offset);
+                        self.actions.push(Action::PrepareVoice {
+                            voice: v,
+                            cue: cue.id,
+                            spec,
+                        });
                         v
                     }
                 };
@@ -1325,41 +1678,51 @@ impl Engine {
                     fade_in_frames: fade_in,
                     curve: a.fade_curve,
                 });
-                let mut wraps = None;
-                if let (true, Some(v)) = (vamping, a.active_vamp().filter(|v| v.timecode)) {
-                    let rate = u64::from(a.file_rate.unwrap_or(self.sr).max(1));
-                    let src = |secs: f64| (secs.max(0.0) * rate as f64).round() as u64;
-                    let (s0, ls, le) = (src(a.start), src(v.start), src(v.end));
-                    let ls = ls.max(s0);
-                    if le > ls {
-                        let mut w = Wraps {
-                            next: 0,
+                let rate = self.file_rate(a);
+                let src = |secs: f64| (secs.max(0.0) * rate as f64).round() as u64;
+                let s0 = src(a.start);
+                let lp = loops.get(seg).and_then(|l| {
+                    let (ls, le) = (src(l.start).max(s0), src(l.end));
+                    (le > ls).then(|| {
+                        let mut w = LoopRt {
+                            index: seg,
+                            base: 0,
                             intro: le - s0,
                             len: le - ls,
                             rate,
                             sr: u64::from(self.sr.max(1)),
+                            src0: s0,
+                            ls,
+                            le,
+                            next: 0,
+                            tc: l.timecode,
                         };
                         // Started inside the loop (load to time): skip passed ends.
                         while w.end(w.next) <= offset {
                             w.next += 1;
                         }
-                        wraps = Some(w);
-                    }
-                }
+                        w
+                    })
+                });
                 let fade = self.fr(a.fade_out);
                 let i = &mut self.insts[ix];
                 i.voice = Some(voice);
-                i.vamp = if vamping {
+                i.seg = seg;
+                i.origin = (0, a.start.max(0.0));
+                i.vamp = if lp.is_some() {
                     VampState::Looping
                 } else {
                     VampState::None
                 };
-                i.wraps = wraps;
+                i.lp = lp;
                 i.dur = dur;
                 if let (Some(d), true) = (dur, fade > 0) {
                     i.fade_frames = fade.min(d - offset);
                     i.fade_curve = a.fade_curve;
                     i.fade_at = Some(pre + d - i.fade_frames);
+                }
+                if lp.is_some() {
+                    self.enter_loop(ix, t);
                 }
             }
             CueKind::Fade(f) => {
@@ -1458,7 +1821,8 @@ impl Engine {
                     }
                     ControlAction::Reset => self.reset_cue(target, t),
                     ControlAction::ReleaseLoop => {
-                        if let Err(e) = self.release_loop(target, t) {
+                        let name = Some(c.loop_name.trim()).filter(|n| !n.is_empty());
+                        if let Err(e) = self.release_loop(target, name, t) {
                             self.emit(
                                 t,
                                 EventKind::Info {
@@ -1563,7 +1927,7 @@ impl Engine {
         let mut removed = Vec::new();
         self.insts.retain(|i| {
             if fam.contains(&i.id) {
-                removed.push((i.cue, i.voices(t).collect::<Vec<_>>(), i.pending_voice()));
+                removed.push((i.cue, i.voices(t).collect::<Vec<_>>(), i.pending_voices()));
                 false
             } else {
                 true
@@ -1579,7 +1943,7 @@ impl Engine {
                     hard,
                 });
             }
-            if let Some(voice) = pending {
+            for voice in pending {
                 self.actions.push(Action::DiscardVoice { voice });
             }
             self.emit(t, EventKind::CueStopped { cue });
@@ -1787,11 +2151,17 @@ impl Engine {
     /// The I/O layer reports that a voice could not be opened or failed.
     pub fn voice_error(&mut self, voice: VoiceId, message: String) {
         let t = self.now;
-        // The rest of a released vamp could not be opened: keep looping.
+        // The audio kept ready for an immediate release could not be opened: release at
+        // the loop end instead.
+        if let Some(i) = self.insts.iter_mut().find(|i| i.spare == Some(voice)) {
+            i.spare = None;
+            return;
+        }
+        // The audio after a released loop could not be opened: keep looping.
         if let Some(i) = self
             .insts
             .iter_mut()
-            .find(|i| i.pending_voice() == Some(voice))
+            .find(|i| matches!(i.vamp, VampState::Switching { next, .. } if next == voice))
         {
             i.vamp = VampState::Looping;
             self.emit(
@@ -2454,9 +2824,15 @@ impl Engine {
                 }
                 Ok(())
             }
-            Command::ReleaseLoop { cue } => {
+            Command::ReleaseLoop { cue, name } => {
                 self.need_cue(cue)?;
-                self.release_loop(cue, t)
+                self.release_loop(cue, name.as_deref(), t)
+            }
+            Command::ReleaseLoops { name } => {
+                if self.release_loops(name.as_deref(), t, None) == 0 {
+                    return Err("no loop is playing".into());
+                }
+                Ok(())
             }
             Command::PauseCue { cue } => {
                 self.need_cue(cue)?;
@@ -2572,6 +2948,11 @@ impl Engine {
                 return Ok(());
             }
         }
+        // Loops that GO releases go first: GO only lets them go.
+        if self.go_releases(list, t) > 0 {
+            self.last_go = Some(t);
+            return Ok(());
+        }
         let Some(Some(head)) = self.playheads.get(&list).copied() else {
             self.emit(
                 t,
@@ -2621,7 +3002,7 @@ impl Engine {
 
     fn stop_everything(&mut self, t: u64, fade_frames: u64, hard: bool) {
         let cues: Vec<CueId> = self.insts.iter().map(|i| i.cue).collect();
-        let pending: Vec<VoiceId> = self.insts.iter().filter_map(Inst::pending_voice).collect();
+        let pending: Vec<VoiceId> = self.insts.iter().flat_map(Inst::pending_voices).collect();
         for voice in pending {
             self.actions.push(Action::DiscardVoice { voice });
         }
@@ -2671,6 +3052,53 @@ impl Engine {
     // Snapshot
     // ------------------------------------------------------------------
 
+    /// The loop instance `i` plays, for display.
+    fn loop_status(&self, i: &Inst, t: u64) -> Option<LoopStatus> {
+        let lp = i.lp?;
+        let Some(CueKind::Audio(a)) = self.show.cue(i.cue).map(|c| &c.kind) else {
+            return None;
+        };
+        let loops = a.active_loops();
+        let l = loops.get(lp.index)?;
+        let pos = i.local_at(t).saturating_sub(i.pre);
+        let k = lp.next_end(pos);
+        let (remaining, releasing) = match i.vamp {
+            VampState::Switching {
+                at, auto: false, ..
+            } => (at.saturating_sub(i.pre + pos), true),
+            _ => (lp.end(k) - pos, false),
+        };
+        Some(LoopStatus {
+            name: l.name.clone(),
+            index: lp.index,
+            count: loops.len(),
+            pass: k + 1,
+            passes: l.passes,
+            remaining: self.secs(remaining),
+            releasing,
+            release_on_go: l.release_on_go,
+            immediate: l.immediate,
+        })
+    }
+
+    /// File position (seconds) of an audio cue with loops.
+    fn file_pos(&self, i: &Inst, t: u64) -> Option<f64> {
+        if !i.started || i.voice.is_none() {
+            return None;
+        }
+        let Some(CueKind::Audio(a)) = self.show.cue(i.cue).map(|c| &c.kind) else {
+            return None;
+        };
+        if a.active_loops().is_empty() {
+            return None;
+        }
+        let pos = i.local_at(t).saturating_sub(i.pre);
+        Some(match i.lp {
+            Some(lp) => lp.file_pos(pos),
+            None => i.origin.1 + self.secs(pos.saturating_sub(i.origin.0)),
+        })
+    }
+
     pub fn snapshot(&self) -> Snapshot {
         let t = self.now;
         let active = self
@@ -2699,6 +3127,8 @@ impl Engine {
                     duration: duration.map(|d| self.secs(d)),
                     from_tc: i.from_tc,
                     vamping: i.vamp == VampState::Looping,
+                    looping: self.loop_status(i, t),
+                    file_pos: self.file_pos(i, t),
                 }
             })
             .collect();

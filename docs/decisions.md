@@ -288,3 +288,7 @@ revidieren lassen.
 ## Kanäle folgen dem Patch (0.5.4)
 
 - `settings.audio.channels` ist mindestens der höchste gepatchte Kanal + 1 (`Show::fit_audio_channels`, beim Laden und bei jeder Änderung von Show/Patch). Vorher blieb die Zahl beim Gerätewechsel auf 2 stehen und Ausgänge ab Kanal 3 waren stumm.
+
+## Mehrere Loops pro Cue (0.6.0)
+
+- Eine Audio-Cue hat `loops` (Liste, nach Start sortiert, ohne Überlappung) statt eines `vamp`. Die Engine spielt Abschnitte: Eine Stimme läuft vom vorigen Loop-Ende bis zum Ende des aktuellen Loops und wiederholt ihn; ein Release bereitet die nächste Stimme vor und wechselt sample-genau am Loop-Ende (bei „Release at once“ sofort über eine vorab geöffnete Ersatzstimme mit Crossfade). Der Loop-Crossfade passiert in `FileSource` (der Klang nach dem Loop-Ende wird ausgeblendet, der Loop-Anfang eingeblendet), damit sich das Timing der Engine nicht ändert. GO gibt zuerst einen Loop frei, der „GO releases“ hat, und startet erst mit dem nächsten GO die nächste Cue (Standard an, auch für migrierte Shows).

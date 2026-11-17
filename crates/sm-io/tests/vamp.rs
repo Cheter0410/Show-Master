@@ -64,11 +64,11 @@ fn vamp_loops_and_releases_without_a_glitch() {
                 db: 0.0,
             }],
             // 220 whole cycles: the loop itself is seamless.
-            vamp: Some(Vamp {
+            loops: vec![Loop {
                 start: 1.0,
                 end: 1.5,
-                timecode: true,
-            }),
+                ..Loop::default()
+            }],
             ..AudioCue::default()
         }),
         ..Cue::default()
@@ -112,7 +112,12 @@ fn vamp_loops_and_releases_without_a_glitch() {
     while out.len() < go + 3_700 * SR as usize / 1000 {
         step(&mut engine, &mut io, &mut out);
     }
-    engine.command(Command::ReleaseLoop { cue: id }).unwrap();
+    engine
+        .command(Command::ReleaseLoop {
+            cue: id,
+            name: None,
+        })
+        .unwrap();
     // Next loop end far enough ahead: 4.5 s; then 0.5 s of file remain.
     while out.len() < go + 5_300 * SR as usize / 1000 {
         step(&mut engine, &mut io, &mut out);

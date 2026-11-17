@@ -1,6 +1,6 @@
 // Live cue list shared by the desktop dashboard, /remote and /view.
 import { memo, useEffect, useMemo, useRef } from "react";
-import type { ActiveCue, Cue, Show } from "../api";
+import type { ActiveCue, Cue, LoopStatus, Show } from "../api";
 import { activeMap, CONTINUE_GLYPH, cueDuration, cueTarget, findList, flattenCues, TYPE_LABELS } from "../cues";
 import { run } from "../commands";
 import { currentListId, setApp, useApp } from "../store";
@@ -64,11 +64,40 @@ interface RowProps {
   isPlayhead: boolean;
   selected: boolean;
   interactive: boolean;
-  /** shows "Release loop" on a vamping cue */
+  /** shows the release button on a looping cue */
   canRelease: boolean;
   gutterSetsPlayhead: boolean;
   onSelect: (id: number) => void;
   onPlayhead: (id: number) => void;
+}
+
+/** The loop a cue plays: name, pass, time to the loop end and its release button. */
+function LoopTag({ cue, lp, canRelease }: { cue: Cue; lp: LoopStatus; canRelease: boolean }) {
+  const name = lp.name.toUpperCase();
+  const left = `${lp.remaining.toFixed(1)} s`;
+  if (lp.releasing) {
+    return <span className="tag tag-paused num" data-testid="loop-leaving">LEAVING {name} {left}</span>;
+  }
+  const pass = `pass ${lp.pass}${lp.passes ? `/${lp.passes}` : ""} · ${left}`;
+  return (
+    <>
+      <span className="tag tag-loop num" data-testid="loop-info">{name} · {pass}</span>
+      {canRelease ? (
+        <button
+          type="button"
+          className="tag tag-release"
+          data-testid="release-loop"
+          aria-label={`Release ${lp.name} of cue ${cue.number}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            void run({ cmd: "release_loop", cue: cue.id });
+          }}
+        >
+          RELEASE {name}{lp.release_on_go ? " (GO)" : ""}
+        </button>
+      ) : null}
+    </>
+  );
 }
 
 const LiveRow = memo(function LiveRow(p: RowProps) {
@@ -135,24 +164,7 @@ const LiveRow = memo(function LiveRow(p: RowProps) {
       <span className="lrow-tags">
         {!cue.armed ? <span className="tag tag-disarmed">DISARMED</span> : null}
         {st === "paused" ? <span className="tag tag-paused">PAUSED</span> : null}
-        {active?.vamping ? (
-          p.canRelease ? (
-            <button
-              type="button"
-              className="tag tag-release"
-              data-testid="release-loop"
-              aria-label={`Release loop of cue ${cue.number}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                void run({ cmd: "release_loop", cue: cue.id });
-              }}
-            >
-              RELEASE LOOP
-            </button>
-          ) : (
-            <span className="tag tag-paused">LOOP</span>
-          )
-        ) : null}
+        {active?.looping ? <LoopTag cue={cue} lp={active.looping} canRelease={p.canRelease} /> : null}
         {st === "loaded" ? <span className="tag tag-loaded">LOADED {formatDuration(p.loaded ?? 0, false)}</span> : null}
         {cue.tc_trigger ? <span className="tag tag-tc num">TC {cue.tc_trigger}</span> : null}
         {st === "pre_wait" ? <span className="tag tag-wait">PRE-WAIT</span> : null}

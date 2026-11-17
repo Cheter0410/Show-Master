@@ -395,6 +395,40 @@ fn mapping_section(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
                         ui.label(RichText::new("no such cue").color(theme::WARN));
                     }
                 }
+                if m.action == MidiMapAction::ReleaseLoop {
+                    ui.label(RichText::new("Cue no.").color(theme::MUTED));
+                    ui.name_inputs(format!("Mapping {n} cue number"), |ui| {
+                        if let Some(v) = text_field(
+                            ui,
+                            &mut st.drafts,
+                            &format!("map_cue_{i}"),
+                            &m.cue_number,
+                            60.0,
+                        ) {
+                            let v = v.trim().to_string();
+                            new = Some(edit(&|x| x.cue_number = v.clone()));
+                        }
+                    });
+                    ui.label(RichText::new("Loop").color(theme::MUTED));
+                    ui.name_inputs(format!("Mapping {n} loop name"), |ui| {
+                        if let Some(v) = text_field(
+                            ui,
+                            &mut st.drafts,
+                            &format!("map_loop_{i}"),
+                            &m.loop_name,
+                            110.0,
+                        ) {
+                            let v = v.trim().to_string();
+                            new = Some(edit(&|x| x.loop_name = v.clone()));
+                        }
+                    });
+                    ui.label(
+                        RichText::new(
+                            "(empty cue: every loop playing; empty loop: the one playing)",
+                        )
+                        .color(theme::MUTED),
+                    );
+                }
                 let is_learning = learn.is_some_and(|(l, _)| l == i);
                 let learn_text = if is_learning {
                     "Waiting for MIDI... (cancel)"

@@ -137,6 +137,13 @@ export function cueDuration(cue: Cue): number | null {
     const end = k.end ?? k.file_duration;
     if (end == null) return null;
     if (k.loop_count === 0) return null;
+    const loops = k.loops ?? [];
+    if (loops.length) {
+      // a loop without a pass count waits for its release
+      if (loops.some((l) => !l.passes)) return null;
+      const extra = loops.reduce((t, l) => t + Math.max(0, l.passes - 1) * Math.max(0, l.end - l.start), 0);
+      return Math.max(0, end - k.start) + extra;
+    }
     return Math.max(0, end - k.start) * Math.max(1, k.loop_count);
   }
   if (k.type === "fade") return k.duration;

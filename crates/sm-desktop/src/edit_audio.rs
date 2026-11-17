@@ -9,7 +9,7 @@ use crate::model::{Phase, Tick, UiState};
 use crate::{theme, util};
 use egui::{pos2, vec2, Color32, Id, Mesh, Rect, RichText, Sense, Shape, Stroke, Ui};
 use serde_json::{json, Value};
-use sm_core::model::{AudioCue, Crosspoint, Cue, CueKind, Show};
+use sm_core::model::{AudioCue, Crosspoint, Cue, CueKind, Loop, Show};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
@@ -100,11 +100,12 @@ pub enum Marker {
     Start,
     /// Out point (its handle).
     End,
-    /// One edge of the loop (in the loop strip).
-    LoopStart,
-    LoopEnd,
-    /// The whole loop; `grab` = pointer time minus loop start at the press.
+    /// One edge of loop `i` (in the loop strip).
+    LoopStart(usize),
+    LoopEnd(usize),
+    /// The whole loop `i`; `grab` = pointer time minus loop start at the press.
     LoopMove {
+        i: usize,
         grab: f64,
     },
     /// A new loop drawn in the loop strip from `anchor`.
@@ -245,7 +246,7 @@ pub(crate) fn audio_tab(
                 }
             });
             ui.end_row();
-            vamp_rows(ui, edit, out, id, a);
+            loops_rows(ui, edit, out, id, a);
         });
         ui.add_space(24.0);
         grid(("audio_b", id)).show(ui, |ui| {
@@ -372,20 +373,42 @@ fn waveform(
         Some(d) if d.marker == Marker::End => d.time,
         _ => a.end.unwrap_or(duration).min(duration),
     };
-    // The loop as drawn: being dragged, or the cue's.
-    let shown_loop = match drag {
-        Some(d)
-            if matches!(
-                d.marker,
-                Marker::LoopStart
-                    | Marker::LoopEnd
-                    | Marker::LoopMove { .. }
-                    | Marker::LoopNew { .. }
-            ) =>
-        {
-            Some((d.time, d.time2))
+    // The loops as drawn (index into `a.loops`, start, end, name): one may be dragged,
+    // a new one drawn.
+    let mut shown_loops: Vec<(Option<usize>, f64, f64, String)> = a
+        .loops
+        .iter()
+        .enumerate()
+        .map(|(i, l)| (Some(i), l.start, l.end, l.label(i)))
+        .collect();
+    if let Some(d) = drag {
+        match d.marker {
+            Marker::LoopStart(i) | Marker::LoopEnd(i) | Marker::LoopMove { i, .. } => {
+                if let Some(l) = shown_loops.get_mut(i) {
+                    (l.1, l.2) = (d.time, d.time2);
+                }
+            }
+            Marker::LoopNew { .. } => {
+                shown_loops.push((None, d.time, d.time2, new_loop_name(&a.loops)));
+            }
+            _ => {}
         }
-        _ => a.active_vamp().map(|v| (v.start, v.end)),
+    }
+    // Neighbours of a loop (or of a time): the free room around it.
+    let room = |skip: Option<usize>, t: f64| -> (f64, f64) {
+        let mut lo = a.start.max(0.0);
+        let mut hi = a.end.or(a.file_duration).unwrap_or(f64::INFINITY);
+        for (i, l) in a.loops.iter().enumerate() {
+            if Some(i) == skip {
+                continue;
+            }
+            if l.end <= t {
+                lo = lo.max(l.end);
+            } else if l.start >= t {
+                hi = hi.min(l.start);
+            }
+        }
+        (lo, hi)
     };
     // The part of the file shown (zoom): whole file unless zoomed in.
     let (v0, v1) = match edit.insp.wave_view {
@@ -500,55 +523,66 @@ fn waveform(
         let strip =
             Rect::from_x_y_ranges(rect.x_range(), (rect.bottom() - LOOP_STRIP)..=rect.bottom());
         painter.rect_filled(strip, 0.0, Color32::from_black_alpha(70));
-        match shown_loop {
-            Some((ls, le)) => {
-                let (x0, x1) = (x_of(ls), x_of(le));
+        let playing_loop = tick
+            .active(id)
+            .and_then(|t| t.looping.as_ref())
+            .map(|l| l.name.clone());
+        for (i, ls, le, name) in &shown_loops {
+            let (x0, x1) = (x_of(*ls), x_of(*le));
+            let live = playing_loop.as_deref() == Some(name.as_str());
+            let tint = if live { 0.22 } else { 0.12 };
+            painter.rect_filled(
+                Rect::from_x_y_ranges(x0..=x1, rect.top()..=strip.top()),
+                0.0,
+                theme::PAUSED.gamma_multiply(tint),
+            );
+            let band = Rect::from_x_y_ranges(x0..=x1, strip.y_range());
+            painter.rect_filled(
+                band,
+                3.0,
+                theme::PAUSED.gamma_multiply(if live { 1.0 } else { 0.8 }),
+            );
+            for x in [x0, x1] {
+                painter.vline(x, rect.y_range(), Stroke::new(1.0, theme::PAUSED));
+            }
+            // The crossfade: the audio after the loop end that fades out at each jump back.
+            let xf = i.and_then(|i| a.loops.get(i)).map_or(0.0, |l| l.crossfade);
+            if xf > 0.0 {
+                let xe = x_of(le + xf);
                 painter.rect_filled(
-                    Rect::from_x_y_ranges(x0..=x1, rect.top()..=strip.top()),
-                    0.0,
-                    theme::PAUSED.gamma_multiply(0.12),
-                );
-                let band = Rect::from_x_y_ranges(x0..=x1, strip.y_range());
-                painter.rect_filled(band, 3.0, theme::PAUSED.gamma_multiply(0.8));
-                for x in [x0, x1] {
-                    painter.vline(x, rect.y_range(), Stroke::new(1.0, theme::PAUSED));
-                }
-                if band.width() > 34.0 {
-                    painter.text(
-                        band.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "LOOP",
-                        egui::FontId::proportional(10.0),
-                        Color32::BLACK,
-                    );
-                }
-            }
-            None => {
-                painter.text(
-                    strip.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "drag here to loop a part",
-                    egui::FontId::proportional(10.0),
-                    Color32::from_gray(110),
+                    Rect::from_x_y_ranges(
+                        x1..=xe.max(x1),
+                        (strip.top() + 5.0)..=(strip.bottom() - 5.0),
+                    ),
+                    2.0,
+                    theme::PAUSED.gamma_multiply(0.35),
                 );
             }
+            let galley = painter.layout_no_wrap(
+                name.to_uppercase(),
+                egui::FontId::proportional(10.0),
+                Color32::BLACK,
+            );
+            if band.width() > galley.size().x + 8.0 {
+                painter.galley(band.center() - galley.size() / 2.0, galley, Color32::BLACK);
+            }
+        }
+        if shown_loops.is_empty() {
+            painter.text(
+                strip.center(),
+                egui::Align2::CENTER_CENTER,
+                "drag here to loop a part",
+                egui::FontId::proportional(10.0),
+                Color32::from_gray(110),
+            );
         }
         // play cursor
         if let Some(act) = tick.active(id).filter(|t| t.phase == Phase::Running) {
             let len = end - start;
-            let pos = match a.active_vamp() {
-                Some(v) if act.vamping => {
-                    let intro = v.end - start;
-                    let l = v.end - v.start;
-                    Some(if act.elapsed < intro {
-                        start + act.elapsed
-                    } else {
-                        v.start + (act.elapsed - intro) % l
-                    })
-                }
-                // Released: the position is not known here.
-                Some(_) => None,
-                None => (len > 0.0).then(|| start + act.elapsed % len),
+            let pos = match act.file_pos {
+                Some(p) => Some(p),
+                None if a.loops.is_empty() => (len > 0.0).then(|| start + act.elapsed % len),
+                None => None,
             };
             if let Some(pos) = pos {
                 painter.vline(x_of(pos), rect.y_range(), Stroke::new(1.5, Color32::WHITE));
@@ -591,15 +625,16 @@ fn waveform(
         let grab = |p: egui::Pos2| -> (Marker, f64, f64) {
             let t = time_at(p.x);
             if in_strip(p.y) {
-                if let Some((ls, le)) = shown_loop {
+                for (i, l) in a.loops.iter().enumerate() {
+                    let (ls, le) = (l.start, l.end);
                     if near(p.x, ls) && (!near(p.x, le) || t <= (ls + le) / 2.0) {
-                        return (Marker::LoopStart, ls, le);
+                        return (Marker::LoopStart(i), ls, le);
                     }
                     if near(p.x, le) {
-                        return (Marker::LoopEnd, ls, le);
+                        return (Marker::LoopEnd(i), ls, le);
                     }
                     if t > ls && t < le {
-                        return (Marker::LoopMove { grab: t - ls }, ls, le);
+                        return (Marker::LoopMove { i, grab: t - ls }, ls, le);
                     }
                 }
                 return (Marker::LoopNew { anchor: t }, t, t);
@@ -657,17 +692,27 @@ fn waveform(
                 Marker::Start => d.time = t.min(end - min_len).max(0.0),
                 Marker::End => d.time = t.max(start + min_len).min(duration),
                 Marker::Seek => d.time = t,
-                Marker::LoopStart => d.time = t.clamp(start, d.time2 - min_loop),
-                Marker::LoopEnd => d.time2 = t.clamp(d.time + min_loop, end),
-                Marker::LoopMove { grab } => {
+                Marker::LoopStart(i) => {
+                    let (lo, _) = room(Some(i), d.time2);
+                    d.time = t.clamp(lo.max(start), d.time2 - min_loop);
+                }
+                Marker::LoopEnd(i) => {
+                    let (_, hi) = room(Some(i), d.time);
+                    d.time2 = t.clamp(d.time + min_loop, hi.min(end));
+                }
+                Marker::LoopMove { i, grab } => {
                     let len = d.time2 - d.time;
-                    let s = (t - grab).clamp(start, (end - len).max(start));
+                    let (lo, hi) = room(Some(i), (d.time + d.time2) / 2.0);
+                    let (lo, hi) = (lo.max(start), hi.min(end));
+                    let s = (t - grab).clamp(lo, (hi - len).max(lo));
                     d.time = s;
                     d.time2 = s + len;
                 }
                 Marker::LoopNew { anchor } => {
-                    let a = anchor.clamp(start, end);
-                    let b = t.clamp(start, end);
+                    let (lo, hi) = room(None, anchor);
+                    let (lo, hi) = (lo.max(start), hi.min(end));
+                    let a = anchor.clamp(lo, hi);
+                    let b = t.clamp(lo, hi);
                     d.time = a.min(b);
                     d.time2 = a.max(b);
                 }
@@ -681,19 +726,32 @@ fn waveform(
                         Some(json!({ "end": Value::Null }))
                     }
                     Marker::End => Some(json!({ "end": r2(d.time) })),
-                    Marker::LoopStart
-                    | Marker::LoopEnd
-                    | Marker::LoopMove { .. }
-                    | Marker::LoopNew { .. } => {
+                    Marker::LoopStart(i) | Marker::LoopEnd(i) | Marker::LoopMove { i, .. } => {
+                        let mut loops = a.loops.clone();
+                        if let Some(l) = loops.get_mut(i) {
+                            l.start = r2(d.time);
+                            l.end = r2(d.time2);
+                        }
+                        Some(loops_patch(loops))
+                    }
+                    Marker::LoopNew { .. } => {
                         // A click in the strip (or a tiny drag) makes no loop.
-                        (d.time2 - d.time >= min_loop)
-                            .then(|| json!({ "vamp": { "start": r2(d.time), "end": r2(d.time2) } }))
+                        (d.time2 - d.time >= min_loop).then(|| {
+                            let mut loops = a.loops.clone();
+                            loops.push(Loop {
+                                name: new_loop_name(&a.loops),
+                                start: r2(d.time),
+                                end: r2(d.time2),
+                                ..Loop::default()
+                            });
+                            loops_patch(loops)
+                        })
                     }
                     Marker::Seek => {
                         // The playhead: a playing cue jumps there, a stopped
                         // one is loaded there (GO / preview start there).
-                        let at = match a.active_vamp() {
-                            // Past the loop the cue only gets after a release.
+                        let at = match a.active_loops().first() {
+                            // Past the first loop the cue only gets after a release.
                             Some(v) => d.time.clamp(start, v.end - min_len),
                             None => d.time.clamp(start, end),
                         };
@@ -717,10 +775,30 @@ fn waveform(
         {
             edit.insp.wave_drag = None;
         }
-        // Right-click: remove the loop, play from the start.
+        // Right-click: remove the loop under the pointer (or all), play from the start.
+        let hovered_loop = resp
+            .hover_pos()
+            .or(ui.input(|i| i.pointer.latest_pos()))
+            .map(|p| time_at(p.x))
+            .and_then(|t| a.loops.iter().position(|l| t >= l.start && t <= l.end));
+        if let Some(i) = hovered_loop {
+            ui.data_mut(|d| d.insert_temp(Id::unique(("loop_menu", id)), i));
+        }
         resp.context_menu(|ui| {
-            if a.vamp.is_some() && ui.button("Remove loop").clicked() {
-                out.push(Out::Cmd(kind_patch(id, json!({ "vamp": Value::Null }))));
+            let i: Option<usize> = ui.data(|d| d.get_temp(Id::unique(("loop_menu", id))));
+            if let Some(i) = i.filter(|i| *i < a.loops.len()) {
+                if ui
+                    .button(format!("Remove \"{}\"", a.loops[i].label(i)))
+                    .clicked()
+                {
+                    let mut loops = a.loops.clone();
+                    loops.remove(i);
+                    out.push(Out::Cmd(kind_patch(id, loops_patch(loops))));
+                    ui.close();
+                }
+            }
+            if !a.loops.is_empty() && ui.button("Remove all loops").clicked() {
+                out.push(Out::Cmd(kind_patch(id, json!({ "loops": [] }))));
                 ui.close();
             }
             if ui.button("Play from the start").clicked() {
@@ -754,17 +832,12 @@ fn waveform(
                 .active(id)
                 .filter(|t| t.phase == Phase::Running && !t.paused)
             {
-                let pos = match a.active_vamp() {
-                    Some(v) if act.vamping => {
-                        let intro = v.end - start;
-                        Some(if act.elapsed < intro {
-                            start + act.elapsed
-                        } else {
-                            v.start + (act.elapsed - intro) % (v.end - v.start)
-                        })
+                let pos = match act.file_pos {
+                    Some(p) => Some(p),
+                    None if a.loops.is_empty() => {
+                        Some(start + act.elapsed % (end - start).max(1e-9))
                     }
-                    Some(_) => None,
-                    None => Some(start + act.elapsed % (end - start).max(1e-9)),
+                    None => None,
                 };
                 if let Some(pos) = pos.filter(|p| *p < v0 || *p > v1) {
                     wanted = (pos - span * 0.1, pos + span * 0.9);
@@ -1097,74 +1170,211 @@ pub(crate) fn routing_tab(ui: &mut Ui, show: &Show, cue: &Cue, out: &mut Vec<Out
 }
 
 /// "Loop a part" (vamp): the part loops until it is released in the show.
-fn vamp_rows(ui: &mut Ui, edit: &mut EditState, out: &mut Vec<Out>, id: u64, a: &AudioCue) {
-    label(ui, "Vamp");
-    let mut on = a.vamp.is_some();
-    if ui
-        .checkbox(&mut on, "Loop a part")
-        .accessible_name("Loop a part (vamp)")
-        .on_hover_text(
-            "The part loops until it is released (Release loop in Live, a Control cue \
-             \"Release loop\", or OSC /showmaster/cue/<n>/release); then the cue plays \
-             on to the end. Shown in orange on the waveform: drag in the strip along its \
-             bottom to draw, move or resize the loop.",
-        )
-        .changed()
-    {
-        let v = if on {
-            let start = a.start.max(0.0);
-            let end = a.end.or(a.file_duration).unwrap_or(start + 6.0);
-            let third = ((end - start) / 3.0).max(0.01);
+/// The `loops` of an audio cue as a patch (in file order).
+fn loops_patch(mut loops: Vec<Loop>) -> Value {
+    loops.sort_by(|a, b| a.start.total_cmp(&b.start));
+    json!({ "loops": loops })
+}
+
+/// "Loop n" with the first n not taken.
+fn new_loop_name(loops: &[Loop]) -> String {
+    (1..)
+        .map(|n| format!("Loop {n}"))
+        .find(|n| {
+            !loops
+                .iter()
+                .enumerate()
+                .any(|(i, l)| l.label(i).eq_ignore_ascii_case(n))
+        })
+        .unwrap_or_default()
+}
+
+fn loops_rows(ui: &mut Ui, edit: &mut EditState, out: &mut Vec<Out>, id: u64, a: &AudioCue) {
+    label(ui, "Vamps");
+    ui.horizontal(|ui| {
+        if ui
+            .button("Add loop")
+            .accessible_name("Add loop")
+            .on_hover_text(
+                "A part that loops until it is released: GO (if set), Release loop in Live, a \
+                 hotkey, a Control cue, MIDI or OSC - or after a number of passes. Then the cue \
+                 plays on to its next loop or the end. Shown in orange on the waveform: drag in \
+                 the strip along its bottom to draw, move or resize a loop.",
+            )
+            .clicked()
+        {
+            let region_start = a.start.max(0.0);
+            let region_end = a.end.or(a.file_duration).unwrap_or(region_start + 6.0);
+            let from = a.loops.iter().map(|l| l.end).fold(region_start, f64::max);
+            let len = ((region_end - from) / 3.0).max(0.01);
             let r = |x: f64| (x * 100.0).round() / 100.0;
-            json!({ "start": r(start + third), "end": r(start + 2.0 * third) })
-        } else {
-            Value::Null
+            let mut loops = a.loops.clone();
+            loops.push(Loop {
+                name: new_loop_name(&a.loops),
+                start: r(from + len),
+                end: r(from + 2.0 * len),
+                ..Loop::default()
+            });
+            out.push(Out::Cmd(kind_patch(id, loops_patch(loops))));
+        }
+        if a.loops.is_empty() {
+            ui.label(RichText::new("none").color(theme::MUTED));
+        }
+    });
+    ui.end_row();
+    let active = a.active_loops();
+    for (i, l) in a.loops.iter().enumerate() {
+        let with = {
+            let loops = a.loops.clone();
+            move |f: &dyn Fn(&mut Loop)| {
+                let mut loops = loops.clone();
+                if let Some(l) = loops.get_mut(i) {
+                    f(l);
+                }
+                kind_patch(id, loops_patch(loops))
+            }
         };
-        out.push(Out::Cmd(kind_patch(id, json!({ "vamp": v }))));
-    }
-    ui.end_row();
-    let Some(v) = a.vamp else { return };
-    label(ui, "Loop from");
-    time_field(
-        ui,
-        edit,
-        out,
-        ("vamp_start", id),
-        "Loop start time",
-        v.start,
-        move |x| kind_patch(id, json!({ "vamp": { "start": x, "end": v.end } })),
-    );
-    ui.end_row();
-    label(ui, "Loop to");
-    time_field(
-        ui,
-        edit,
-        out,
-        ("vamp_end", id),
-        "Loop end time",
-        v.end,
-        move |x| kind_patch(id, json!({ "vamp": { "start": v.start, "end": x } })),
-    );
-    ui.end_row();
-    label(ui, "");
-    let mut tc = v.timecode;
-    if ui
-        .checkbox(&mut tc, "Timecode loops too")
-        .on_hover_text(
-            "While the part loops, a running timecode jumps back with it, so it keeps \
-             matching the audio (timecode triggers in the loop fire again each pass).",
-        )
-        .changed()
-    {
-        out.push(Out::Cmd(kind_patch(
-            id,
-            json!({ "vamp": { "timecode": tc } }),
-        )));
-    }
-    ui.end_row();
-    if a.active_vamp().is_none() {
-        label(ui, "");
-        ui.label(RichText::new("The loop lies outside the cue's start / end.").color(theme::WARN));
+        let name = l.label(i);
+        label(ui, &format!("{}.", i + 1));
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                let w = with.clone();
+                fields::field(
+                    ui,
+                    &mut edit.drafts,
+                    Id::unique(("loop_name", id, i)),
+                    &l.name,
+                    Opts::new(&format!("Loop {} name", i + 1), 120.0).hint(&name),
+                    out,
+                    move |t| {
+                        let t = t.trim().to_string();
+                        Ok(Some(w(&|l: &mut Loop| l.name = t.clone())))
+                    },
+                );
+                ui.label(RichText::new("from").color(theme::MUTED));
+                let w = with.clone();
+                time_field(
+                    ui,
+                    edit,
+                    out,
+                    ("loop_start", id, i),
+                    &format!("Loop {} start", i + 1),
+                    l.start,
+                    move |x| w(&|l: &mut Loop| l.start = x),
+                );
+                ui.label(RichText::new("to").color(theme::MUTED));
+                let w = with.clone();
+                time_field(
+                    ui,
+                    edit,
+                    out,
+                    ("loop_end", id, i),
+                    &format!("Loop {} end", i + 1),
+                    l.end,
+                    move |x| w(&|l: &mut Loop| l.end = x),
+                );
+                if ui
+                    .small_button("Remove")
+                    .accessible_name(format!("Remove loop {}", i + 1))
+                    .clicked()
+                {
+                    let mut loops = a.loops.clone();
+                    loops.remove(i);
+                    out.push(Out::Cmd(kind_patch(id, loops_patch(loops))));
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Crossfade").color(theme::MUTED));
+                let w = with.clone();
+                time_field(
+                    ui,
+                    edit,
+                    out,
+                    ("loop_xfade", id, i),
+                    &format!("Loop {} crossfade", i + 1),
+                    l.crossfade,
+                    move |x| w(&|l: &mut Loop| l.crossfade = x.clamp(0.0, 10.0)),
+                )
+                .on_hover_text(
+                    "At each jump back the audio after the loop end fades out while the loop \
+                     start fades in, so the jump is not heard. 0 = hard jump.",
+                );
+                ui.label(RichText::new("Passes").color(theme::MUTED));
+                let w = with.clone();
+                fields::field(
+                    ui,
+                    &mut edit.drafts,
+                    Id::unique(("loop_passes", id, i)),
+                    &if l.passes == 0 {
+                        String::new()
+                    } else {
+                        l.passes.to_string()
+                    },
+                    Opts::new(&format!("Loop {} passes", i + 1), 44.0)
+                        .mono()
+                        .hint("∞"),
+                    out,
+                    move |t| {
+                        let n: u32 = match t.trim() {
+                            "" | "0" | "∞" => 0,
+                            t => t
+                                .parse()
+                                .ok()
+                                .filter(|n| (1..=9999).contains(n))
+                                .ok_or("Passes must be 1 to 9999 (empty: until released)")?,
+                        };
+                        Ok(Some(w(&|l: &mut Loop| l.passes = n)))
+                    },
+                )
+                .on_hover_text("Passes before the loop releases itself; empty = until released");
+            });
+            ui.horizontal_wrapped(|ui| {
+                let mut go = l.release_on_go;
+                if ui
+                    .checkbox(&mut go, "GO releases")
+                    .accessible_name(format!("Loop {} GO releases", i + 1))
+                    .on_hover_text(
+                        "While this loop plays, GO releases it (and starts nothing else); the \
+                         next GO starts the next cue.",
+                    )
+                    .changed()
+                {
+                    out.push(Out::Cmd(with(&|l: &mut Loop| l.release_on_go = go)));
+                }
+                let mut now = l.immediate;
+                if ui
+                    .checkbox(&mut now, "Release at once")
+                    .accessible_name(format!("Loop {} release at once", i + 1))
+                    .on_hover_text(
+                        "A release leaves the loop right away with a crossfade to the audio after \
+                         it, instead of at the end of the pass.",
+                    )
+                    .changed()
+                {
+                    out.push(Out::Cmd(with(&|l: &mut Loop| l.immediate = now)));
+                }
+                let mut tc = l.timecode;
+                if ui
+                    .checkbox(&mut tc, "Timecode loops too")
+                    .accessible_name(format!("Loop {} timecode loops too", i + 1))
+                    .on_hover_text(
+                        "While the part loops, a running timecode jumps back with it, so it keeps \
+                         matching the audio (timecode triggers in the loop fire again each pass).",
+                    )
+                    .changed()
+                {
+                    out.push(Out::Cmd(with(&|l: &mut Loop| l.timecode = tc)));
+                }
+            });
+            if !active.iter().any(|x| x.name == name) {
+                ui.label(
+                    RichText::new(
+                        "Not played: outside the cue's start / end or inside another loop.",
+                    )
+                    .color(theme::WARN),
+                );
+            }
+        });
         ui.end_row();
     }
 }

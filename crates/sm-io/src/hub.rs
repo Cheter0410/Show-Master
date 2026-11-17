@@ -663,6 +663,7 @@ fn open_source(job: &OpenJob) -> Opened {
     opts.end_seconds = spec.end;
     opts.loop_count = spec.loop_count;
     opts.loop_start_seconds = spec.loop_from;
+    opts.loop_xfade_seconds = spec.loop_xfade;
     if spec.loop_from.is_some() {
         // Vamp: the source maps an offset past the intro into the loop.
         opts.offset_seconds = spec.offset_frames as f64 / f64::from(sr.max(1));

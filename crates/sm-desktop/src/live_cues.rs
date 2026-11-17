@@ -623,14 +623,49 @@ fn draw_row(
         dim(muted),
     );
     let mut tags_r = type_r - type_w - 6.0;
-    // A vamping cue: a button that releases the loop.
+    // A cue in a loop: a button that releases it (with the loop's name, pass and the time
+    // to the loop end); once released, how long until it leaves the loop.
     let mut release = false;
-    if active.is_some_and(|a| a.vamping) {
-        let g = p.layout_no_wrap(
-            "RELEASE LOOP".to_string(),
-            FontId::proportional(13.0),
+    let lp = active.and_then(|a| a.looping.as_ref());
+    if let Some(l) = lp.filter(|l| l.releasing) {
+        let w = tag(
+            &p,
+            tags_r,
+            cy,
+            &format!("LEAVING {} {:.1} s", l.name.to_uppercase(), l.remaining),
             Color32::BLACK,
+            theme::PAUSED.gamma_multiply(0.7),
         );
+        tags_r -= w + 6.0;
+    }
+    if let Some(l) = lp.filter(|l| !l.releasing) {
+        let pass = if l.passes > 0 {
+            format!("{}/{}", l.pass, l.passes)
+        } else {
+            format!("{}", l.pass)
+        };
+        let info = p.layout_no_wrap(
+            format!("pass {pass} · {:.1} s", l.remaining),
+            FontId::monospace(12.0),
+            muted,
+        );
+        let iw = info.size().x;
+        p.galley(
+            Pos2::new(tags_r - iw, cy - info.size().y / 2.0),
+            info,
+            muted,
+        );
+        tags_r -= iw + 8.0;
+    }
+    if active.is_some_and(|a| {
+        a.looping.as_ref().is_some_and(|l| !l.releasing) || (a.vamping && a.looping.is_none())
+    }) {
+        let text = match lp {
+            Some(l) if l.release_on_go => format!("RELEASE {} (GO)", l.name.to_uppercase()),
+            Some(l) => format!("RELEASE {}", l.name.to_uppercase()),
+            None => "RELEASE LOOP".to_string(),
+        };
+        let g = p.layout_no_wrap(text, FontId::proportional(13.0), Color32::BLACK);
         let size = g.size() + Vec2::new(18.0, 12.0);
         let r = Rect::from_min_size(Pos2::new(tags_r - size.x, cy - size.y / 2.0), size);
         let b = ui

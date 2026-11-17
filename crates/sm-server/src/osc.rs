@@ -72,6 +72,10 @@ pub fn short_command(
         ["pause"] => json!({ "cmd": "pause_all" }),
         ["resume"] => json!({ "cmd": "resume_all" }),
         ["toggle_pause"] => json!({ "cmd": "toggle_pause" }),
+        ["release"] => match first.and_then(Value::as_str) {
+            Some(name) => json!({ "cmd": "release_loops", "name": name }),
+            None => json!({ "cmd": "release_loops" }),
+        },
         ["reset"] => json!({ "cmd": "reset" }),
         ["next"] => json!({ "cmd": "next" }),
         ["previous"] => json!({ "cmd": "previous" }),
@@ -82,7 +86,10 @@ pub fn short_command(
             match *action {
                 "start" | "go" => json!({ "cmd": "start_cue", "cue": cue }),
                 "stop" => json!({ "cmd": "stop_cue", "cue": cue }),
-                "release" | "devamp" => json!({ "cmd": "release_loop", "cue": cue }),
+                "release" | "devamp" => match first.and_then(Value::as_str) {
+                    Some(name) => json!({ "cmd": "release_loop", "cue": cue, "name": name }),
+                    None => json!({ "cmd": "release_loop", "cue": cue }),
+                },
                 "pause" => json!({ "cmd": "pause_cue", "cue": cue }),
                 "resume" => json!({ "cmd": "resume_cue", "cue": cue }),
                 "load" => json!({
@@ -234,6 +241,15 @@ mod tests {
         let ids = |n: &str| cue_by_number(&state, n);
         let c = |a: &str, args: &[Value]| short_command(a, args, &ids);
         assert_eq!(c("/go", &[]), Some(json!({ "cmd": "go" })));
+        assert_eq!(c("/release", &[]), Some(json!({ "cmd": "release_loops" })));
+        assert_eq!(
+            c("/release", &[json!("Chorus")]),
+            Some(json!({ "cmd": "release_loops", "name": "Chorus" }))
+        );
+        assert_eq!(
+            c("/cue/12/release", &[json!("Intro")]),
+            Some(json!({ "cmd": "release_loop", "cue": 7, "name": "Intro" }))
+        );
         assert_eq!(c("/stop", &[]), Some(json!({ "cmd": "stop_all" })));
         assert_eq!(
             c("/cue/12/start", &[]),

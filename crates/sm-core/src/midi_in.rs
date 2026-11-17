@@ -371,6 +371,13 @@ pub fn mapping_commands(show: &Show, m: &MidiMapping) -> Result<Vec<Command>, St
         MidiMapAction::StartCue => Command::StartCue {
             cue: cue(m.cue_number.trim())?,
         },
+        MidiMapAction::ReleaseLoop => {
+            let name = Some(m.loop_name.trim().to_string()).filter(|n| !n.is_empty());
+            match m.cue_number.trim() {
+                "" => Command::ReleaseLoops { name },
+                n => Command::ReleaseLoop { cue: cue(n)?, name },
+            }
+        }
     }])
 }
 
@@ -388,6 +395,7 @@ pub fn action_label(a: MidiMapAction) -> &'static str {
         MidiMapAction::Reset => "Reset",
         MidiMapAction::GotoNumber => "Go to cue (playhead)",
         MidiMapAction::StartCue => "Start cue",
+        MidiMapAction::ReleaseLoop => "Release loop",
     }
 }
 
@@ -689,6 +697,23 @@ mod tests {
             ..MidiMapping::default()
         };
         assert!(mapping_commands(&s, &bad).is_err());
+        let all = MidiMapping {
+            action: MidiMapAction::ReleaseLoop,
+            loop_name: " Chorus ".into(),
+            ..MidiMapping::default()
+        };
+        assert_eq!(
+            mapping_commands(&s, &all).unwrap(),
+            vec![Command::ReleaseLoops {
+                name: Some("Chorus".into())
+            }]
+        );
+        let none = MidiMapping {
+            action: MidiMapAction::ReleaseLoop,
+            cue_number: "nope".into(),
+            ..MidiMapping::default()
+        };
+        assert!(mapping_commands(&s, &none).is_err());
     }
 
     #[test]

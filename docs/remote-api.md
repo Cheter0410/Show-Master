@@ -148,7 +148,12 @@ mDNS/Bonjour fields (optional comfort, see `decisions.md`):
           "source": "generator"|"mtc"|"ltc",
           "status": "generator"|"no_signal"|"locking"|"locked"|"freewheel"|"lost"|"stopped"|"held" },
   "active": [ { "cue": 5, "list": 1, "phase": "pre_wait"|"running"|"post_wait", "paused": false,
-                "elapsed": 1.2, "duration": 30.0 | null, "from_tc": false } ],
+                "elapsed": 1.2, "duration": 30.0 | null, "from_tc": false,
+                "vamping": true /* omitted when false: a loop plays, not released */,
+                "looping": { "name": "Chorus", "index": 0, "count": 2, "pass": 3, "passes": 0 /* 0 = until released */,
+                             "remaining": 1.4 /* s to the end of this pass */, "releasing": false,
+                             "release_on_go": true, "immediate": false } /* omitted without a loop */,
+                "file_pos": 12.3 /* s into the file, audio cues with loops */ } ],
   "next_auto": 3.2 | null,                 // seconds until the next automatically fired cue
   "meters": { "peak": [0.5, 0.4], "rms": [0.2, 0.2], "clip": [false, false] },  // linear, per device channel
   "cpu": 0.03, "underruns": 0, "voices": 2,
@@ -201,7 +206,9 @@ Cue:
             "start": 0.0, "end": null, "gain_db": 0.0, "fade_in": 0.0, "fade_out": 0.0,
             "fade_curve": "smooth"|"linear"|"equal_power"|"s_curve", "loop_count": 1 /* 0 = infinite */,
             "routing": [ { "src": 0, "out": 0, "db": 0.0 } ] /* empty = default routing */,
-            "file_rate": 44100 /* cached */, "vamp": { "start": 4.0, "end": 6.0, "timecode": true } /* optional: loops until released; timecode: a running generator jumps back with every loop */ }
+            "file_rate": 44100 /* cached */, "loops": [ { "name": "Chorus", "start": 4.0, "end": 6.0, "crossfade": 0.2 /* s, 0 = jump */,
+              "release_on_go": true, "passes": 0 /* 0 = until released */, "immediate": false /* leave at once */,
+              "timecode": true /* a running generator jumps back with every loop */ } ] /* optional, in order, no overlap */ }
   // { "type": "fade", "target": 5, "duration": 3.0, "curve": "equal_power", "gain_db": -120.0|null, "crosspoints": [], "stop_target": true }
   // { "type": "midi", "port": "Desk", "message": { "msg": "note_on", "channel": 1, "note": 60, "velocity": 100 } }
   //      msg: note_on | note_off | control_change{channel,controller,value} | program_change{channel,program}
@@ -212,7 +219,8 @@ Cue:
   // { "type": "http", "method": "GET"|"POST"|"PUT"|"PATCH"|"DELETE", "url": "http://10.0.0.5/api/x", "body": "", "content_type": "application/json" }
   //      plain HTTP/1.1 (no https), sent from a worker thread; failures are logged
   // { "type": "timecode", "tc": { "action": "start" | "stop" | "pause" | "resume" } | { "action": "start_from", "from": "…" } | { "action": "relocate", "to": "…" } }
-  // { "type": "control", "action": "start"|"stop"|"pause"|"resume"|"load_to_time"|"arm"|"disarm"|"go_to"|"release_loop"|"reset", "target": 5, "time": 0.0 }
+  // { "type": "control", "action": "start"|"stop"|"pause"|"resume"|"load_to_time"|"arm"|"disarm"|"go_to"|"release_loop"|"reset", "target": 5, "time": 0.0,
+  //   "loop_name": "Chorus" /* release_loop only: that loop (empty = the one playing) */ }
   // { "type": "group", "mode": "parallel"|"playlist"|"random"|"list", "children": [ /* Cue */ ] }
   //      list: nothing fires by itself; the playhead steps through its cues, one GO each
   // { "type": "memo" }
@@ -271,7 +279,8 @@ Every command is `{ "cmd": "<name>", …fields }`.
 | `goto_number` | `number` | "Go to cue 14" – moves the playhead |
 | `start_cue`, `stop_cue`, `pause_cue`, `resume_cue`, `reset_cue` | `cue` | single cue; `start_cue` = preview, does not move the playhead |
 | `seek_cue` | `cue`, `time` | playhead of one cue: a playing cue continues from `time` s into its action, a stopped one is loaded there |
-| `release_loop` | `cue` | release a vamping audio cue: it leaves its loop at the next loop end (at least 0.5 s ahead, sample-exact crossover) and plays on; `tick.active[].vamping` is true until then |
+| `release_loop` | `cue`, `name?` | release the loop an audio cue plays (or, with `name`, that loop – also ahead of time, so it is skipped): it leaves at the next loop end (at least 0.5 s ahead, sample-exact), or at once with a crossfade for an `immediate` loop, and plays on to its next loop; `tick.active[].looping` shows it |
+| `release_loops` | `name?` | the same for every playing cue (with `name`: only loops of that name) |
 | `load_cue` | `cue`, `time` | load to time (s) |
 | `arm_cue` | `cue`, `armed` | |
 | `reset` | | stop all, playhead to top, clear loads/errors, show clock reset |
@@ -329,5 +338,6 @@ network with the same names as the transport commands, e.g. `/showmaster/go`, `/
 
 Short addresses (QLab-style, cue *numbers* instead of ids): `/go`, `/stop` (stop all), `/panic`, `/pause`,
 `/resume`, `/toggle_pause`, `/reset`, `/next`, `/previous`, `/master -6.0`, `/playhead/12`,
-`/cue/12/start|stop|pause|resume|arm|disarm|release`, `/cue/12/load 4.5` (seconds), `/tc/start|stop|pause|resume`,
+`/cue/12/start|stop|pause|resume|arm|disarm|release`, `/cue/12/release "Chorus"`, `/release ["Chorus"]` (every playing loop
+or the named one), `/cue/12/load 4.5` (seconds), `/tc/start|stop|pause|resume`,
 `/tc/locate "01:00:10:00"`. Unknown addresses and numbers are ignored.

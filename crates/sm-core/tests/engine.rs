@@ -355,41 +355,49 @@ fn control_cues() {
         action: ControlAction::Start,
         target: Some(a),
         time: 0.0,
+        ..ControlCue::default()
     }));
     let pause = b.cue(CueKind::Control(ControlCue {
         action: ControlAction::Pause,
         target: Some(a),
         time: 0.0,
+        ..ControlCue::default()
     }));
     let resume = b.cue(CueKind::Control(ControlCue {
         action: ControlAction::Resume,
         target: Some(a),
         time: 0.0,
+        ..ControlCue::default()
     }));
     let disarm = b.cue(CueKind::Control(ControlCue {
         action: ControlAction::Disarm,
         target: Some(m),
         time: 0.0,
+        ..ControlCue::default()
     }));
     let goto = b.cue(CueKind::Control(ControlCue {
         action: ControlAction::GoTo,
         target: Some(m),
         time: 0.0,
+        ..ControlCue::default()
     }));
     let stop = b.cue(CueKind::Control(ControlCue {
         action: ControlAction::Stop,
         target: Some(a),
         time: 1.5,
+        ..ControlCue::default()
     }));
     let load = b.cue(CueKind::Control(ControlCue {
         action: ControlAction::LoadToTime,
         target: Some(a),
         time: 30.0,
+        ..ControlCue::default()
     }));
     let broken = b.cue(CueKind::Control(ControlCue {
         action: ControlAction::Start,
         target: None,
         time: 0.0,
+        ..ControlCue::default()
     }));
     let mut e = b.engine();
     let fire = |e: &mut Engine, c| e.command(Command::StartCue { cue: c }).unwrap();
@@ -945,11 +953,11 @@ fn vamp_cue(rate: Option<u32>) -> CueKind {
         file_duration: Some(20.0),
         file_rate: rate,
         start: 1.0,
-        vamp: Some(Vamp {
+        loops: vec![Loop {
             start: 4.0,
             end: 6.0,
-            timecode: true,
-        }),
+            ..Loop::default()
+        }],
         ..AudioCue::default()
     })
 }
@@ -982,9 +990,11 @@ fn vamp_loops_until_released_then_switches_at_a_loop_end() {
         // Released 60.3 s in: loop ends at 5 s + n * 2 s; 61 s is far enough
         // ahead (0.5 s to open the rest of the file).
         e.advance(t0 + 60 * u64::from(SR) + 3 * u64::from(SR) / 10);
-        e.command(Command::ReleaseLoop { cue: c }).unwrap();
+        e.command(Command::ReleaseLoop { cue: c, name: None })
+            .unwrap();
         assert!(
-            e.command(Command::ReleaseLoop { cue: c }).is_err(),
+            e.command(Command::ReleaseLoop { cue: c, name: None })
+                .is_err(),
             "only once"
         );
         let acts = e.drain_actions();
@@ -1042,7 +1052,8 @@ fn vamp_released_in_the_pre_wait_plays_straight_through() {
     let c = b.with(vamp_cue(None), |c| c.pre_wait = 2.0);
     let mut e = b.engine();
     e.command(Command::Go { list: None }).unwrap();
-    e.command(Command::ReleaseLoop { cue: c }).unwrap();
+    e.command(Command::ReleaseLoop { cue: c, name: None })
+        .unwrap();
     e.drain_actions();
     e.advance(3 * u64::from(SR));
     let acts = e.drain_actions();
@@ -1066,6 +1077,7 @@ fn release_loop_control_cue_and_stop_during_switch() {
         action: ControlAction::ReleaseLoop,
         target: Some(a),
         time: 0.0,
+        ..ControlCue::default()
     }));
     let mut e = b.engine();
     e.command(Command::Go { list: None }).unwrap();
@@ -1096,11 +1108,11 @@ fn timecode_loops_back_with_the_vamp() {
         file: "a.wav".into(),
         file_duration: Some(10.0),
         file_rate: Some(44_100),
-        vamp: Some(Vamp {
+        loops: vec![Loop {
             start: 1.0,
             end: 3.0,
-            timecode: true,
-        }),
+            ..Loop::default()
+        }],
         ..AudioCue::default()
     }));
     // A memo fired by timecode at the loop start (file position 1.0 s).
@@ -1146,7 +1158,8 @@ fn timecode_loops_back_with_the_vamp() {
     );
     // Released at 11.6 s: it leaves the loop at the 13 s loop end, where the
     // timecode no longer jumps back - both run on.
-    e.command(Command::ReleaseLoop { cue: c }).unwrap();
+    e.command(Command::ReleaseLoop { cue: c, name: None })
+        .unwrap();
     check(&mut e, 126, "00:00:12:15");
     check(&mut e, 136, "00:00:13:15");
     check(&mut e, 156, "00:00:15:15");
@@ -1225,4 +1238,341 @@ fn list_group_cues_each_take_their_own_go() {
     // Firing the group itself starts nothing inside it.
     e.command(Command::StartCue { cue: g }).unwrap();
     assert!(fired(&mut e).iter().all(|c| *c == g));
+}
+
+// ---------------------------------------------------------------------------
+// Several loops per cue (0.6)
+// ---------------------------------------------------------------------------
+
+fn two_loops(f: impl Fn(&mut Loop, usize)) -> CueKind {
+    let mut loops = vec![
+        Loop {
+            name: "Intro".into(),
+            start: 2.0,
+            end: 4.0,
+            ..Loop::default()
+        },
+        Loop {
+            name: "Chorus".into(),
+            start: 8.0,
+            end: 10.0,
+            crossfade: 0.25,
+            ..Loop::default()
+        },
+    ];
+    for (i, l) in loops.iter_mut().enumerate() {
+        f(l, i);
+    }
+    CueKind::Audio(AudioCue {
+        file: "a.wav".into(),
+        file_duration: Some(20.0),
+        loops,
+        ..AudioCue::default()
+    })
+}
+
+fn prepared(acts: &[Action]) -> Vec<(VoiceId, sm_core::engine::VoiceSpec)> {
+    acts.iter()
+        .filter_map(|a| match a {
+            Action::PrepareVoice { voice, spec, .. } => Some((*voice, spec.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn go_releases_one_loop_after_the_other_then_starts_the_next_cue() {
+    let sr = u64::from(SR);
+    let mut b = B::new();
+    let c = b.cue(two_loops(|_, _| {}));
+    let next = b.cue(audio(5.0));
+    let mut e = b.engine();
+    e.command(Command::Go { list: None }).unwrap();
+    let acts = e.drain_actions();
+    let spec = &prepared(&acts)[0].1;
+    // The first stretch: from the start, looping the intro.
+    assert_eq!(
+        (spec.loop_count, spec.end, spec.loop_from),
+        (0, Some(4.0), Some(2.0))
+    );
+    let t0 = starts(&acts)[0].1;
+    e.advance(t0 + 10 * sr);
+    let st = e.snapshot().active[0].looping.clone().unwrap();
+    assert_eq!((st.name.as_str(), st.index, st.count), ("Intro", 0, 2));
+    // The first pass ends at 4 s, then every 2 s: 10 s in, the 5th pass starts.
+    assert_eq!(st.pass, 5);
+    assert!((st.remaining - 2.0).abs() < 0.01, "{}", st.remaining);
+
+    // GO: releases the intro, starts nothing else.
+    e.command(Command::Go { list: None }).unwrap();
+    let acts = e.drain_actions();
+    assert!(starts(&acts).is_empty(), "GO started something: {acts:?}");
+    let (_, spec) = prepared(&acts)[0].clone();
+    // The next stretch: from the intro's end on, looping the chorus with its crossfade.
+    assert_eq!(
+        (spec.loop_count, spec.end, spec.loop_from),
+        (0, Some(10.0), Some(8.0))
+    );
+    assert!((spec.loop_xfade - 0.25).abs() < 1e-9);
+    assert!(e.snapshot().active.iter().all(|a| a.cue == c));
+    assert!(e.snapshot().active[0].looping.as_ref().unwrap().releasing);
+    // Switch at the loop end 12 s in: now in the chorus (8..10, 6 s after the intro's end).
+    e.advance(t0 + 13 * sr);
+    let st = e.snapshot().active[0].looping.clone().unwrap();
+    assert_eq!(
+        (st.name.as_str(), st.pass, st.releasing),
+        ("Chorus", 1, false)
+    );
+    let pos = e.snapshot().active[0].file_pos.unwrap();
+    assert!((pos - 5.0).abs() < 0.01, "file position {pos}");
+    e.advance(t0 + 30 * sr);
+    let pos = e.snapshot().active[0].file_pos.unwrap();
+    // Chorus reached at 18 s (12 + 6), then passes of 2 s: 30 s = the loop start again.
+    assert!((pos - 8.0).abs() < 0.01, "file position {pos}");
+
+    // GO again: the chorus goes; the cue plays on to its end (20 s).
+    e.drain_actions();
+    e.command(Command::Go { list: None }).unwrap();
+    let acts = e.drain_actions();
+    assert!(starts(&acts).is_empty(), "{acts:?}");
+    assert_eq!(prepared(&acts)[0].1.loop_count, 1);
+    e.advance(t0 + 33 * sr);
+    let a = &e.snapshot().active[0];
+    assert!(a.looping.is_none());
+    // Left the chorus at its end 32 s in; 10 s of file after it.
+    let d = a.duration.unwrap();
+    assert!((d - 42.0).abs() < 0.01, "duration {d}");
+    // With no loop left, GO starts the next cue.
+    e.command(Command::Go { list: None }).unwrap();
+    assert!(e.snapshot().active.iter().any(|a| a.cue == next));
+}
+
+#[test]
+fn go_does_not_release_a_loop_without_release_on_go() {
+    let mut b = B::new();
+    b.cue(two_loops(|l, _| l.release_on_go = false));
+    let next = b.cue(audio(5.0));
+    let mut e = b.engine();
+    e.command(Command::Go { list: None }).unwrap();
+    e.advance(5 * u64::from(SR));
+    e.command(Command::Go { list: None }).unwrap();
+    let snap = e.snapshot();
+    assert!(snap.active.iter().any(|a| a.cue == next));
+    assert!(!snap.active[0].looping.as_ref().unwrap().releasing);
+}
+
+#[test]
+fn a_loop_with_passes_releases_itself() {
+    let sr = u64::from(SR);
+    let mut b = B::new();
+    b.cue(two_loops(|l, i| {
+        if i == 0 {
+            l.passes = 3;
+        }
+    }));
+    let mut e = b.engine();
+    e.command(Command::Go { list: None }).unwrap();
+    let t0 = starts(&e.drain_actions())[0].1;
+    // Prepared at once for the end of pass 3: 4 s + 2 x 2 s = 8 s in.
+    e.advance(t0 + sr);
+    let st = e.snapshot().active[0].looping.clone().unwrap();
+    assert_eq!((st.pass, st.passes, st.releasing), (1, 3, false));
+    e.advance(t0 + 7 * sr);
+    assert_eq!(
+        e.snapshot().active[0].looping.as_ref().unwrap().name,
+        "Intro"
+    );
+    e.advance(t0 + 8 * sr + sr / 10);
+    assert_eq!(
+        e.snapshot().active[0].looping.as_ref().unwrap().name,
+        "Chorus"
+    );
+}
+
+#[test]
+fn a_manual_release_comes_before_the_passes() {
+    let sr = u64::from(SR);
+    let mut b = B::new();
+    let c = b.cue(two_loops(|l, i| {
+        if i == 0 {
+            l.passes = 10;
+        }
+    }));
+    let mut e = b.engine();
+    e.command(Command::Go { list: None }).unwrap();
+    let t0 = starts(&e.drain_actions())[0].1;
+    e.advance(t0 + 5 * sr);
+    e.command(Command::ReleaseLoop { cue: c, name: None })
+        .unwrap();
+    let acts = e.drain_actions();
+    // The pass-10 switch is dropped for the earlier one.
+    assert!(acts
+        .iter()
+        .any(|a| matches!(a, Action::DiscardVoice { .. })));
+    e.advance(t0 + 8 * sr + sr / 10);
+    assert_eq!(
+        e.snapshot().active[0].looping.as_ref().unwrap().name,
+        "Chorus"
+    );
+}
+
+#[test]
+fn an_immediate_loop_leaves_at_once_with_a_crossfade() {
+    let sr = u64::from(SR);
+    let mut b = B::new();
+    let c = b.cue(two_loops(|l, i| {
+        if i == 0 {
+            l.immediate = true;
+            l.crossfade = 0.5;
+        }
+    }));
+    let mut e = b.engine();
+    e.command(Command::Go { list: None }).unwrap();
+    let acts = e.drain_actions();
+    // The audio after the intro is opened ahead.
+    let p = prepared(&acts);
+    assert_eq!(p.len(), 2);
+    let (spare, spec) = p[1].clone();
+    assert_eq!(
+        (spec.start, spec.end, spec.loop_from),
+        (4.0, Some(10.0), Some(8.0))
+    );
+    let (first, t0) = starts(&acts)[0];
+    e.advance(t0 + 5 * sr + sr / 4);
+    let t = e.now();
+    e.command(Command::ReleaseLoop { cue: c, name: None })
+        .unwrap();
+    let acts = e.drain_actions();
+    assert_eq!(starts(&acts), vec![(spare, t)]);
+    assert!(acts.iter().any(|a| matches!(a,
+        Action::StopVoice { voice, at, fade_frames, .. }
+            if *voice == first && *at == t && *fade_frames == u64::from(SR) / 2)));
+    let a = &e.snapshot().active[0];
+    assert_eq!(a.looping.as_ref().unwrap().name, "Chorus");
+    // Right after the intro's end in the file.
+    assert!((a.file_pos.unwrap() - 4.0).abs() < 0.01);
+}
+
+#[test]
+fn a_named_loop_released_ahead_is_skipped() {
+    let sr = u64::from(SR);
+    let mut b = B::new();
+    let c = b.cue(two_loops(|_, _| {}));
+    let mut e = b.engine();
+    e.command(Command::Go { list: None }).unwrap();
+    let t0 = starts(&e.drain_actions())[0].1;
+    e.advance(t0 + sr);
+    assert!(e
+        .command(Command::ReleaseLoop {
+            cue: c,
+            name: Some("verse".into())
+        })
+        .is_err());
+    // The chorus, before the cue gets there.
+    e.command(Command::ReleaseLoop {
+        cue: c,
+        name: Some("chorus".into()),
+    })
+    .unwrap();
+    assert_eq!(
+        e.snapshot().active[0].looping.as_ref().unwrap().name,
+        "Intro"
+    );
+    e.command(Command::ReleaseLoops { name: None }).unwrap();
+    // Intro left at 4 s; the chorus plays once (its end 6 s later) and is left too.
+    e.advance(t0 + 5 * sr);
+    assert_eq!(
+        e.snapshot().active[0].looping.as_ref().unwrap().name,
+        "Chorus"
+    );
+    assert!(e.snapshot().active[0].looping.as_ref().unwrap().releasing);
+    e.advance(t0 + 11 * sr);
+    let a = &e.snapshot().active[0];
+    assert!(a.looping.is_none());
+    assert!((a.duration.unwrap() - 20.0).abs() < 0.01);
+}
+
+#[test]
+fn release_loops_by_name_and_control_cue_with_a_loop_name() {
+    let sr = u64::from(SR);
+    let mut b = B::new();
+    let c = b.cue(two_loops(|_, _| {}));
+    b.cue(CueKind::Control(ControlCue {
+        action: ControlAction::ReleaseLoop,
+        target: Some(c),
+        loop_name: "Chorus".into(),
+        ..ControlCue::default()
+    }));
+    let mut e = b.engine();
+    e.command(Command::Go { list: None }).unwrap();
+    e.advance(sr);
+    assert!(e
+        .command(Command::ReleaseLoops {
+            name: Some("Bridge".into())
+        })
+        .is_err());
+    // GO releases the intro (the loop GO releases comes first) ...
+    e.command(Command::Go { list: None }).unwrap();
+    // ... the next GO fires the control cue: the chorus will be skipped.
+    e.command(Command::Go { list: None }).unwrap();
+    e.advance(15 * sr);
+    let a = e
+        .snapshot()
+        .active
+        .into_iter()
+        .find(|a| a.cue == c)
+        .unwrap();
+    assert!(a.looping.is_none(), "{:?}", a.looping);
+}
+
+#[test]
+fn loops_are_ordered_and_cannot_overlap() {
+    let a = AudioCue {
+        file_duration: Some(20.0),
+        start: 1.0,
+        loops: vec![
+            Loop {
+                start: 8.0,
+                end: 12.0,
+                ..Loop::default()
+            },
+            Loop {
+                name: "A".into(),
+                start: 0.0,
+                end: 3.0,
+                ..Loop::default()
+            },
+            Loop {
+                start: 10.0,
+                end: 14.0,
+                ..Loop::default()
+            },
+            Loop {
+                start: 19.995,
+                end: 30.0,
+                ..Loop::default()
+            },
+        ],
+        ..AudioCue::default()
+    };
+    let l = a.active_loops();
+    let got: Vec<(&str, f64, f64)> = l
+        .iter()
+        .map(|l| (l.name.as_str(), l.start, l.end))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            ("A", 1.0, 3.0),
+            ("Loop 1", 8.0, 12.0),
+            ("Loop 3", 12.0, 14.0)
+        ]
+    );
+    assert_eq!(a.duration(), None);
+    let fixed = AudioCue {
+        loops: l.into_iter().map(|l| Loop { passes: 2, ..l }).collect(),
+        ..a
+    };
+    // 19 s plus one more pass of each: 2 + 4 + 2.
+    assert_eq!(fixed.duration(), Some(27.0));
 }

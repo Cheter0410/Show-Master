@@ -207,6 +207,63 @@ fn vamp_plays_the_intro_then_loops_the_vamp_region() {
 }
 
 #[test]
+fn loop_crossfade_mixes_the_tail_into_the_loop_start() {
+    let dir = TempDir::new("xfade");
+    let s = noise_i16(8000, 9);
+    let f = i16_to_f32(&s);
+    let p = dir.path("a.wav");
+    write_wav_i16(&p, 48_000, 1, &s);
+    let mut o = opts();
+    o.start_frame = Some(100);
+    o.end_frame = Some(1500);
+    o.loop_start_frame = Some(1000);
+    o.loop_count = 0;
+    o.loop_xfade_seconds = 100.0 / 48_000.0;
+    let mut src = FileSource::open(&p, o).unwrap();
+    let mut buf = vec![0.0f32; 1400 + 3 * 500];
+    let mut filled = 0;
+    while filled < buf.len() {
+        let to = (filled + 77).min(buf.len());
+        filled += src.read(&mut buf[filled..to]);
+    }
+    // The intro is untouched; the pass length stays 500 frames.
+    assert_eq!(&buf[..1400], &f[100..1500], "intro");
+    for pass in 0..3 {
+        let at = 1400 + pass * 500;
+        for j in 0..500 {
+            let want = if j < 100 {
+                // Equal power: the loop start fades in, the audio after the end fades out.
+                let x = (j as f32 + 0.5) / 100.0 * std::f32::consts::FRAC_PI_2;
+                f[1000 + j] * x.sin() + f[1500 + j] * x.cos()
+            } else {
+                f[1000 + j]
+            };
+            assert!((buf[at + j] - want).abs() < 1e-5, "pass {pass} frame {j}");
+        }
+    }
+}
+
+#[test]
+fn loop_crossfade_without_audio_after_the_end_is_a_plain_jump() {
+    let dir = TempDir::new("xfade_end");
+    let s = noise_i16(1500, 4);
+    let f = i16_to_f32(&s);
+    let p = dir.path("a.wav");
+    write_wav_i16(&p, 48_000, 1, &s);
+    let mut o = opts();
+    o.loop_start_frame = Some(1000);
+    o.loop_count = 0;
+    o.loop_xfade_seconds = 0.01;
+    let mut src = FileSource::open(&p, o).unwrap();
+    let mut buf = vec![0.0f32; 1500 + 500];
+    let mut filled = 0;
+    while filled < buf.len() {
+        filled += src.read(&mut buf[filled..]);
+    }
+    assert_eq!(&buf[1500..], &f[1000..1500]);
+}
+
+#[test]
 fn resamples_44k1_to_48k_with_correct_length_and_pitch() {
     let dir = TempDir::new("resample");
     let rate_in = 44_100u32;

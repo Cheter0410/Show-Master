@@ -9,7 +9,7 @@ pub type ListId = u64;
 
 /// Current showfile schema version. Bump together with a migration step in
 /// [`crate::showfile`].
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
@@ -485,10 +485,13 @@ pub enum MidiMapAction {
     GotoNumber,
     /// Fire the cue `cue_number` without moving the playhead.
     StartCue,
+    /// Release the loop of cue `cue_number` (empty: every cue playing a loop); with
+    /// `loop_name` only that loop.
+    ReleaseLoop,
 }
 
 impl MidiMapAction {
-    pub const ALL: [MidiMapAction; 11] = [
+    pub const ALL: [MidiMapAction; 12] = [
         MidiMapAction::Go,
         MidiMapAction::StopAll,
         MidiMapAction::Panic,
@@ -500,6 +503,7 @@ impl MidiMapAction {
         MidiMapAction::Reset,
         MidiMapAction::GotoNumber,
         MidiMapAction::StartCue,
+        MidiMapAction::ReleaseLoop,
     ];
 
     /// The action needs a cue number.
@@ -523,8 +527,11 @@ pub struct MidiMapping {
     /// value rises to or above this threshold. Ignored for program change.
     pub min_value: u8,
     pub action: MidiMapAction,
-    /// Cue number for `goto_number` / `start_cue`.
+    /// Cue number for `goto_number` / `start_cue` / `release_loop`.
     pub cue_number: String,
+    /// `release_loop`: only the loop with this name.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub loop_name: String,
 }
 
 impl Default for MidiMapping {
@@ -537,6 +544,7 @@ impl Default for MidiMapping {
             min_value: 1,
             action: MidiMapAction::Go,
             cue_number: String::new(),
+            loop_name: String::new(),
         }
     }
 }
@@ -730,26 +738,62 @@ pub struct AudioCue {
     /// releasing a vamp sample-accurate.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_rate: Option<u32>,
-    /// Vamp: this part of the file loops until it is released (in a show:
-    /// "Release loop"); then playback runs on to the end.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub vamp: Option<Vamp>,
+    /// Loops (vamps): each part loops until it is released (GO, "Release loop", MIDI, OSC,
+    /// a hotkey) or after its number of passes; then playback runs on to the next loop or the
+    /// end. In file order; see [`AudioCue::active_loops`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub loops: Vec<Loop>,
 }
 
 /// A loop inside an audio cue, in seconds of file time.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
-pub struct Vamp {
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct Loop {
+    /// Shown in Live and on the remote; MIDI / OSC / Control cues can release a loop by name.
+    pub name: String,
     pub start: f64,
     pub end: f64,
+    /// Crossfade at the loop end (seconds): the audio after the loop end fades out while the
+    /// loop start fades in, so the jump back is not heard. 0 = hard jump.
+    pub crossfade: f64,
+    /// GO releases this loop (instead of starting the next cue) while it plays.
+    pub release_on_go: bool,
+    /// Passes before the loop releases itself; 0 = until released.
+    pub passes: u32,
+    /// A release leaves the loop right away (crossfade to the audio after the loop end)
+    /// instead of at the end of the pass.
+    pub immediate: bool,
     /// A running timecode generator jumps back with every loop, so it
     /// keeps matching the audio (and timecode triggers in the loop fire
     /// again each pass).
-    #[serde(default = "yes")]
     pub timecode: bool,
 }
 
-fn yes() -> bool {
-    true
+impl Default for Loop {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            start: 0.0,
+            end: 0.0,
+            crossfade: 0.0,
+            release_on_go: true,
+            passes: 0,
+            immediate: false,
+            timecode: true,
+        }
+    }
+}
+
+impl Loop {
+    /// The name, or "Loop n" (1-based) when it has none.
+    pub fn label(&self, index: usize) -> String {
+        let n = self.name.trim();
+        if n.is_empty() {
+            format!("Loop {}", index + 1)
+        } else {
+            n.to_string()
+        }
+    }
 }
 
 impl Default for AudioCue {
@@ -768,7 +812,7 @@ impl Default for AudioCue {
             loop_count: 1,
             routing: Vec::new(),
             file_rate: None,
-            vamp: None,
+            loops: Vec::new(),
         }
     }
 }
@@ -780,29 +824,57 @@ impl AudioCue {
         Some((end - self.start.max(0.0)).max(0.0))
     }
 
-    /// The vamp, when it lies inside the cue's region (at least 10 ms long).
-    pub fn active_vamp(&self) -> Option<Vamp> {
-        let v = self.vamp?;
+    /// The loops that play: inside the cue's region, at least 10 ms long, in file order and
+    /// not overlapping (a loop starting inside the one before it starts at its end). Names
+    /// are filled in ("Loop n") where empty.
+    pub fn active_loops(&self) -> Vec<Loop> {
         let start = self.start.max(0.0);
         let end = self.end.or(self.file_duration).unwrap_or(f64::INFINITY);
-        let (a, b) = (v.start.max(start), v.end.min(end));
-        (b - a >= 0.01).then_some(Vamp {
-            start: a,
-            end: b,
-            ..v
-        })
+        let mut named: Vec<Loop> = self
+            .loops
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.start.is_finite() && l.end.is_finite())
+            .map(|(i, l)| Loop {
+                name: l.label(i),
+                ..l.clone()
+            })
+            .collect();
+        named.sort_by(|a, b| a.start.total_cmp(&b.start));
+        let mut out: Vec<Loop> = Vec::new();
+        for l in named {
+            let from = out.last().map_or(start, |p| p.end).max(start);
+            let (a, b) = (l.start.max(from), l.end.min(end));
+            if b - a >= 0.01 {
+                out.push(Loop {
+                    start: a,
+                    end: b,
+                    crossfade: l.crossfade.clamp(0.0, 10.0),
+                    ..l
+                });
+            }
+        }
+        out
     }
 
     /// Total length in seconds; `None` = unknown or open-ended (looping
-    /// forever, or a vamp that has not been released).
+    /// forever, or a loop that is released by hand).
     pub fn duration(&self) -> Option<f64> {
-        if self.active_vamp().is_some() {
+        let loops = self.active_loops();
+        if loops.is_empty() {
+            return self.play_through_duration();
+        }
+        if loops.iter().any(|l| l.passes == 0) {
             return None;
         }
-        self.play_through_duration()
+        let extra: f64 = loops
+            .iter()
+            .map(|l| f64::from(l.passes - 1) * (l.end - l.start))
+            .sum();
+        Some(self.region()? + extra)
     }
 
-    /// Length ignoring the vamp (also the length once a vamp is released
+    /// Length ignoring the loops (also the length once they are all released
     /// before the cue started).
     pub fn play_through_duration(&self) -> Option<f64> {
         if self.loop_count == 0 {
@@ -907,7 +979,8 @@ pub enum ControlAction {
     Disarm,
     GoTo,
     Reset,
-    /// Release the target's vamp (it leaves its loop at the end of the pass).
+    /// Release the target's current loop (all of its loops' semantics: at the end of the
+    /// pass, or right away for an "immediate" loop). With `loop_name`, only that loop.
     ReleaseLoop,
 }
 
@@ -918,6 +991,9 @@ pub struct ControlCue {
     pub target: Option<CueId>,
     /// Position for `LoadToTime` (seconds), fade time for `Stop`.
     pub time: f64,
+    /// `ReleaseLoop`: only the loop with this name (empty = the one playing).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub loop_name: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]

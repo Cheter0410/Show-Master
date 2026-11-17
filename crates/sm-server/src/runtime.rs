@@ -852,10 +852,10 @@ impl Runtime {
             EventKind::CueResumed { cue } => {
                 ("info", format!("Cue {} resumed", self.cue_label(cue)))
             }
-            EventKind::LoopReleased { cue, in_secs } => (
+            EventKind::LoopReleased { cue, in_secs, name } => (
                 "info",
                 format!(
-                    "Cue {} loop released - leaves the loop in {in_secs:.1} s",
+                    "Cue {} loop \"{name}\" released - leaves it in {in_secs:.1} s",
                     self.cue_label(cue)
                 ),
             ),

@@ -54,6 +54,36 @@ fn migrate_v3_to_v4(doc: &mut Value) {
     }
 }
 
+/// v5 has several named loops per audio cue (`loops`) instead of one `vamp`.
+fn migrate_v4_to_v5(doc: &mut Value) {
+    fn walk(cue: &mut Value) {
+        let kind = &mut cue["kind"];
+        if kind["type"] == "audio" {
+            if let Some(obj) = kind.as_object_mut() {
+                if let Some(v) = obj.remove("vamp").filter(Value::is_object) {
+                    let mut l = serde_json::json!({ "name": "Loop 1" });
+                    for k in ["start", "end", "timecode"] {
+                        if let Some(x) = v.get(k) {
+                            l[k] = x.clone();
+                        }
+                    }
+                    obj.insert("loops".into(), Value::Array(vec![l]));
+                }
+            }
+        }
+        if let Some(kids) = kind.get_mut("children").and_then(Value::as_array_mut) {
+            kids.iter_mut().for_each(walk);
+        }
+    }
+    if let Some(lists) = doc.get_mut("cue_lists").and_then(Value::as_array_mut) {
+        for list in lists {
+            if let Some(cues) = list.get_mut("cues").and_then(Value::as_array_mut) {
+                cues.iter_mut().for_each(walk);
+            }
+        }
+    }
+}
+
 /// Upgrade a raw showfile document to the current schema, step by step.
 pub fn migrate(mut doc: Value) -> Result<Value, ShowfileError> {
     let mut version = doc
@@ -78,6 +108,7 @@ pub fn migrate(mut doc: Value) -> Result<Value, ShowfileError> {
             // The bump makes older versions refuse such files cleanly.
             2 => {}
             3 => migrate_v3_to_v4(&mut doc),
+            4 => migrate_v4_to_v5(&mut doc),
             other => {
                 return Err(ShowfileError::Malformed(format!(
                     "no migration from schema {other}"
@@ -562,5 +593,37 @@ mod tests {
             crate::model::Curve::Linear,
             "a deliberate choice stays"
         );
+    }
+
+    #[test]
+    fn v4_vamp_becomes_the_first_of_the_loops() {
+        let show = parse(
+            r#"{
+          "schema_version": 4, "name": "Vamp", "next_id": 4,
+          "cue_lists": [{ "id": 1, "name": "Main", "cues": [
+            { "id": 2, "kind": { "type": "audio", "file": "a.wav",
+              "vamp": { "start": 1.5, "end": 3.0, "timecode": false } } },
+            { "id": 3, "kind": { "type": "group", "children": [
+              { "id": 4, "kind": { "type": "audio", "file": "b.wav", "vamp": { "start": 0.5, "end": 1.0 } } }
+            ] } }
+          ] }]
+        }"#,
+        )
+        .unwrap();
+        let loops = |id| match &show.cue(id).unwrap().kind {
+            CueKind::Audio(a) => a.loops.clone(),
+            _ => panic!(),
+        };
+        let l = loops(2);
+        assert_eq!(l.len(), 1);
+        assert_eq!(
+            (l[0].name.as_str(), l[0].start, l[0].end),
+            ("Loop 1", 1.5, 3.0)
+        );
+        assert!(!l[0].timecode && l[0].release_on_go && l[0].crossfade == 0.0 && l[0].passes == 0);
+        assert!(loops(4)[0].timecode);
+        // Saved again: `loops`, no `vamp`.
+        let text = to_string(&show).unwrap();
+        assert!(text.contains("\"loops\"") && !text.contains("\"vamp\""));
     }
 }

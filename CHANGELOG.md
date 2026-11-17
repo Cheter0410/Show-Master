@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0
+
+- Loops (vamps), much extended: an audio cue can have several loops, one after the other, each with its
+  own name. Draw them in the strip under the waveform (or "Add loop" in the Audio tab), drag their
+  edges or move them; they cannot overlap.
+- Crossfade per loop: instead of jumping, the audio crossfades back to the loop start over the set
+  time. The sound after the loop end fades out under it, so a reverb tail is kept.
+- GO releases the loop that plays (on by default, also for loops of older shows). It only releases the
+  loop – the next cue starts with the next GO. Loops with "GO releases" off wait for their own release.
+- Passes: a loop can release itself after a number of passes (empty = until released). A manual
+  release still comes first.
+- "Release at once": the release crossfades straight to the audio after the loop instead of waiting
+  for the loop end.
+- Live and the tablet show the loop playing: name, pass, time to the loop end and a release button;
+  a released loop shows "LEAVING <name>" until it leaves.
+- Release by name from everywhere: control cues (Release loop with a loop name), MIDI mappings (with or
+  without a cue number), OSC `/release ["name"]` and `/cue/<n>/release ["name"]`, the remote command
+  `release_loops`, and the "Release loops" hotkey (also as a global hotkey). A named loop released
+  before the cue reaches it is skipped.
+- Show files: schema 5. The single `vamp` of older shows becomes the first entry of `loops`.
+
 ## 0.5.5
 
 - PANIC no longer fills the log with "RTP-MIDI session is not enabled" (about a hundred lines each

@@ -135,6 +135,10 @@ pub struct FileSourceOpts {
     pub loop_start_frame: Option<u64>,
     /// Same as `loop_start_frame` in seconds of file time.
     pub loop_start_seconds: Option<f64>,
+    /// Crossfade at each jump back (seconds): the audio after the region end fades out while
+    /// the loop start fades in (equal power). 0 = hard jump. Limited to the loop length and to
+    /// what the file has after the end.
+    pub loop_xfade_seconds: f64,
 }
 
 impl FileSourceOpts {
@@ -150,6 +154,7 @@ impl FileSourceOpts {
             offset_seconds: 0.0,
             loop_start_frame: None,
             loop_start_seconds: None,
+            loop_xfade_seconds: 0.0,
         }
     }
 }
@@ -179,6 +184,12 @@ struct Region {
     /// Where passes after the first start (vamp); `start` when `None`.
     loop_start: Option<u64>,
     done: bool,
+    /// Wanted crossfade at each jump back (source frames).
+    xfade: u64,
+    /// The audio right after the region end (read once, the same every pass).
+    tail: Option<Vec<f32>>,
+    /// Frames of the crossfade done since the last jump back; `None` = none running.
+    xf_pos: Option<usize>,
 }
 
 impl Region {
@@ -199,6 +210,7 @@ impl Region {
                 0
             };
             if n > 0 {
+                self.mix_tail(&mut buf[filled * ch..(filled + n) * ch], ch);
                 self.pos += n as u64;
                 filled += n;
                 continue;
@@ -219,12 +231,54 @@ impl Region {
                         .loop_start
                         .filter(|l| *l < self.pos)
                         .unwrap_or(self.start);
+                    if self.xfade > 0 {
+                        if self.tail.is_none() {
+                            // The decoder stands at the region end: what follows is the tail.
+                            let want = self.xfade.min(self.pos - to) as usize;
+                            let mut tail = vec![0.0; want * ch];
+                            let mut got = 0;
+                            while got < want {
+                                let k = self.dec.read(&mut tail[got * ch..])?;
+                                if k == 0 {
+                                    break;
+                                }
+                                got += k;
+                            }
+                            tail.truncate(got * ch);
+                            self.tail = Some(tail);
+                        }
+                        self.xf_pos = self.tail.as_ref().filter(|t| !t.is_empty()).map(|_| 0);
+                    }
                     self.dec.seek(to)?;
                     self.pos = to;
                 }
             }
         }
         Ok(filled)
+    }
+}
+
+impl Region {
+    /// Crossfade running after a jump back: the fresh frames in `buf` fade in, the tail
+    /// (the audio after the region end) fades out, equal power.
+    fn mix_tail(&mut self, buf: &mut [f32], ch: usize) {
+        let (Some(p), Some(tail)) = (self.xf_pos, self.tail.as_ref()) else {
+            return;
+        };
+        let len = tail.len() / ch;
+        let mut j = p;
+        for frame in buf.chunks_exact_mut(ch) {
+            if j >= len {
+                break;
+            }
+            let x = (j as f32 + 0.5) / len as f32 * std::f32::consts::FRAC_PI_2;
+            let (gin, gout) = (x.sin(), x.cos());
+            for (c, s) in frame.iter_mut().enumerate() {
+                *s = *s * gin + tail[j * ch + c] * gout;
+            }
+            j += 1;
+        }
+        self.xf_pos = (j < len).then_some(j);
     }
 }
 
@@ -460,6 +514,13 @@ impl FileSource {
             loops_left,
             loop_start,
             done,
+            xfade: if loop_start.is_some() || loops_left != Some(1) {
+                seconds_to_frames(opts.loop_xfade_seconds, rate)
+            } else {
+                0
+            },
+            tail: None,
+            xf_pos: None,
         };
         let resampler = if rate != opts.engine_sample_rate {
             Some(Resampled::new(rate, opts.engine_sample_rate, channels)?)

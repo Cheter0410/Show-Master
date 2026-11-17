@@ -1103,3 +1103,4 @@ button.lrow-gutter:hover { box-shadow: inset 7px 0 0 var(--green-deep); }
 .lrow-tree i.open { top: calc(50% + 14px); }
 .lrow.is-child .lrow-num { color: var(--muted); }
 .lrow-tree i:not([class*="c-"]) { --cc: 140 146 160; }
+.tag-loop { background: color-mix(in srgb, var(--amber) 22%, transparent); color: var(--amber); }

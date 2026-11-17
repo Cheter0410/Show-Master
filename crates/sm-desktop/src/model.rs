@@ -294,6 +294,28 @@ pub struct Active {
     pub from_tc: bool,
     /// Audio cue playing its vamp (loop), not released yet.
     pub vamping: bool,
+    /// The loop the cue plays (also while released and waiting for its end).
+    pub looping: Option<LoopInfo>,
+    /// Position in the file (seconds) for an audio cue with loops.
+    pub file_pos: Option<f64>,
+}
+
+/// The loop an audio cue plays (engine `LoopStatus`).
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct LoopInfo {
+    pub name: String,
+    pub index: usize,
+    pub count: usize,
+    /// The pass playing (1-based).
+    pub pass: u64,
+    /// Passes before it releases itself; 0 = until released.
+    pub passes: u32,
+    /// Seconds until the end of this pass (released: until it leaves the loop).
+    pub remaining: f64,
+    pub releasing: bool,
+    pub release_on_go: bool,
+    pub immediate: bool,
 }
 
 impl Active {

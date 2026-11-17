@@ -230,6 +230,7 @@ pub fn make(dir: &Path) -> Result<std::path::PathBuf, String> {
             action: ControlAction::Stop,
             target: Some(bed_id),
             time: 2.0,
+            ..ControlCue::default()
         }),
     ));
 

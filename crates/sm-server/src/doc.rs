@@ -448,11 +448,19 @@ impl Document {
             }
         }
         if let CueKind::Audio(a) = &mut new.kind {
-            if let Some(v) = &mut a.vamp {
+            for v in &mut a.loops {
                 if !(v.start.is_finite() && v.end.is_finite()) || v.end - v.start < 0.01 {
-                    return Err("the loop must be at least 10 ms long".into());
+                    return Err("a loop must be at least 10 ms long".into());
                 }
                 v.start = v.start.max(0.0);
+                v.crossfade = if v.crossfade.is_finite() {
+                    v.crossfade.clamp(0.0, 10.0)
+                } else {
+                    0.0
+                };
+                v.name = v.name.trim().to_string();
+            }
+            if !a.loops.is_empty() {
                 // Releasing a loop exactly needs the file's own sample rate.
                 if a.file_rate.is_none() && !a.file.is_empty() {
                     let dir = self.show_dir().map(Path::to_path_buf);

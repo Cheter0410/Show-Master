@@ -247,10 +247,10 @@ fn release_loop_button_on_a_vamping_cue() {
     // Intro (2 s): loop 0.5 s .. 1.5 s.
     h.state_mut().cmd(serde_json::json!({
         "cmd": "update_cue", "cue": first,
-        "patch": { "kind": { "vamp": { "start": 0.5, "end": 1.5 } } }
+        "patch": { "kind": { "loops": [{ "name": "Chorus", "start": 0.5, "end": 1.5 }] } }
     }));
-    env.wait(&mut h, "vamp set", |s| {
-        s["show"]["cue_lists"][0]["cues"][0]["kind"]["vamp"]["end"] == 1.5
+    env.wait(&mut h, "loop set", |s| {
+        s["show"]["cue_lists"][0]["cues"][0]["kind"]["loops"][0]["end"] == 1.5
     });
     go_live(&env, &mut h);
     h.get_by_label("GO").click();
@@ -259,6 +259,10 @@ fn release_loop_button_on_a_vamping_cue() {
             .iter()
             .any(|a| a["cue"] == first && a["vamping"] == true)
     });
+    // The loop's name and pass show in its row.
+    let lp = active(&env).iter().find(|a| a["cue"] == first).unwrap()["looping"].clone();
+    assert_eq!(lp["name"], "Chorus");
+    assert_eq!(lp["release_on_go"], true);
     h.get_by_label("Release loop of cue 1 Intro").click();
     env.wait(&mut h, "released", |_| {
         active(&env)

@@ -36,8 +36,24 @@ export interface AudioKind {
   routing: RoutePoint[];
   /** native sample rate of the file (cached) */
   file_rate?: number | null;
-  /** vamp: this part loops until it is released */
-  vamp?: { start: number; end: number; timecode?: boolean } | null;
+  /** loops (vamps): each part repeats until it is released, in order of `start` */
+  loops?: Loop[];
+}
+
+export interface Loop {
+  /** empty = "Loop n" */
+  name: string;
+  start: number;
+  end: number;
+  /** seconds of crossfade back to the loop start; 0 = plain jump */
+  crossfade: number;
+  /** GO releases it (before starting the next cue) */
+  release_on_go: boolean;
+  /** releases itself after this many passes; 0 = until released */
+  passes: number;
+  /** a release leaves at once (crossfade) instead of at the loop end */
+  immediate: boolean;
+  timecode: boolean;
 }
 
 export interface FadeKind {
@@ -367,8 +383,27 @@ export interface ActiveCue {
   elapsed: number;
   duration: number | null;
   from_tc: boolean;
-  /** audio cue playing its vamp (loop), not released yet */
+  /** audio cue playing a loop, not released yet */
   vamping?: boolean;
+  /** the loop the cue plays (also while released, until it leaves) */
+  looping?: LoopStatus;
+  /** position in the file (seconds) for an audio cue with loops */
+  file_pos?: number;
+}
+
+export interface LoopStatus {
+  name: string;
+  index: number;
+  count: number;
+  /** 1-based */
+  pass: number;
+  /** 0 = until released */
+  passes: number;
+  /** seconds until the end of this pass (released: until it leaves) */
+  remaining: number;
+  releasing: boolean;
+  release_on_go: boolean;
+  immediate: boolean;
 }
 
 export interface TcStatus {
@@ -447,7 +482,9 @@ export type Command =
   | { cmd: "next" | "previous"; list?: number }
   | { cmd: "set_playhead"; cue: number | null; list?: number }
   | { cmd: "goto_number"; number: string }
-  | { cmd: "start_cue" | "stop_cue" | "pause_cue" | "resume_cue" | "reset_cue" | "release_loop"; cue: number }
+  | { cmd: "start_cue" | "stop_cue" | "pause_cue" | "resume_cue" | "reset_cue"; cue: number }
+  | { cmd: "release_loop"; cue: number; name?: string }
+  | { cmd: "release_loops"; name?: string }
   | { cmd: "load_cue" | "seek_cue"; cue: number; time: number }
   | { cmd: "arm_cue"; cue: number; armed: boolean }
   | { cmd: "reset" | "reset_show_clock" | "midi_panic" | "reset_clip" }

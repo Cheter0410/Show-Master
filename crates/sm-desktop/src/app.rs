@@ -25,11 +25,12 @@ pub const AUDIO_EXTENSIONS: [&str; 11] = [
 pub const SHOW_EXTENSION: &str = "smshow";
 
 /// Hotkey actions (values of `show.hotkeys`).
-pub const ACTIONS: [(&str, &str); 15] = [
+pub const ACTIONS: [(&str, &str); 16] = [
     ("go", "GO"),
     ("panic", "Panic"),
     ("stop_all", "Stop all"),
     ("toggle_pause", "Pause / resume"),
+    ("release_loop", "Release loops"),
     ("next", "Playhead down"),
     ("previous", "Playhead up"),
     ("reset", "Reset"),
@@ -1016,6 +1017,7 @@ impl App {
             }
             "stop_all" => self.stop_all(),
             "toggle_pause" => self.toggle_pause(),
+            "release_loop" => self.cmd(json!({ "cmd": "release_loops" })),
             "next" | "previous" => {
                 self.step_playhead(action == "next");
                 // In Edit mode the selection (and inspector) follows the playhead.

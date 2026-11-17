@@ -698,16 +698,24 @@ fn waveform_click_sets_the_playhead_and_the_strip_draws_a_loop() {
     let y = w.bottom() - 5.0;
     pointer_drag(&mut h, at(0.25, y), at(0.75, y));
     env.wait(&mut h, "loop drawn", |s| {
-        let v = &find_cue(s, id).unwrap()["kind"]["vamp"];
+        let v = &find_cue(s, id).unwrap()["kind"]["loops"][0];
         v["start"].as_f64().is_some_and(|x| (x - 0.5).abs() < 0.03)
             && v["end"].as_f64().is_some_and(|x| (x - 1.5).abs() < 0.03)
     });
     // Dragging inside it moves it by 10 % (0.2 s), length kept.
     pointer_drag(&mut h, at(0.5, y), at(0.6, y));
     env.wait(&mut h, "loop moved", |s| {
-        let v = &find_cue(s, id).unwrap()["kind"]["vamp"];
+        let v = &find_cue(s, id).unwrap()["kind"]["loops"][0];
         v["start"].as_f64().is_some_and(|x| (x - 0.7).abs() < 0.03)
             && v["end"].as_f64().is_some_and(|x| (x - 1.7).abs() < 0.03)
+    });
+    // A second drag in free space adds a second loop after it (1.8 .. 1.95 s).
+    pointer_drag(&mut h, at(0.9, y), at(0.975, y));
+    env.wait(&mut h, "second loop drawn", |s| {
+        let l = &find_cue(s, id).unwrap()["kind"]["loops"];
+        l.as_array().is_some_and(|a| a.len() == 2)
+            && l[1]["start"].as_f64().is_some_and(|x| (x - 1.8).abs() < 0.03)
+            && l[0]["release_on_go"] == true
     });
     // The in point still moves by its handle.
     pointer_drag(&mut h, at(0.0, w.center().y), at(0.1, w.center().y));
