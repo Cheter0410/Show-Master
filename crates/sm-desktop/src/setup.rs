@@ -29,25 +29,25 @@ use std::str::FromStr;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 enum Tab {
-    #[default]
     Audio,
     Patch,
     Midi,
     Timecode,
     Remote,
     Hotkeys,
+    #[default]
     General,
     About,
 }
 
 const TABS: [(Tab, &str); 8] = [
+    (Tab::General, "General"),
     (Tab::Audio, "Audio"),
     (Tab::Patch, "Outputs / Patch"),
     (Tab::Midi, "MIDI"),
     (Tab::Timecode, "Timecode"),
     (Tab::Remote, "Remote"),
     (Tab::Hotkeys, "Hotkeys"),
-    (Tab::General, "General"),
     (Tab::About, "About / Updates"),
 ];
 

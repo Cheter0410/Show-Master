@@ -1,5 +1,5 @@
 //! Setup tabs "Audio" (device, rate, buffer, channels) and "Outputs / Patch"
-//! (named outputs, groups, layout templates).
+//! (named outputs on device channels, layout templates).
 
 use super::{
     banner, form, heading, hint, num_field, row, small_button, text_field, unit, SetupState,
@@ -8,7 +8,7 @@ use crate::model::{DeviceEntry, UiState};
 use crate::theme;
 use egui::RichText;
 use serde_json::json;
-use sm_core::model::{AudioSettings, OutputDef, OutputGroup, OutputPatch};
+use sm_core::model::{AudioSettings, OutputDef, OutputPatch};
 
 const BUFFERS: [u32; 6] = [64, 128, 256, 512, 1024, 2048];
 const RATES: [u32; 4] = [44_100, 48_000, 88_200, 96_000];
@@ -300,7 +300,7 @@ pub(super) fn patch_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(format!(
-                    "Replace all outputs and groups by the \"{layout}\" template? Cue routings may need checking afterwards (Undo works)."
+                    "Replace all outputs by the \"{layout}\" template? Cue routings may need checking afterwards (Undo works)."
                 ));
                 ui.horizontal(|ui| {
                     if ui.button(RichText::new(format!("Apply layout {layout}")).strong()).clicked() {
@@ -405,98 +405,6 @@ pub(super) fn patch_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
         "Removing outputs changes what existing cue routings point to - check the routing of audio cues afterwards.",
     );
 
-    heading(ui, "Groups");
-    if patch.groups.is_empty() {
-        hint(
-            ui,
-            "No groups. Groups are shortcuts for routing to several speakers at once.",
-        );
-    }
-    for (gi, g) in patch.groups.iter().enumerate() {
-        egui::Frame::new()
-            .fill(ui.visuals().faint_bg_color)
-            .corner_radius(5.0)
-            .inner_margin(egui::Margin::symmetric(10, 8))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.name_inputs(format!("Group {} name", gi + 1), |ui| {
-                        if let Some(name) = text_field(
-                            ui,
-                            &mut st.drafts,
-                            &format!("group_name_{gi}"),
-                            &g.name,
-                            160.0,
-                        ) {
-                            let mut p = patch.clone();
-                            p.groups[gi].name = name.trim().to_string();
-                            new_patch = Some(p);
-                        }
-                    });
-                    let mut layout = g.layout.clone();
-                    ui.name_inputs(format!("Group {} layout", gi + 1), |ui| {
-                        egui::ComboBox::from_id_salt(("group_layout", gi))
-                            .width(110.0)
-                            .selected_text(layout.clone().unwrap_or_else(|| "free".into()))
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut layout, None, "free");
-                                for l in &s.layouts {
-                                    ui.selectable_value(&mut layout, Some(l.clone()), l.as_str());
-                                }
-                            });
-                    });
-                    if layout != g.layout {
-                        let mut p = patch.clone();
-                        p.groups[gi].layout = layout;
-                        new_patch = Some(p);
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if small_button(ui, "Remove")
-                            .on_hover_text(format!("Remove group {}", g.name))
-                            .clicked()
-                        {
-                            let mut p = patch.clone();
-                            p.groups.remove(gi);
-                            new_patch = Some(p);
-                        }
-                    });
-                });
-                ui.horizontal_wrapped(|ui| {
-                    for (oi, o) in patch.outputs.iter().enumerate() {
-                        let idx = oi as u16;
-                        let mut on = g.outputs.contains(&idx);
-                        if ui
-                            .checkbox(&mut on, format!("{} {}", oi + 1, o.name))
-                            .changed()
-                        {
-                            let mut p = patch.clone();
-                            let members = &mut p.groups[gi].outputs;
-                            if on {
-                                members.push(idx);
-                                members.sort_unstable();
-                                members.dedup();
-                            } else {
-                                members.retain(|x| *x != idx);
-                            }
-                            new_patch = Some(p);
-                        }
-                    }
-                    if patch.outputs.is_empty() {
-                        hint(ui, "No outputs to choose from.");
-                    }
-                });
-            });
-        ui.add_space(4.0);
-    }
-    if ui.button("Add group").clicked() {
-        let mut p = patch.clone();
-        p.groups.push(OutputGroup {
-            name: format!("Group {}", p.groups.len() + 1),
-            layout: None,
-            outputs: Vec::new(),
-        });
-        new_patch = Some(p);
-    }
     if let Some(p) = new_patch {
         send_patch(st, &p);
     }
@@ -505,6 +413,7 @@ pub(super) fn patch_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sm_core::model::OutputGroup;
 
     #[test]
     fn removing_an_output_shifts_group_members() {

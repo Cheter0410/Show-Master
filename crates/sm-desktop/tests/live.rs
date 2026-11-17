@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{settle, Env};
+use common::{settle, shot, Env};
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use serde_json::Value;
@@ -263,6 +263,9 @@ fn release_loop_button_on_a_vamping_cue() {
     let lp = active(&env).iter().find(|a| a["cue"] == first).unwrap()["looping"].clone();
     assert_eq!(lp["name"], "Chorus");
     assert_eq!(lp["release_on_go"], true);
+    // GO says what it does: it releases the loop.
+    assert_eq!(h.state().go_release().as_deref(), Some("RELEASE CHORUS"));
+    shot(&mut h, "live_go_release");
     h.get_by_label("Release loop of cue 1 Intro").click();
     env.wait(&mut h, "released", |_| {
         active(&env)
@@ -270,4 +273,5 @@ fn release_loop_button_on_a_vamping_cue() {
             .any(|a| a["cue"] == first && a["vamping"] != true)
     });
     assert!(h.query_by_label("Release loop of cue 1 Intro").is_none());
+    assert_eq!(h.state().go_release(), None);
 }

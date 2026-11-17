@@ -1013,29 +1013,6 @@ pub(crate) fn routing_tab(ui: &mut Ui, show: &Show, cue: &Cue, out: &mut Vec<Out
         {
             out.push(set(vec![SILENT]));
         }
-        if sources == 1 && !show.patch.groups.is_empty() {
-            egui::ComboBox::from_id_salt(("route_group", id))
-                .selected_text("Send to group…")
-                .width(180.0)
-                .show_ui(ui, |ui| {
-                    for g in &show.patch.groups {
-                        let t = format!("{} ({} out)", g.name, g.outputs.len());
-                        if ui.selectable_label(false, t).clicked() {
-                            let r: Vec<Crosspoint> = g
-                                .outputs
-                                .iter()
-                                .filter(|o| usize::from(**o) < outputs.len())
-                                .map(|o| Crosspoint {
-                                    src: 0,
-                                    out: *o,
-                                    db: 0.0,
-                                })
-                                .collect();
-                            out.push(set(if r.is_empty() { vec![SILENT] } else { r }));
-                        }
-                    }
-                });
-        }
         ui.label(
             RichText::new(if is_default {
                 "Default routing · click a cell for 0 dB / off, right-click to set a level"

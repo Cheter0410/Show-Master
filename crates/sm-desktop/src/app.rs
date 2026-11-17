@@ -267,6 +267,27 @@ impl App {
     }
 
     /// The cue list shown in the main area.
+    /// What GO does first when loops play in the current list: "RELEASE <NAME>" for the loop it
+    /// releases (GO then only releases; the next cue starts with the next GO).
+    pub fn go_release(&self) -> Option<String> {
+        let list = self.current_list()?;
+        let names: Vec<&str> = self
+            .client
+            .tick
+            .active
+            .iter()
+            .filter(|a| a.list == list && a.vamping)
+            .filter_map(|a| a.looping.as_ref())
+            .filter(|l| l.release_on_go && !l.releasing)
+            .map(|l| l.name.as_str())
+            .collect();
+        let first = names.first()?.to_uppercase();
+        Some(match names.len() {
+            1 => format!("RELEASE {first}"),
+            n => format!("RELEASE {first} + {}", n - 1),
+        })
+    }
+
     pub fn current_list(&self) -> Option<u64> {
         let lists = &self.client.state.show.cue_lists;
         self.view

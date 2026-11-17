@@ -292,3 +292,7 @@ revidieren lassen.
 ## Mehrere Loops pro Cue (0.6.0)
 
 - Eine Audio-Cue hat `loops` (Liste, nach Start sortiert, ohne Überlappung) statt eines `vamp`. Die Engine spielt Abschnitte: Eine Stimme läuft vom vorigen Loop-Ende bis zum Ende des aktuellen Loops und wiederholt ihn; ein Release bereitet die nächste Stimme vor und wechselt sample-genau am Loop-Ende (bei „Release at once“ sofort über eine vorab geöffnete Ersatzstimme mit Crossfade). Der Loop-Crossfade passiert in `FileSource` (der Klang nach dem Loop-Ende wird ausgeblendet, der Loop-Anfang eingeblendet), damit sich das Timing der Engine nicht ändert. GO gibt zuerst einen Loop frei, der „GO releases“ hat, und startet erst mit dem nächsten GO die nächste Cue (Standard an, auch für migrierte Shows).
+
+## Keine Ausgangsgruppen in der Oberfläche (0.6.1)
+
+- Ausgangsgruppen sind aus Einstellungen und Routing entfernt: Ausgänge auf Gerätekanälen reichen. `patch.groups` bleibt im Datenmodell (alte Shows behalten sie, Layout-Vorlagen dürfen sie anlegen), wird aber nicht mehr angezeigt. „General“ ist der erste Einstellungs-Tab.

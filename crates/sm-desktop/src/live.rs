@@ -615,7 +615,7 @@ fn transport_zone(
         .and_then(|l| app.client.state.playhead(l))
         .is_some();
     widgets::go_button(app, ui, Vec2::new(w, go_h));
-    if !has_next {
+    if !has_next && app.go_release().is_none() {
         let r = ui.min_rect();
         ui.painter().text(
             Pos2::new(r.center().x, r.top() + go_h - 10.0),
@@ -991,7 +991,7 @@ fn stacked(app: &mut App, ui: &mut egui::Ui, r: Rect, hc: bool) {
             .current_list()
             .and_then(|l| app.client.state.playhead(l))
             .is_some();
-        if !has_next {
+        if !has_next && app.go_release().is_none() {
             c.painter().text(
                 Pos2::new(go.center().x, go.bottom() - 8.0),
                 Align2::CENTER_BOTTOM,

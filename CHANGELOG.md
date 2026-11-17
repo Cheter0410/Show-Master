@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.1
+
+- Settings: "General" is now the first tab and opens first.
+- Outputs / Patch: output groups are gone from the settings and from the routing ("Send to group…").
+  Outputs on device channels are all that is set up; groups in existing shows are kept in the file
+  but no longer shown.
+- While a loop plays that GO releases, the GO button says so under "GO": "RELEASE <loop name>"
+  (with "+ n" when GO releases several loops at once).
+
 ## 0.6.0
 
 - Loops (vamps), much extended: an audio cue can have several loops, one after the other, each with its

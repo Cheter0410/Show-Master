@@ -59,7 +59,11 @@ impl Env {
     fn ready(self) -> Env {
         let deadline = Instant::now() + Duration::from_secs(60);
         while !self.state()["show"]["cue_lists"].is_array() {
-            assert!(Instant::now() < deadline, "the runtime did not publish the show\nstate: {}", self.state());
+            assert!(
+                Instant::now() < deadline,
+                "the runtime did not publish the show\nstate: {}",
+                self.state()
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
         self

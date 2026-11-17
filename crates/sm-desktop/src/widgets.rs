@@ -16,14 +16,37 @@ pub fn go_button(app: &mut App, ui: &mut egui::Ui, size: Vec2) {
     } else {
         theme::GO
     };
+    let release = app.go_release();
     let resp = ui.add_sized(
         size,
         egui::Button::new(text).fill(fill).sense(Sense::click()),
     );
+    // A loop GO releases: its name under "GO" (big buttons; the small one has it as a tooltip).
+    if let Some(r) = &release {
+        if size.y >= 48.0 {
+            let rect = resp.rect;
+            ui.painter().text(
+                egui::pos2(
+                    rect.center().x,
+                    rect.bottom() - (size.y * 0.08).clamp(6.0, 14.0),
+                ),
+                egui::Align2::CENTER_BOTTOM,
+                r,
+                egui::FontId::proportional((size.y * 0.12).clamp(11.0, 18.0)),
+                Color32::from_white_alpha(230),
+            );
+        }
+    }
     if resp.is_pointer_button_down_on() && !locked && ui.input(|i| i.pointer.any_pressed()) {
         app.go();
     }
-    resp.on_hover_text("GO: fire the next cue (Space)");
+    match release {
+        Some(r) => resp.on_hover_text(format!(
+            "GO: {} (Space) - the next cue starts with the next GO",
+            r.to_lowercase()
+        )),
+        None => resp.on_hover_text("GO: fire the next cue (Space)"),
+    };
 }
 
 /// PANIC: stops everything (double tap when that safety is on).
