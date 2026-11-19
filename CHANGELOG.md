@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- Rebuilt `ui/dist` so the committed tablet remote matches the current UI sources (no Node needed to use it).
+
 ## 0.7.0
 
 - Tablet remote (`/remote`): quick edits. "Edit" in the selection bar opens the selected cue: number,
