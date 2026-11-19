@@ -23,7 +23,7 @@ Dock. Beendet wird nur mit **Quit** im Fenster (Mac: Cmd+Q) oder *Quit Show Mast
 Parallel läuft ein lokaler Webserver
 nur für Fernsteuerung: Auf Handy oder iPad im selben lokalen Netz reicht im Browser
 **`showmaster.local`** – das öffnet die reine Anzeige (ohne PIN, falls keine View-PIN gesetzt ist).
-Oben rechts führt der Knopf **Control** zur Fernsteuerung (GO, Pause, Stop, PANIC, Pegel, Notizen und ein Timecode-Tab mit Start/Pause/Resume/Stop/Locate; Control-PIN, Standard `1234`), **View** wieder
+Oben rechts führt der Knopf **Control** zur Fernsteuerung (GO, Pause, Stop, PANIC, Pegel, Notizen, ein Timecode-Tab mit Start/Pause/Resume/Stop/Locate und schnelle Änderungen an einer Cue über **Edit**: Name, Nummer, Notizen, Farbe, Wartezeiten, Pegel, Fades, In/Out und Loops, dazu Undo, Save und EDIT/LIVE; Control-PIN, Standard `1234`), **View** wieder
 zurück; direkt geht es auch über `showmaster.local/remote`. **Stage** zeigt eine große Ansicht für die
 Inspizienz (NEXT mit Notizen, Countdown, laufende Cues, Uhren, Cue-Sheet als PDF). Ohne PIN-Tippen geht
 es mit *Setup → Remote → Pair a control device*: Tablet scannt den QR-Code und bleibt angemeldet, bis es

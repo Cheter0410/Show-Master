@@ -1,17 +1,19 @@
 // /remote – touch-first control surface for the iPad (role `control`).
 import { useEffect, useState } from "react";
-import { transport } from "../commands";
+import { run, transport } from "../commands";
 import { Clocks } from "../components/Clocks";
 import { CueList } from "../components/CueList";
 import { MasterFader, Meters } from "../components/Meters";
 import { NextPanel } from "../components/NextPanel";
+import { QuickEdit } from "../components/QuickEdit";
+import { ModeDialogs, ModeSwitch } from "../desktop/ModeSwitch";
 import { ConnDot, Notes } from "../components/Panels";
 import { TimecodePanel } from "../components/TimecodePanel";
 import { Transport } from "../components/Transport";
 import { cueLabel, findCue } from "../cues";
 import { IconChevronDown, IconUp } from "../components/icons";
 import { keepScreenAwake, loadFlag, saveFlag } from "../platform";
-import { currentListId, useApp } from "../store";
+import { currentListId, toast, useApp } from "../store";
 
 type Tab = "cues" | "mix" | "tc" | "notes";
 
@@ -20,6 +22,10 @@ export function RemoteApp() {
   const [follow, setFollow] = useState(true);
   const show = useApp((s) => s.doc?.show ?? null);
   const mode = useApp((s) => s.doc?.mode);
+  const dirty = useApp((s) => s.doc?.dirty ?? false);
+  const canUndo = useApp((s) => s.doc?.can_undo ?? false);
+  const hasPath = useApp((s) => s.doc?.show_path != null);
+  const [editing, setEditing] = useState<number | null>(null);
   const selectedId = useApp((s) => s.selection[0] ?? null);
   const playhead = useApp((s) => {
     const l = currentListId(s);
@@ -39,7 +45,25 @@ export function RemoteApp() {
       <header className="r-head">
         <ConnDot />
         <span className="r-title ellipsis">{show?.name ?? "Show Master"}</span>
-        <span className={`mode-badge ${mode}`}>{mode === "live" ? "LIVE" : "EDIT"}</span>
+        <button
+          className="btn ghost r-undo"
+          data-testid="r-undo"
+          disabled={!canUndo || mode === "live"}
+          title={mode === "live" ? "Undo works in Edit mode" : "Undo the last change"}
+          onClick={() => void run({ cmd: "undo" })}
+        >
+          Undo
+        </button>
+        <button
+          className={`btn r-save${dirty ? " primary" : " ghost"}`}
+          data-testid="r-save"
+          disabled={!dirty || !hasPath}
+          title={hasPath ? "Save the show" : "Save the show on the host computer first"}
+          onClick={() => void run({ cmd: "save_show" }).then((ok) => ok && toast("Show saved", "info", 2000))}
+        >
+          {dirty ? "Save" : "Saved"}
+        </button>
+        <ModeSwitch />
         <a className="btn ghost r-switch" href="/view" data-testid="to-view" title="Back to the read-only view">
           View
         </a>
@@ -86,12 +110,17 @@ export function RemoteApp() {
             <button className="btn big" data-testid="fire-selected" disabled={!selected} onClick={() => selected && void transport.startCue(selected.id)}>
               Fire selected
             </button>
+            <button className="btn big" data-testid="edit-selected" disabled={!selected} onClick={() => selected && setEditing(selected.id)}>
+              Edit
+            </button>
           </div>
         ) : null}
       </div>
       <div className="r-transport">
         <Transport touch />
       </div>
+      {editing != null ? <QuickEdit cueId={editing} onClose={() => setEditing(null)} /> : null}
+      <ModeDialogs />
     </div>
   );
 }

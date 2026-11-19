@@ -161,6 +161,14 @@ impl AnyCommand {
         match self {
             AnyCommand::Engine(_) => Role::Control,
             AnyCommand::Sys(SysCommand::SetNotes { .. } | SysCommand::ResetClip) => Role::Control,
+            // The tablet: quick cue edits, Edit/Live and saving to the show's own file.
+            AnyCommand::Edit(c) if c.is_quick_edit() => Role::Control,
+            AnyCommand::Sys(SysCommand::SetMode { .. } | SysCommand::RunPreflight) => Role::Control,
+            AnyCommand::Sys(SysCommand::SaveShow {
+                path: None,
+                folder: false,
+                media: None,
+            }) => Role::Control,
             AnyCommand::Edit(_) | AnyCommand::Sys(_) => Role::Admin,
         }
     }
@@ -581,7 +589,10 @@ impl Runtime {
         };
         let doc = Document::new(show, path);
         let dir = doc.show_dir().map(Path::to_path_buf);
-        let midi = config.midi_backend.take().unwrap_or_else(sm_io::midi::default_backend);
+        let midi = config
+            .midi_backend
+            .take()
+            .unwrap_or_else(sm_io::midi::default_backend);
         let io = if config.midi_input_backend.is_some() || config.audio_input_backend.is_some() {
             Io::with_input_backends(
                 &doc.show,

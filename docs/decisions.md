@@ -296,3 +296,7 @@ revidieren lassen.
 ## Keine Ausgangsgruppen in der Oberfläche (0.6.1)
 
 - Ausgangsgruppen sind aus Einstellungen und Routing entfernt: Ausgänge auf Gerätekanälen reichen. `patch.groups` bleibt im Datenmodell (alte Shows behalten sie, Layout-Vorlagen dürfen sie anlegen), wird aber nicht mehr angezeigt. „General“ ist der erste Einstellungs-Tab.
+
+## Schnelle Änderungen vom Tablet (0.7.0)
+
+- Die Rolle `control` darf kleine Cue-Änderungen schicken (`EditCommand::is_quick_edit`: Name, Nummer, Notizen, Farbe, Armed, Wartezeiten, Continue, Pegel, Fades, In/Out, Loops, Fade-Dauer/-Pegel), dazu Undo/Redo, Edit/Live und Speichern in die eigene Showdatei. Neue Cues, Dateien, Ziele, Einstellungen und „Speichern unter“ bleiben beim Host-PC (`admin`): Dort wird die Show im Detail vorbereitet, das iPad korrigiert nur schnell.

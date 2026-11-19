@@ -10,10 +10,16 @@ Default port: `7400` (show setting `settings.remote.port`).
 | Role      | How obtained                                             | May do                                   |
 |-----------|----------------------------------------------------------|------------------------------------------|
 | `admin`   | automatically for connections from loopback (the desktop UI) | everything incl. editing, files, setup |
-| `control` | `POST /api/login` with the control PIN                   | transport commands, `set_notes`          |
+| `control` | `POST /api/login` with the control PIN                   | transport commands, `set_notes`, quick edits (below), `undo`/`redo`, `set_mode`, `run_preflight`, `save_show` without arguments |
 | `view`    | `POST /api/login` with the view PIN (or no PIN if empty) | nothing – read only                      |
 
 Roles are enforced on the server for every command, never only in the UI.
+
+Quick edits (role `control`): `update_cue` / `update_cues` whose patch only touches `number`, `name`, `notes`,
+`color`, `armed`, `pre_wait`, `post_wait`, `continue_mode` and, inside `kind`, `gain_db`, `fade_in`, `fade_out`,
+`fade_curve`, `start`, `end`, `loop_count`, `loops`, `duration`, `curve`, `stop_target`. Anything else (new or
+deleted cues, the cue type, files, targets, show settings, saving elsewhere) stays `admin`. Live mode still
+only allows the live-safe fields (notes, level, routing).
 
 ## HTTP
 

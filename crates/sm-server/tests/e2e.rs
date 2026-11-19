@@ -296,7 +296,32 @@ async fn full_show_flow_over_websocket() {
     );
     assert_eq!(
         control
+            .cmd(json!({ "cmd": "save_show", "path": "/tmp/elsewhere.smshow" }))
+            .await
+            .unwrap_err(),
+        "forbidden",
+        "the tablet saves only to the show's own file"
+    );
+    assert_ne!(
+        control
             .cmd(json!({ "cmd": "save_show" }))
+            .await
+            .err()
+            .as_deref(),
+        Some("forbidden"),
+        "the tablet may save the show"
+    );
+    assert_eq!(
+        control
+            .cmd(json!({ "cmd": "add_cue", "kind": "memo" }))
+            .await
+            .unwrap_err(),
+        "forbidden",
+        "the tablet does not add cues"
+    );
+    assert_eq!(
+        control
+            .cmd(json!({ "cmd": "update_cue", "cue": 1, "patch": { "kind": { "file": "x.wav" } } }))
             .await
             .unwrap_err(),
         "forbidden"
@@ -337,6 +362,24 @@ async fn full_show_flow_over_websocket() {
         .until("undo visible", |c| {
             c.state["show"]["cue_lists"][0]["cues"][2]["name"] == "tone"
                 && c.state["can_redo"] == true
+        })
+        .await;
+    // The tablet makes quick edits: a new name and fade-in, then undoes the fade-in.
+    control
+        .cmd(json!({ "cmd": "update_cue", "cue": new_cue, "patch": { "name": "From iPad" } }))
+        .await
+        .unwrap();
+    control
+        .cmd(
+            json!({ "cmd": "update_cue", "cue": new_cue, "patch": { "kind": { "fade_in": 0.2 } } }),
+        )
+        .await
+        .unwrap();
+    control.cmd(json!({ "cmd": "undo" })).await.unwrap();
+    admin
+        .until("tablet edits visible", |c| {
+            let cue = &c.state["show"]["cue_lists"][0]["cues"][2];
+            cue["name"] == "From iPad" && cue["kind"]["fade_in"] == 0.0
         })
         .await;
     admin
@@ -487,7 +530,7 @@ async fn full_show_flow_over_websocket() {
         fx.port,
         "POST",
         "/api/v1/command?token=pin:4711",
-        Some(json!({ "cmd": "save_show" })),
+        Some(json!({ "cmd": "update_show", "patch": { "name": "x" } })),
     )
     .await;
     assert_eq!((status, r["error"].as_str()), (403, Some("forbidden")));

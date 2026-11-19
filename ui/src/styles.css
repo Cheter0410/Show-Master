@@ -1104,3 +1104,31 @@ button.lrow-gutter:hover { box-shadow: inset 7px 0 0 var(--green-deep); }
 .lrow.is-child .lrow-num { color: var(--muted); }
 .lrow-tree i:not([class*="c-"]) { --cc: 140 146 160; }
 .tag-loop { background: color-mix(in srgb, var(--amber) 22%, transparent); color: var(--amber); }
+
+/* ---------- quick edit (tablet) ---------- */
+.r-head .r-undo, .r-head .r-save { flex: none; min-height: 40px; padding: 4px 12px; }
+.r-head .mode-switch button { min-height: 40px; padding: 6px 12px; }
+.modal.quick-edit { width: min(820px, 100%); }
+.quick-edit .modal-body { display: flex; flex-direction: column; gap: 6px; }
+.quick-edit .form-row { min-height: 48px; align-items: center; }
+.quick-edit .form-label { padding-top: 0; font-size: 14px; width: 90px; }
+.quick-edit .input { min-height: 44px; font-size: 16px; }
+.quick-edit .check { min-height: 44px; font-size: 15px; }
+.quick-edit .check input { width: 22px; height: 22px; }
+.quick-edit .swatch { width: 36px; height: 36px; }
+.quick-edit .swatches { gap: 10px; flex-wrap: wrap; }
+.qe-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); column-gap: 18px; }
+.qe-head { font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 14px 0 4px; border-top: var(--bw) solid var(--border); padding-top: 12px; }
+.qe-live { background: var(--red-bg); border: var(--bw) solid var(--red); border-radius: var(--radius); padding: 8px 12px; margin: 0 0 6px; font-size: 14px; }
+.qe-loop { background: var(--panel2); border: var(--bw) solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px; }
+.qe-loop-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.qe-mini { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.quick-edit .modal-foot .btn.big { min-height: 48px; padding: 6px 28px; }
+@media (max-width: 560px) {
+  /* phones: the header keeps Save and the mode switch; Undo only on bigger screens */
+  .r-head .r-undo { display: none; }
+  .r-head .r-save { padding: 4px 8px; }
+  .r-head .mode-switch button { padding: 4px 8px; letter-spacing: 0.02em; }
+  .quick-edit .form-label { width: 74px; }
+  .qe-grid { grid-template-columns: minmax(0, 1fr); }
+}

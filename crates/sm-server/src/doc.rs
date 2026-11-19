@@ -113,6 +113,47 @@ impl EditCommand {
         }
     }
 
+    /// A quick edit the tablet (role `control`) may make: undo / redo and cue patches that
+    /// only touch everyday fields (name, number, notes, colour, waits, levels, fades, in/out,
+    /// loops). Never the cue type, file, target or anything structural.
+    pub fn is_quick_edit(&self) -> bool {
+        fn quick(patch: &Value) -> bool {
+            let Some(obj) = patch.as_object() else {
+                return false;
+            };
+            obj.iter().all(|(k, v)| match k.as_str() {
+                "number" | "name" | "notes" | "color" | "armed" | "pre_wait" | "post_wait"
+                | "continue_mode" => true,
+                "kind" => v.as_object().is_some_and(|kind| {
+                    kind.keys().all(|k| {
+                        matches!(
+                            k.as_str(),
+                            "gain_db"
+                                | "fade_in"
+                                | "fade_out"
+                                | "fade_curve"
+                                | "start"
+                                | "end"
+                                | "loop_count"
+                                | "loops"
+                                | "duration"
+                                | "curve"
+                                | "stop_target"
+                        )
+                    })
+                }),
+                _ => false,
+            })
+        }
+        match self {
+            EditCommand::Undo | EditCommand::Redo => true,
+            EditCommand::UpdateCue { patch, .. } | EditCommand::UpdateCues { patch, .. } => {
+                quick(patch)
+            }
+            _ => false,
+        }
+    }
+
     /// For level / routing patches: which cues and fields they change, so
     /// that a stream of them (a fader being dragged) is one undo step.
     fn coalesce_key(&self) -> Option<String> {
@@ -1218,6 +1259,35 @@ mod tests {
         let del: EditCommand =
             serde_json::from_value(json!({ "cmd": "delete_cues", "cues": [1] })).unwrap();
         assert!(!del.is_live_safe());
+    }
+
+    #[test]
+    fn quick_edits_for_the_tablet() {
+        let cmd = |v: Value| serde_json::from_value::<EditCommand>(v).unwrap();
+        assert!(cmd(
+            json!({ "cmd": "update_cue", "cue": 1, "patch": { "name": "x", "pre_wait": 1.0 } })
+        )
+        .is_quick_edit());
+        assert!(cmd(json!({ "cmd": "update_cue", "cue": 1, "patch": { "kind": { "fade_in": 2.0, "loops": [] } } })).is_quick_edit());
+        assert!(cmd(json!({ "cmd": "undo" })).is_quick_edit());
+        assert!(!cmd(
+            json!({ "cmd": "update_cue", "cue": 1, "patch": { "kind": { "file": "a.wav" } } })
+        )
+        .is_quick_edit());
+        assert!(!cmd(
+            json!({ "cmd": "update_cue", "cue": 1, "patch": { "kind": { "type": "memo" } } })
+        )
+        .is_quick_edit());
+        assert!(!cmd(
+            json!({ "cmd": "update_cue", "cue": 1, "patch": { "kind": { "target": 3 } } })
+        )
+        .is_quick_edit());
+        assert!(!cmd(
+            json!({ "cmd": "update_cue", "cue": 1, "patch": { "tc_trigger": "01:00:00:00" } })
+        )
+        .is_quick_edit());
+        assert!(!cmd(json!({ "cmd": "delete_cues", "cues": [1] })).is_quick_edit());
+        assert!(!cmd(json!({ "cmd": "add_cue", "kind": "memo" })).is_quick_edit());
     }
 
     #[test]

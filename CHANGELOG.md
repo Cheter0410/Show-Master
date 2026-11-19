@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.0
+
+- Tablet remote (`/remote`): quick edits. "Edit" in the selection bar opens the selected cue: number,
+  name, notes, colour, armed, pre/post-wait, continue mode; for audio cues level, fades, start/end and the
+  loops (name, from/to, crossfade, passes, GO releases, release at once, add/remove); for fade cues
+  duration, level and "stop the cue". In Live mode only notes and level can change.
+- The tablet header has Undo, Save (to the show's own file) and the EDIT/LIVE switch with the pre-flight
+  check.
+- Server: the `control` role may send these quick edits, `undo`/`redo`, `set_mode`, `run_preflight` and
+  `save_show` without arguments. Adding or deleting cues, files, targets, settings and "save as" stay
+  admin only.
+- Note: `ui/dist` is not rebuilt in this version (no Node on the Mac it was made on); run
+  `cd ui && npm run build` and commit `ui/dist` for the tablet to show it.
+
 ## 0.6.1
 
 - Settings: "General" is now the first tab and opens first.
