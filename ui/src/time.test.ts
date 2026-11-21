@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatClock, formatCountdown, formatDb, formatDuration, formatSeconds, linToDb, normalizeTimecode, parseDb,
+  formatClock, formatCountdown, formatDb, formatDuration, formatKhz, formatSeconds, linToDb, normalizeTimecode, parseDb,
   parseDuration, parseTimecode, validateSysex, validateTimecode,
 } from "./time";
 
@@ -130,5 +130,14 @@ describe("validateSysex", () => {
     expect(validateSysex("01 02 F7")).toMatchObject({ ok: false, error: "Must start with F0" });
     expect(validateSysex("F0 01 02")).toMatchObject({ ok: false, error: "Must end with F7" });
     expect(validateSysex("F0 80 F7")).toMatchObject({ ok: false });
+  });
+});
+
+describe("formatKhz", () => {
+  it("drops needless decimals", () => {
+    expect(formatKhz(48000)).toBe("48 kHz");
+    expect(formatKhz(44100)).toBe("44.1 kHz");
+    expect(formatKhz(88200)).toBe("88.2 kHz");
+    expect(formatKhz(22050)).toBe("22.05 kHz");
   });
 });

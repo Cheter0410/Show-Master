@@ -5,6 +5,11 @@ function pad2(n: number): string {
 }
 
 /** 75.3 -> "1:15.3", 3723 -> "1:02:03.0"; null/NaN -> "–". Tenths are truncated, never rounded up. */
+/** A sample rate as people say it: 48000 -> "48 kHz", 44100 -> "44.1 kHz". */
+export function formatKhz(hz: number): string {
+  return `${parseFloat((hz / 1000).toFixed(3))} kHz`;
+}
+
 export function formatDuration(seconds: number | null | undefined, tenths = true): string {
   if (seconds == null || !Number.isFinite(seconds)) return "–";
   const neg = seconds < 0;

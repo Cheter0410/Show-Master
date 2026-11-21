@@ -5,7 +5,7 @@ import { run, transport } from "../commands";
 import { Check, DbField, NumField, Row, Select, Slider, TimeField } from "../components/fields";
 import { IconPlay, IconStop } from "../components/icons";
 import { getApp, useApp } from "../store";
-import { DB_FLOOR, formatDb, formatDuration, parseDb } from "../time";
+import { DB_FLOOR, formatDb, formatDuration, formatKhz, parseDb } from "../time";
 import { FileBrowser } from "./FileBrowser";
 import { CURVE_OPTIONS } from "./Inspector";
 
@@ -142,7 +142,7 @@ function WaveformView({ cue, kind }: { cue: Cue; kind: AudioKind }) {
       />
       <div className="wave-info num">
         <span className="wave-start">▶ {formatDuration(start)}</span>
-        <span className="muted">{error ?? (wave ? `${wave.channels} ch · ${(wave.sample_rate / 1000).toFixed(1)} kHz · ${formatDuration(duration)}` : kind.file ? "loading waveform…" : "no file")}</span>
+        <span className="muted">{error ?? (wave ? `${wave.channels} ch · ${formatKhz(wave.sample_rate)} · ${formatDuration(duration)}` : kind.file ? "loading waveform…" : "no file")}</span>
         <span className="wave-end">{formatDuration(end)} ◀</span>
       </div>
     </div>

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { run, transport } from "../commands";
 import { route, submitPin } from "../session";
 import { dismissToast, toast, useApp } from "../store";
-import { formatWallClock } from "../time";
+import { formatKhz, formatWallClock } from "../time";
 import { IconLock, IconX } from "./icons";
 
 // ---------- stage manager notes ----------
@@ -109,8 +109,8 @@ export function StatusBar() {
       >
         {audio?.error ? `Audio error: ${audio.error}` : audio?.is_null ? "NO AUDIO DEVICE (silent)" : audio?.device ?? "–"}
       </span>
-      <span className="sb-minor">{audio ? `${(audio.sample_rate / 1000).toFixed(audio.sample_rate % 1000 ? 1 : 0)} kHz` : ""}</span>
-      <span className="sb-minor">{audio ? `${audio.buffer_frames} frames` : ""}</span>
+      <span className="sb-minor">{audio ? formatKhz(audio.sample_rate) : ""}</span>
+      <span className="sb-minor">{audio ? `${audio.buffer_frames} samples` : ""}</span>
       <span className="sb-minor">{audio ? `${audio.channels} out` : ""}</span>
       <span className={cpu != null && cpu > 70 ? "sb-warn" : ""}>CPU {cpu ?? "–"}%</span>
       <span className={underruns > 0 ? "sb-err" : ""}>Underruns {underruns}</span>

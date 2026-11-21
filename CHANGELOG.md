@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.1
+
+- Tablet remote and browser UI: buffer sizes in samples and sample rates in kHz too ("48 kHz",
+  "256 samples"), like the desktop app since 0.8.0. `ui/dist` rebuilt.
+
 ## 0.8.0
 
 - Audio editor: clicking the waveform past a loop moves the playhead there. Before, a playing cue

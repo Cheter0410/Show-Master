@@ -6,7 +6,7 @@ import { Check, DbField, NumField, Row, Select, TcField, TextField, TimeField } 
 import { Confirm, Modal } from "../components/Modal";
 import { ACTION_LABELS, assignHotkey, clearHotkey, comboFromEvent, DEFAULT_HOTKEYS, formatCombo, HOTKEY_ACTIONS, keyForAction, type HotkeyAction } from "../hotkeys";
 import { toast, useApp } from "../store";
-import { formatWallClock } from "../time";
+import { formatKhz, formatWallClock } from "../time";
 
 type Tab = "audio" | "patch" | "midi" | "timecode" | "remote" | "hotkeys" | "general";
 const TABS: { id: Tab; label: string }[] = [
@@ -37,7 +37,7 @@ function AudioSetup({ doc }: { doc: State }) {
     <div className="setup-col">
       <div className={`engine-status${doc.audio.error ? " bad" : doc.audio.is_null ? " warn" : ""}`}>
         <b>{doc.audio.error ? "Audio error" : doc.audio.is_null ? "No audio device – running silent" : "Engine running"}</b>
-        <span>{doc.audio.error ?? `${doc.audio.device} · ${doc.audio.backend} · ${doc.audio.sample_rate} Hz · ${doc.audio.buffer_frames} frames · ${doc.audio.channels} outputs`}</span>
+        <span>{doc.audio.error ?? `${doc.audio.device} · ${doc.audio.backend} · ${formatKhz(doc.audio.sample_rate)} · ${doc.audio.buffer_frames} samples · ${doc.audio.channels} outputs`}</span>
       </div>
       <Row label="Device">
         <Select
@@ -51,10 +51,10 @@ function AudioSetup({ doc }: { doc: State }) {
         />
       </Row>
       <Row label="Sample rate">
-        <Select value={a.sample_rate} options={[...new Set([...rates, a.sample_rate])].sort((x, y) => x - y).map((r) => ({ value: r, label: `${r} Hz` }))} onChange={(v) => set({ sample_rate: v })} width={140} />
+        <Select value={a.sample_rate} options={[...new Set([...rates, a.sample_rate])].sort((x, y) => x - y).map((r) => ({ value: r, label: formatKhz(r) }))} onChange={(v) => set({ sample_rate: v })} width={140} />
       </Row>
       <Row label="Buffer" hint="smaller = lower latency, higher risk of dropouts">
-        <Select value={a.buffer_frames} options={[...new Set([64, 128, 256, 512, 1024, 2048, a.buffer_frames])].sort((x, y) => x - y).map((r) => ({ value: r, label: `${r} frames (${((r / a.sample_rate) * 1000).toFixed(1)} ms)` }))} onChange={(v) => set({ buffer_frames: v })} width={200} />
+        <Select value={a.buffer_frames} options={[...new Set([64, 128, 256, 512, 1024, 2048, a.buffer_frames])].sort((x, y) => x - y).map((r) => ({ value: r, label: `${r} samples (${((r / a.sample_rate) * 1000).toFixed(1)} ms)` }))} onChange={(v) => set({ buffer_frames: v })} width={200} />
       </Row>
       <Row label="Output channels" hint={`device offers up to ${maxCh}`}>
         <NumField value={a.channels} integer min={1} max={maxCh} width={80} testId="setup-channels" onCommit={(v) => set({ channels: v })} />
