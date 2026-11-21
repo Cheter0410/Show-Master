@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0
+
+- First stable release: the development phase is complete. From here on there are fixes and smaller
+  improvements.
+
 ## 0.8.1
 
 - Tablet remote and browser UI: buffer sizes in samples and sample rates in kHz too ("48 kHz",

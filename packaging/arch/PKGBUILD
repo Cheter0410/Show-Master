@@ -2,7 +2,7 @@
 # Used by packaging/build-on-linux.sh (which builds the program first):
 #   SM_VERSION=0.4.0 makepkg -f
 pkgname=showmaster
-pkgver=${SM_VERSION:-0.4.0}
+pkgver=${SM_VERSION:-1.0.0}
 pkgrel=1
 pkgdesc="Cue-based playback and show control for live production (runs fully offline)"
 arch=('x86_64')
