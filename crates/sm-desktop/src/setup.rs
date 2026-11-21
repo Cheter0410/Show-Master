@@ -68,6 +68,7 @@ pub(super) enum Out {
     Pair(&'static str),
     SetAutostart(bool),
     SetOpenLast(bool),
+    SetLiveWaveform(bool),
     SetKiosk(bool, String),
 }
 
@@ -98,6 +99,7 @@ pub struct SetupState {
     pub pair_shown: Option<(String, String)>,
     /// Per-machine settings mirrored from the preferences while Setup is open.
     open_last: bool,
+    live_waveform: bool,
     kiosk: bool,
     kiosk_pin: String,
     /// Start with the computer (read from the system when Setup opens).
@@ -165,6 +167,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     {
         app.setup.touch_pref = app.prefs.touch;
         app.setup.open_last = app.prefs.open_last;
+        app.setup.live_waveform = app.prefs.live_waveform;
         app.setup.kiosk = app.prefs.kiosk;
         app.setup.kiosk_pin.clone_from(&app.prefs.kiosk_pin);
         if app.setup.autostart.is_none() {
@@ -335,6 +338,7 @@ fn flush(app: &mut App) {
                 Err(e) => app.toast_error(format!("Start with the computer: {e}")),
             },
             Out::SetOpenLast(on) => app.prefs.set_open_last(on),
+            Out::SetLiveWaveform(on) => app.prefs.set_live_waveform(on),
             Out::SetKiosk(on, pin) => app.prefs.set_kiosk(on, &pin),
             Out::Pair(role) => {
                 let page = if role == "view" { "view" } else { "remote" };

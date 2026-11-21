@@ -131,7 +131,7 @@ const LOOP_STRIP: f32 = 18.0;
 /// Pointer distance (px) that grabs a marker or a loop edge.
 const GRAB_PX: f32 = 8.0;
 
-fn show_dir(state: &UiState) -> Option<PathBuf> {
+pub(crate) fn show_dir(state: &UiState) -> Option<PathBuf> {
     state
         .show_path
         .as_deref()
@@ -750,11 +750,9 @@ fn waveform(
                     Marker::Seek => {
                         // The playhead: a playing cue jumps there, a stopped
                         // one is loaded there (GO / preview start there).
-                        let at = match a.active_loops().first() {
-                            // Past the first loop the cue only gets after a release.
-                            Some(v) => d.time.clamp(start, v.end - min_len),
-                            None => d.time.clamp(start, end),
-                        };
+                        // Anywhere in the region: past a loop, the cue plays on
+                        // from there (the loops before it are behind it).
+                        let at = d.time.clamp(start, (end - min_len).max(start));
                         out.push(Out::Cmd(json!({
                             "cmd": "seek_cue", "cue": id, "time": r2(at - start),
                         })));

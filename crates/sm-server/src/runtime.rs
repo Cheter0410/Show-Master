@@ -644,8 +644,11 @@ impl Runtime {
         rt.note(
             "info",
             format!(
-                "Audio output: {} / {} @ {} Hz, {} ch",
-                status.backend, status.device, status.sample_rate, status.channels
+                "Audio output: {} / {} @ {}, {} ch",
+                status.backend,
+                status.device,
+                sm_audio::fmt_khz(status.sample_rate),
+                status.channels
             ),
         );
         if let Some(n) = &status.note {
@@ -952,8 +955,11 @@ impl Runtime {
         self.note(
             "info",
             format!(
-                "Audio output: {} / {} @ {} Hz, {} ch",
-                status.backend, status.device, status.sample_rate, status.channels
+                "Audio output: {} / {} @ {}, {} ch",
+                status.backend,
+                status.device,
+                sm_audio::fmt_khz(status.sample_rate),
+                status.channels
             ),
         );
         if let Some(e) = status.error {

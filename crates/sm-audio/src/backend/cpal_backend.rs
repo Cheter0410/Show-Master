@@ -87,8 +87,8 @@ fn choose_config(
         .map(|(_, c)| c)
         .ok_or_else(|| {
             AudioError::Unsupported(format!(
-                "device does not support {} Hz output",
-                req.sample_rate
+                "device does not support {} output",
+                crate::fmt_khz(req.sample_rate)
             ))
         })
 }
@@ -332,13 +332,18 @@ fn device_rate_note(name: Option<&str>, rate: u32) -> Option<String> {
     match match_rate(name, rate) {
         RateChange::Already | RateChange::Unknown => None,
         RateChange::Switched(from) => Some(format!(
-            "Audio device switched from {from} Hz to {rate} Hz (the show's sample rate)"
+            "Audio device switched from {} to {} (the show's sample rate)",
+            crate::fmt_khz(from),
+            crate::fmt_khz(rate)
         )),
-        RateChange::Failed(at) => Some(format!(
-            "The audio device runs at {at} Hz and could not be switched to {rate} Hz: macOS \
-             converts in real time, which can crackle. Set the sample rate to {at} Hz in \
-             Setup > Audio, or set the device to {rate} Hz in Audio MIDI Setup."
-        )),
+        RateChange::Failed(at) => {
+            let (at, rate) = (crate::fmt_khz(at), crate::fmt_khz(rate));
+            Some(format!(
+                "The audio device runs at {at} and could not be switched to {rate}: macOS \
+                 converts in real time, which can crackle. Set the sample rate to {at} in \
+                 Setup > Audio, or set the device to {rate} in Audio MIDI Setup."
+            ))
+        }
     }
 }
 

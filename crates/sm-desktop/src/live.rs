@@ -39,6 +39,8 @@ pub mod clocks;
 pub mod cues;
 #[path = "live_meters.rs"]
 pub mod meters;
+#[path = "live_wave.rs"]
+mod wave;
 
 use crate::app::App;
 use crate::theme;
@@ -171,10 +173,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let tools_h = (r.height() * 0.3).clamp(160.0, 280.0);
     let clocks = Rect::from_min_size(left.min, Vec2::new(left.width(), clock_h));
     let tools = Rect::from_min_max(Pos2::new(left.left(), left.bottom() - tools_h), left.max);
-    let cue_rect = Rect::from_min_max(
+    let mut cue_rect = Rect::from_min_max(
         Pos2::new(left.left(), clocks.bottom() + GAP),
         Pos2::new(left.right(), tools.top() - GAP),
     );
+    let wave_rect = wave_rect(app, &mut cue_rect);
 
     let clock_action = clocks::clock_strip(ui, clocks, &app.client.tick);
     if clock_action.reset_show_clock {
@@ -183,12 +186,30 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     if let Some(cmd) = clock_action.timecode {
         app.cmd(json!({ "cmd": cmd }));
     }
+    if let Some(w) = wave_rect {
+        wave::strip(app, ui, w, hc);
+    }
     cue_zone(app, ui, cue_rect, hc);
     tools_zone(app, ui, tools, hc);
     side_zone(app, ui, side, hc);
     reset_confirm(app, ui);
 
     ui.advance_cursor_after_rect(full);
+}
+
+/// The waveform strip (when it is switched on and there is room): taken
+/// from the top of the cue window.
+fn wave_rect(app: &App, cue_rect: &mut Rect) -> Option<Rect> {
+    if !app.prefs.live_waveform {
+        return None;
+    }
+    let h = (cue_rect.height() * 0.22).clamp(72.0, 120.0);
+    if cue_rect.height() - h - GAP < 150.0 {
+        return None;
+    }
+    let w = Rect::from_min_size(cue_rect.min, Vec2::new(cue_rect.width(), h));
+    cue_rect.min.y = w.bottom() + GAP;
+    Some(w)
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +317,14 @@ fn cue_zone(app: &mut App, ui: &mut egui::Ui, rect: Rect, hc: bool) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.checkbox(&mut app.live.follow, "Follow playhead")
                 .on_hover_text("Keep the NEXT cue in view");
+            let mut wave = app.prefs.live_waveform;
+            if ui
+                .checkbox(&mut wave, "Waveform")
+                .on_hover_text("Show the waveform of the audio playing above the cue list (this computer)")
+                .changed()
+            {
+                app.prefs.set_live_waveform(wave);
+            }
             if roomy {
                 ui.label(
                     RichText::new(if touch {
@@ -965,10 +994,11 @@ fn stacked(app: &mut App, ui: &mut egui::Ui, r: Rect, hc: bool) {
     let top = take(top_h);
     let transport = take(row_h);
     let bottom_h = strip_h + if pane_h > 0.0 { pane_h + GAP } else { 0.0 };
-    let cue_rect = Rect::from_min_max(
+    let mut cue_rect = Rect::from_min_max(
         Pos2::new(r.left(), y),
         Pos2::new(r.right(), (r.bottom() - bottom_h - GAP).max(y)),
     );
+    let wave_rect = wave_rect(app, &mut cue_rect);
     let tools = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - bottom_h), r.max);
 
     let clock_action = clocks::clock_strip(ui, clocks, &app.client.tick);
@@ -1057,6 +1087,9 @@ fn stacked(app: &mut App, ui: &mut egui::Ui, r: Rect, hc: bool) {
         }
     }
 
+    if let Some(w) = wave_rect {
+        wave::strip(app, ui, w, hc);
+    }
     if cue_rect.height() >= 60.0 {
         cue_zone(app, ui, cue_rect, hc);
     }

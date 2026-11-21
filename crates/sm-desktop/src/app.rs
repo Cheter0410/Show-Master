@@ -1791,9 +1791,9 @@ impl App {
                 Some("Main / backup computer link: Setup > Remote > Backup computer"),
             ));
         }
-        items.push((format!("{} Hz", s.audio.sample_rate), None, 4, None));
+        items.push((crate::util::fmt_khz(s.audio.sample_rate), None, 4, None));
         if let Some(b) = s.audio.buffer_frames {
-            items.push((format!("{b} frames"), None, 5, None));
+            items.push((format!("{b} samples"), None, 5, None));
         }
         items.push((format!("{} out", s.audio.channels), None, 5, None));
         items.push((

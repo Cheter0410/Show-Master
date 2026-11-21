@@ -275,3 +275,32 @@ fn release_loop_button_on_a_vamping_cue() {
     assert!(h.query_by_label("Release loop of cue 1 Intro").is_none());
     assert_eq!(h.state().go_release(), None);
 }
+
+#[test]
+fn optional_waveform_shows_the_cue_standing_by_and_playing() {
+    let env = Env::demo();
+    let mut h = env.harness();
+    go_live(&env, &mut h);
+    assert!(!h.state().prefs.live_waveform, "off unless switched on");
+    assert!(h.query_by_label_contains("Waveform: ").is_none());
+    h.get_by_label("Waveform").click();
+    settle(&mut h);
+    assert!(h.state().prefs.live_waveform);
+    // Cue 1 (audio) stands by: shown dimmed from where GO starts it.
+    h.get_by_label_contains("Waveform: Standing by  1 ");
+    shot(&mut h, "live-waveform-standby");
+    h.get_by_label("GO").click();
+    env.wait(&mut h, "cue running", |_| !active(&env).is_empty());
+    for _ in 0..20 {
+        settle(&mut h);
+        if h.query_by_label_contains("Waveform: Playing  1 ").is_some() {
+            break;
+        }
+    }
+    h.get_by_label_contains("Waveform: Playing  1 ");
+    shot(&mut h, "live-waveform-playing");
+    // And off again.
+    h.get_by_label("Waveform").click();
+    settle(&mut h);
+    assert!(h.query_by_label_contains("Waveform: ").is_none());
+}

@@ -1,5 +1,10 @@
 //! Formatting and small helpers shared by all views.
 
+/// A sample rate as people say it: 48000 -> "48 kHz", 44100 -> "44.1 kHz".
+pub fn fmt_khz(hz: u32) -> String {
+    sm_audio::fmt_khz(hz)
+}
+
 /// `m:ss.d` (or `h:mm:ss.d` above an hour).
 pub fn fmt_time(secs: f64) -> String {
     let secs = secs.max(0.0);

@@ -1193,6 +1193,59 @@ fn seek_moves_a_playing_cue_and_loads_a_stopped_one() {
 }
 
 #[test]
+fn seeking_past_a_loop_stays_there() {
+    let mut b = B::new();
+    let c = b.cue(CueKind::Audio(AudioCue {
+        file: "a.wav".into(),
+        file_duration: Some(10.0),
+        file_rate: Some(SR),
+        loops: vec![
+            Loop { name: "A".into(), start: 1.0, end: 3.0, ..Loop::default() },
+            Loop { name: "B".into(), start: 5.0, end: 7.0, ..Loop::default() },
+        ],
+        ..AudioCue::default()
+    }));
+    let mut e = b.engine();
+    e.command(Command::Go { list: None }).unwrap();
+    let sr = u64::from(SR);
+    let t0 = e.now();
+    e.advance(t0 + sr);
+    let pos = |e: &Engine| {
+        let a = e.snapshot().active.iter().find(|a| a.cue == c).cloned().unwrap();
+        (a.file_pos.unwrap(), a.looping.map(|l| l.name))
+    };
+    // Playing in loop A; the editor jumps to 4 s, between the loops.
+    e.command(Command::SeekCue { cue: c, time: 4.0 }).unwrap();
+    let t1 = e.now();
+    e.advance(t1 + sr / 2);
+    let (p, looping) = pos(&e);
+    assert!((p - 4.5).abs() < 0.01, "at {p}");
+    assert_eq!(looping.as_deref(), Some("B"), "loop A is behind it");
+    // On into loop B, which repeats: 4 + 3.5 s = 7.5 s -> 5.5 s.
+    e.advance(t1 + 7 * sr / 2);
+    let (p, _) = pos(&e);
+    assert!((p - 5.5).abs() < 0.01, "loop B repeats, at {p}");
+    // Past the last loop: plays on to the end.
+    e.command(Command::SeekCue { cue: c, time: 8.0 }).unwrap();
+    let t2 = e.now();
+    e.advance(t2 + sr);
+    let (p, looping) = pos(&e);
+    assert!((p - 9.0).abs() < 0.01, "at {p}");
+    assert_eq!(looping, None);
+    // A stopped cue loaded past loop A starts in section B too.
+    e.command(Command::StopCue { cue: c }).ok();
+    e.advance(e.now() + sr);
+    e.command(Command::LoadCue { cue: c, time: 3.5 }).unwrap();
+    e.command(Command::SetPlayhead { list: None, cue: Some(c) }).unwrap();
+    e.command(Command::Go { list: None }).unwrap();
+    let t3 = e.now();
+    e.advance(t3 + sr);
+    let (p, looping) = pos(&e);
+    assert!((p - 4.5).abs() < 0.01, "at {p}");
+    assert_eq!(looping.as_deref(), Some("B"));
+}
+
+#[test]
 fn list_group_cues_each_take_their_own_go() {
     let mut b = B::new();
     let first = b.cue(midi(1));

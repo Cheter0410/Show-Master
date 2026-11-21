@@ -573,8 +573,10 @@ impl App {
         } else {
             (
                 format!(
-                    "{}  ·  {} channels  ·  {} Hz",
-                    s.audio.device, s.audio.channels, s.audio.sample_rate
+                    "{}  ·  {} channels  ·  {}",
+                    s.audio.device,
+                    s.audio.channels,
+                    crate::util::fmt_khz(s.audio.sample_rate)
                 ),
                 GREEN,
             )

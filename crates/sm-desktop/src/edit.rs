@@ -7,7 +7,7 @@
 //! runtime's command bus (`docs/remote-api.md`).
 
 #[path = "edit_audio.rs"]
-mod audio;
+pub(crate) mod audio;
 #[path = "edit_fields.rs"]
 pub(crate) mod fields;
 #[path = "edit_inspector.rs"]

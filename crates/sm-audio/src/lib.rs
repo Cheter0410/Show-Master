@@ -118,3 +118,21 @@ pub use types::{
 pub fn no_audio_devices() -> bool {
     std::env::var_os("SHOWMASTER_NO_AUDIO_DEVICES").is_some_and(|v| !v.is_empty() && v != "0")
 }
+
+/// A sample rate as people say it: 48000 -> "48 kHz", 44100 -> "44.1 kHz".
+pub fn fmt_khz(hz: u32) -> String {
+    let s = format!("{:.3}", f64::from(hz) / 1000.0);
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    format!("{s} kHz")
+}
+
+#[cfg(test)]
+mod khz_tests {
+    #[test]
+    fn rates_read_as_khz() {
+        assert_eq!(super::fmt_khz(48_000), "48 kHz");
+        assert_eq!(super::fmt_khz(44_100), "44.1 kHz");
+        assert_eq!(super::fmt_khz(22_050), "22.05 kHz");
+        assert_eq!(super::fmt_khz(96_000), "96 kHz");
+    }
+}

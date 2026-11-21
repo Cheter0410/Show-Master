@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.0
+
+- Audio editor: clicking the waveform past a loop moves the playhead there. Before, a playing cue
+  jumped back into the first loop; now the loops before that point are behind it and the cue plays on
+  from there (into the next loop, or to the end). A stopped cue loaded past a loop starts there too.
+- Buffer sizes are given in samples, not frames (Setup > Audio, status bar).
+- Sample rates read as kHz everywhere: "48 kHz", "44.1 kHz" (Setup, status bar, start screen, event
+  log, audio device messages).
+- Live view: optional waveform strip above the cue list ("Waveform" box next to "Follow playhead", or
+  Setup > General > This computer). It shows the audio cue playing (the one started last) with its
+  loops, the part already played and the playhead; when nothing plays, the audio cue standing by,
+  dimmed, from where GO starts it. Stored per computer, off by default.
+
 ## 0.7.1
 
 - Rebuilt `ui/dist` so the committed tablet remote matches the current UI sources (no Node needed to use it).

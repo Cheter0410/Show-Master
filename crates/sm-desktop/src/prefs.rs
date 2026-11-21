@@ -82,6 +82,7 @@ struct Stored {
     open_last: bool,
     kiosk: bool,
     kiosk_pin: String,
+    live_waveform: bool,
 }
 
 pub struct Prefs {
@@ -98,6 +99,8 @@ pub struct Prefs {
     pub kiosk: bool,
     /// PIN that unlocks kiosk mode ("" = unlock asks for confirmation only).
     pub kiosk_pin: String,
+    /// Live mode shows the waveform of the audio playing (or standing by).
+    pub live_waveform: bool,
 }
 
 impl Default for Prefs {
@@ -127,6 +130,7 @@ impl Prefs {
             open_last: stored.open_last,
             kiosk: stored.kiosk,
             kiosk_pin: stored.kiosk_pin,
+            live_waveform: stored.live_waveform,
         }
     }
 
@@ -178,6 +182,13 @@ impl Prefs {
         }
     }
 
+    pub fn set_live_waveform(&mut self, on: bool) {
+        if self.live_waveform != on {
+            self.live_waveform = on;
+            self.save();
+        }
+    }
+
     pub fn set_touch(&mut self, touch: TouchPref) {
         if self.touch != touch {
             self.touch = touch;
@@ -198,6 +209,7 @@ impl Prefs {
             open_last: self.open_last,
             kiosk: self.kiosk,
             kiosk_pin: self.kiosk_pin.clone(),
+            live_waveform: self.live_waveform,
         };
         let Ok(text) = serde_json::to_string_pretty(&stored) else {
             return;

@@ -310,10 +310,10 @@ fn worker(
                     Ok((s, reader)) => {
                         let info = s.info();
                         say(format!(
-                            "LTC input: {} channel {} @ {} Hz",
+                            "LTC input: {} channel {} @ {}",
                             info.device_name,
                             req.channel + 1,
-                            info.sample_rate
+                            sm_audio::fmt_khz(info.sample_rate)
                         ));
                         stream = Some(s);
                         Ok(reader)

@@ -154,6 +154,17 @@ pub(super) fn general_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
                 st.outbox_push(super::Out::SetOpenLast(on));
             }
         });
+        row(ui, "Live view", |ui| {
+            let mut on = st.live_waveform;
+            if ui
+                .checkbox(&mut on, "Waveform of the audio playing")
+                .on_hover_text("A strip above the cue list with the waveform, the loops and the playhead")
+                .changed()
+            {
+                st.live_waveform = on;
+                st.outbox_push(super::Out::SetLiveWaveform(on));
+            }
+        });
         row(ui, "Kiosk mode", |ui| {
             let mut on = st.kiosk;
             if ui

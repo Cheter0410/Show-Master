@@ -86,7 +86,8 @@ that sees a `rev` gap must reconnect (the server then sends a fresh `state`).
   "loaded": { "9": 30.0 },                 // cues loaded to a time (s)
   "paused_all": false,
   "master_db": 0.0,
-  "audio": { "backend": "cpal", "device": "…", "sample_rate": 48000, "channels": 2, "buffer_frames": 256,
+  "audio": { "backend": "cpal", "device": "…", "sample_rate": 48000, "channels": 2,
+             "buffer_frames": 256,                 // buffer size in samples (per channel)
              "is_null": false, "error": null,
              "devices": [ { "backend": "cpal", "id": "…", "name": "…", "max_output_channels": 8,
                             "sample_rates": [44100, 48000], "is_default": true } ] },

@@ -57,14 +57,17 @@ pub(super) fn audio_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
     } else {
         let buffer = a
             .buffer_frames
-            .map(|b| format!(" · {b} frames"))
+            .map(|b| format!(" · {b} samples"))
             .unwrap_or_default();
         banner(
             ui,
             theme::NEXT,
             &format!(
-                "Running: {} · {} · {} Hz{buffer} · {} outputs",
-                a.device, a.backend, a.sample_rate, a.channels
+                "Running: {} · {} · {}{buffer} · {} outputs",
+                a.device,
+                a.backend,
+                crate::util::fmt_khz(a.sample_rate),
+                a.channels
             ),
         );
     }
@@ -177,17 +180,17 @@ pub(super) fn audio_tab(ui: &mut egui::Ui, st: &mut SetupState, s: &UiState) {
         row(ui, "Sample rate", |ui| {
             egui::ComboBox::from_id_salt("audio_rate")
                 .width(140.0)
-                .selected_text(format!("{} Hz", d.sample_rate))
+                .selected_text(crate::util::fmt_khz(d.sample_rate))
                 .show_ui(ui, |ui| {
                     for r in &rates {
-                        ui.selectable_value(&mut d.sample_rate, *r, format!("{r} Hz"));
+                        ui.selectable_value(&mut d.sample_rate, *r, crate::util::fmt_khz(*r));
                     }
                 });
         });
         row(ui, "Buffer size", |ui| {
             let label = |b: Option<u32>| match b {
                 Some(b) => format!(
-                    "{b} frames ({:.1} ms)",
+                    "{b} samples ({:.1} ms)",
                     f64::from(b) * 1000.0 / f64::from(d.sample_rate.max(1))
                 ),
                 None => "Backend default".into(),

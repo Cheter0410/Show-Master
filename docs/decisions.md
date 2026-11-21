@@ -300,3 +300,9 @@ revidieren lassen.
 ## Schnelle Änderungen vom Tablet (0.7.0)
 
 - Die Rolle `control` darf kleine Cue-Änderungen schicken (`EditCommand::is_quick_edit`: Name, Nummer, Notizen, Farbe, Armed, Wartezeiten, Continue, Pegel, Fades, In/Out, Loops, Fade-Dauer/-Pegel), dazu Undo/Redo, Edit/Live und Speichern in die eigene Showdatei. Neue Cues, Dateien, Ziele, Einstellungen und „Speichern unter“ bleiben beim Host-PC (`admin`): Dort wird die Show im Detail vorbereitet, das iPad korrigiert nur schnell.
+
+## Springen hinter einen Loop, Samples, kHz, Wellenform in Live (0.8.0)
+
+- Wird eine Audio-Cue hinter einen oder mehrere Loops geladen oder gesprungen, startet sie im Abschnitt, in dem die Zeit liegt (`Engine::section_at`): Die Loops davor gelten als vorbei. Vorher sprang sie in den ersten Loop zurück, und der Editor begrenzte den Sprung auf das Ende des ersten Loops.
+- Puffergrößen heißen in der Oberfläche „samples“ (pro Kanal, wie bei den Audio-Schnittstellen); das Feld im Protokoll bleibt `buffer_frames`. Abtastraten werden als kHz geschrieben (`sm_audio::fmt_khz`).
+- Die Wellenform in Live ist eine Einstellung pro Computer (`desktop.json`, `live_waveform`, aus): Sie zeigt die zuletzt gestartete laufende Audio-Cue, sonst die Audio-Cue in Bereitschaft.

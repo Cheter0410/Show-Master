@@ -914,9 +914,13 @@ impl Engine {
             }
         }
         let mut initial = opts.initial_local;
+        // Loaded past one or more loops: those are behind it, it starts in the
+        // section the time is in (and does not jump back into an earlier loop).
+        let mut seg = 0;
         if initial == 0 {
             if let Some(off) = self.loaded.remove(&cue_id) {
                 initial = pre + off;
+                seg = self.section_at(cue_id, off);
                 self.standby_dirty = true;
             }
         }
@@ -958,7 +962,7 @@ impl Engine {
             vamp: VampState::None,
             old_voice: None,
             lp: None,
-            seg: 0,
+            seg,
             skip: Vec::new(),
             spare: None,
             origin: (0, 0.0),
@@ -1147,6 +1151,16 @@ impl Engine {
 
     /// The voice for one stretch of an audio cue: from `from` (file seconds) on, through
     /// loop `k` (looping there) - or to the cue's end when there is no loop `k`.
+    /// The section of an audio cue that `offset` (engine frames after its
+    /// start) is in: the number of its active loops that end at or before it.
+    fn section_at(&self, cue: CueId, offset: u64) -> usize {
+        let Some(CueKind::Audio(a)) = self.show.cue(cue).map(|c| &c.kind) else {
+            return 0;
+        };
+        let at = a.start.max(0.0) + self.secs(offset);
+        a.active_loops().iter().take_while(|l| l.end <= at + 1e-9).count()
+    }
+
     fn seg_spec(&self, a: &AudioCue, from: f64, k: usize, offset_frames: u64) -> VoiceSpec {
         let base = VoiceSpec {
             file: a.file.clone(),
